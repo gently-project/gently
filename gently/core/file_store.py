@@ -81,6 +81,36 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+_INVALID_PATH_COMPONENT_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _validate_path_component(value: str, label: str) -> str:
+    """Validate a caller-controlled value before using it as one path part."""
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    if not value:
+        raise ValueError(f"{label} must not be empty")
+    if value.strip() != value:
+        raise ValueError(f"{label} must not start or end with whitespace: {value!r}")
+    if value in {".", ".."} or _INVALID_PATH_COMPONENT_RE.search(value):
+        raise ValueError(f"{label} contains unsafe path characters: {value!r}")
+    if value.rstrip(" .") != value:
+        raise ValueError(f"{label} must not end with a space or dot: {value!r}")
+    return value
+
+
+def _safe_child_path(parent: Path, component: str, label: str) -> Path:
+    """Return parent/component after validating it stays below parent."""
+    component = _validate_path_component(component, label)
+    base = parent.resolve()
+    child = (parent / component).resolve()
+    try:
+        child.relative_to(base)
+    except ValueError:
+        raise ValueError(f"{label} escapes storage root: {component!r}")
+    return child
+
+
 def _slugify(text: str, max_len: int = 30) -> str:
     """Lowercase, replace non-alphanum with hyphens, truncate."""
     if not text:
@@ -173,15 +203,9 @@ def _write_yaml(path: Path, data: Any) -> None:
 def _read_yaml(path: Path) -> Any:
     """Read a YAML file.  Returns None if missing or empty.
 
-    Tolerant of legacy session files written before _sanitize_for_yaml
-    existed — those embed numpy scalars as
-    ``!!python/object/apply:numpy.core.multiarray.scalar`` tags that
-    safe_load refuses to construct. When we hit such a file we fall
-    back to unsafe_load (the only writer of these files is our own
-    code on local disk, same trust boundary as the code itself) and
-    immediately sanitize the result so the caller always receives
-    native Python types. New writes go through _write_yaml + safe_dump
-    so legacy form does not propagate.
+    Never constructs Python objects from YAML. Legacy files containing
+    ``!!python/object`` or numpy constructor tags must be migrated by a
+    trusted offline tool before FileStore will read them.
     """
     if not path.exists():
         return None
@@ -193,8 +217,10 @@ def _read_yaml(path: Path) -> Any:
         marker = str(err)
         if 'python/object' not in marker and 'numpy' not in marker:
             raise
-        data = yaml.unsafe_load(text)
-        return _sanitize_for_yaml(data)
+        raise ValueError(
+            f"Refusing to load unsafe YAML tags from {path}. "
+            "Migrate this file to safe YAML before opening it in Gently."
+        ) from err
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
@@ -283,7 +309,10 @@ class FileStore:
 
     def _embryo_dir(self, session_id: str, embryo_id: str) -> Path:
         sd = self._require_session_dir(session_id)
-        return sd / "embryos" / embryo_id
+        return self._embryo_dir_for_session(sd, embryo_id)
+
+    def _embryo_dir_for_session(self, session_dir: Path, embryo_id: str) -> Path:
+        return _safe_child_path(session_dir / "embryos", embryo_id, "embryo_id")
 
     def _volume_dir(self, session_id: str, embryo_id: str) -> Path:
         d = self._embryo_dir(session_id, embryo_id) / "volumes"
@@ -555,7 +584,7 @@ class FileStore:
         sd = self._session_dir(session_id)
         if sd is None:
             return None
-        yaml_path = sd / "embryos" / embryo_id / "embryo.yaml"
+        yaml_path = self._embryo_dir_for_session(sd, embryo_id) / "embryo.yaml"
         data = _read_yaml(yaml_path)
         return _normalize_embryo_record(data)
 
@@ -733,7 +762,8 @@ class FileStore:
         if sd is None:
             return None
         vol_path = (
-            sd / "embryos" / embryo_id / "volumes" / self._volume_filename(timepoint)
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "volumes" / self._volume_filename(timepoint)
         )
         if vol_path.exists():
             return vol_path
@@ -753,7 +783,7 @@ class FileStore:
 
         # Determine which embryo dirs to scan
         if embryo_id:
-            dirs = [embryos_dir / embryo_id]
+            dirs = [self._embryo_dir_for_session(sd, embryo_id)]
         else:
             dirs = sorted(
                 d for d in embryos_dir.iterdir() if d.is_dir()
@@ -816,8 +846,8 @@ class FileStore:
         if sd is None:
             return None
         proj_path = (
-            sd / "embryos" / embryo_id / "projections"
-            / self._projection_filename(timepoint)
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "projections" / self._projection_filename(timepoint)
         )
         if proj_path.exists():
             return proj_path
@@ -834,7 +864,7 @@ class FileStore:
         sd = self._session_dir(session_id)
         if sd is None:
             return []
-        proj_dir = sd / "embryos" / embryo_id / "projections"
+        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
         if not proj_dir.exists():
             return []
         tps: List[int] = []
@@ -861,7 +891,7 @@ class FileStore:
         sd = self._session_dir(session_id)
         if sd is None:
             return []
-        proj_dir = sd / "embryos" / embryo_id / "projections"
+        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
         if not proj_dir.exists():
             return []
 
@@ -886,8 +916,8 @@ class FileStore:
             # Use the volume sidecar's acquired_at as the projection created_at
             # if available; otherwise use the file mtime.
             meta_path = (
-                sd / "embryos" / embryo_id / "volumes"
-                / self._volume_meta_filename(tp)
+                self._embryo_dir_for_session(sd, embryo_id)
+                / "volumes" / self._volume_meta_filename(tp)
             )
             vol_meta = _read_yaml(meta_path)
             created = (
@@ -1133,7 +1163,7 @@ class FileStore:
         # an offset based on embryo ordering.  A simpler and safer approach:
         # use a session-level counter stored in perception_runs.yaml.
         sd = self._require_session_dir(session_id)
-        pred_path = sd / "embryos" / embryo_id / "predictions.jsonl"
+        pred_path = self._embryo_dir_for_session(sd, embryo_id) / "predictions.jsonl"
         existing = _read_jsonl(pred_path)
         prediction_id = len(existing) + 1
 
@@ -1175,7 +1205,7 @@ class FileStore:
 
         # Determine which embryo dirs to read
         if embryo_id:
-            dirs = [embryos_dir / embryo_id]
+            dirs = [self._embryo_dir_for_session(sd, embryo_id)]
         else:
             dirs = sorted(d for d in embryos_dir.iterdir() if d.is_dir())
 
@@ -1249,7 +1279,7 @@ class FileStore:
         sd = self._session_dir(session_id)
         if sd is None:
             return []
-        gt_path = sd / "embryos" / embryo_id / "ground_truth.yaml"
+        gt_path = self._embryo_dir_for_session(sd, embryo_id) / "ground_truth.yaml"
         entries: list = _read_yaml(gt_path) or []
         entries.sort(key=lambda e: e.get("start_timepoint", 0))
         return entries

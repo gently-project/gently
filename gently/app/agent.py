@@ -1303,13 +1303,15 @@ class MicroscopyAgent:
         if not self.store:
             return result
 
-        # FileStore exposes _session_dir(session_id) → resolved Path.
-        session_dir_fn = getattr(self.store, '_session_dir', None)
-        sd = session_dir_fn(source_session_id) if callable(session_dir_fn) else None
-        if sd is None:
+        # FileStore exposes _embryo_dir(session_id, embryo_id) with validation.
+        embryo_dir_fn = getattr(self.store, '_embryo_dir', None)
+        if not callable(embryo_dir_fn):
             return result
 
-        vols_dir = Path(sd) / 'embryos' / embryo_id / 'volumes'
+        try:
+            vols_dir = Path(embryo_dir_fn(source_session_id, embryo_id)) / 'volumes'
+        except (FileNotFoundError, ValueError):
+            return result
         if not vols_dir.is_dir():
             return result
 
