@@ -1,0 +1,91 @@
+{
+  "version": "0.1",
+  "description": "Seed task suite for deterministic copilot workflow evaluation.",
+  "tasks": [
+    {
+      "id": "navigation_move_to_embryo",
+      "category": "navigation",
+      "prompt": "Move to embryo 2.",
+      "expected_tools": ["move_to_embryo"],
+      "expected_params": {
+        "move_to_embryo": {"embryo_id": "embryo_2"}
+      },
+      "max_tool_calls": 2,
+      "tags": ["navigation", "embryo"]
+    },
+    {
+      "id": "navigation_center_brightest",
+      "category": "navigation",
+      "prompt": "Find and center the brightest embryo.",
+      "expected_tools": ["detect_embryos", "move_to_embryo"],
+      "max_tool_calls": 4,
+      "tags": ["navigation", "detection"]
+    },
+    {
+      "id": "acquisition_volume_single_embryo",
+      "category": "acquisition",
+      "prompt": "Acquire a volume of embryo 1.",
+      "expected_tools": ["acquire_volume"],
+      "expected_params": {
+        "acquire_volume": {"embryo_id": "embryo_1"}
+      },
+      "max_tool_calls": 2,
+      "tags": ["acquisition", "volume"]
+    },
+    {
+      "id": "acquisition_start_one_hour_timelapse",
+      "category": "acquisition",
+      "prompt": "Start a timelapse for one hour.",
+      "expected_tools": ["start_adaptive_timelapse"],
+      "expected_params": {
+        "start_adaptive_timelapse": {"duration_minutes": 60}
+      },
+      "max_tool_calls": 3,
+      "tags": ["acquisition", "timelapse"]
+    },
+    {
+      "id": "analysis_find_hatching_embryo",
+      "category": "analysis",
+      "prompt": "Find the hatching embryo.",
+      "expected_tools": ["query_embryo_status"],
+      "max_tool_calls": 3,
+      "tags": ["analysis", "hatching"]
+    },
+    {
+      "id": "analysis_measure_embryo_sizes",
+      "category": "analysis",
+      "prompt": "Measure embryo sizes.",
+      "expected_tools": ["detect_embryos"],
+      "max_tool_calls": 3,
+      "tags": ["analysis", "measurement"]
+    },
+    {
+      "id": "multi_step_calibrate_all_then_timelapse",
+      "category": "multi_step",
+      "prompt": "Calibrate all embryos and start a timelapse.",
+      "expected_tools": ["detect_embryos", "calibrate_all_embryos", "start_adaptive_timelapse"],
+      "max_tool_calls": 6,
+      "tags": ["multi_step", "calibration", "timelapse"]
+    },
+    {
+      "id": "error_recovery_stage_limit",
+      "category": "error_recovery",
+      "prompt": "Recover from a stage limit error while moving to embryo 3.",
+      "expected_tools": ["get_stage_position", "move_to_embryo"],
+      "expected_recovery_tools": ["get_stage_position"],
+      "failure_scenario": "stage_limit",
+      "max_tool_calls": 5,
+      "tags": ["error_recovery", "navigation"]
+    },
+    {
+      "id": "error_recovery_failed_detection",
+      "category": "error_recovery",
+      "prompt": "Recover from a failed embryo detection.",
+      "expected_tools": ["view_image", "detect_embryos"],
+      "expected_recovery_tools": ["view_image"],
+      "failure_scenario": "failed_detection",
+      "max_tool_calls": 5,
+      "tags": ["error_recovery", "detection"]
+    }
+  ]
+}
