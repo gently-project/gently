@@ -1457,6 +1457,7 @@ class DeviceLayerServer(Service):
                     'success': True, 'target_c': target, 'waited': False,
                     'message': f'commanded {target} C (ramping)',
                     'temperature_c': r.get(temp.name, {}).get('value'),
+                    'setpoint_c': r.get(f'{temp.name}_setpoint', {}).get('value'),
                     'state': r.get(f'{temp.name}_state', {}).get('value'),
                 })
 

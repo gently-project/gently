@@ -106,6 +106,7 @@ class TemperatureController:
             with self._lock:
                 try:
                     self._dev.set_temperature(target)   # vendor also validates range
+                    self._setpoint = target
                     self._dev.enable_tec(True)
                     locked = self._dev.wait_for_target(timeout_seconds=self.stabilize_timeout)
                 except Exception as exc:
@@ -130,7 +131,12 @@ class TemperatureController:
 
     def setpoint(self, target_c):
         """Command the setpoint without blocking for stabilization."""
-        self._dev.set_temperature(float(target_c))
+        target = float(target_c)
+        if not (TEMP_MIN_C <= target <= TEMP_MAX_C):
+            raise ValueError(f"target {target} C outside [{TEMP_MIN_C}, {TEMP_MAX_C}]")
+        with self._lock:
+            self._dev.set_temperature(target)
+            self._setpoint = target
 
     # -- Bluesky readable protocol -------------------------------------------
     def read(self):
