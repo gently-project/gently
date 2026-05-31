@@ -26,7 +26,7 @@ import logging
 import os
 from enum import Enum
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, WebSocket
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class Role(str, Enum):
     CONTROL = "control"
 
 
-def current_username(request: Request) -> str | None:
+def current_username(request: Request | WebSocket) -> str | None:
     """Return the authenticated username from the session cookie, or None.
 
     None when no account store is configured or the cookie is missing/invalid.
@@ -70,7 +70,7 @@ def _configured_token() -> str | None:
     return tok or None
 
 
-def resolve_role(request: Request) -> Role:
+def resolve_role(request: Request | WebSocket) -> Role:
     """Determine the effective role for a request.
 
     Account mode (preferred): if user accounts are configured, identity comes

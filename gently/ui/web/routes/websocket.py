@@ -22,18 +22,12 @@ _MARKING_TYPES = frozenset({
 def _ws_can_control(websocket: WebSocket) -> bool:
     """Whether this /ws client may perform control actions (marking).
 
-    Account mode: operators/admins (by session cookie) only. Legacy mode
-    (no accounts configured): open, preserving prior behavior.
+    Mirrors the REST role resolver: accounts use the session cookie; legacy
+    no-account mode grants localhost control and requires X-Gently-Token for
+    remote control.
     """
-    from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
-    from gently.ui.web.auth import SESSION_COOKIE
-    store = get_account_store()
-    if store is None or not store.has_users():
-        return True
-    token = websocket.cookies.get(SESSION_COOKIE)
-    user = store.verify_session(token) if token else None
-    role = store.get_role(user) if user else None
-    return role in CONTROL_ROLES
+    from gently.ui.web.auth import Role, resolve_role
+    return resolve_role(websocket) is Role.CONTROL
 
 
 def create_router(server) -> APIRouter:

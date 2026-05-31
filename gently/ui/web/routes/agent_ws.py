@@ -292,23 +292,13 @@ def create_router(server) -> APIRouter:
         bridge.register_display_broadcaster(_broadcast)
 
         # ── Authenticate the connection (account mode) ────────────
-        # When user accounts are configured, identity comes from the signed
-        # session cookie (set at login). Viewers may watch but not drive;
-        # operators/admins may take the control lock. With no accounts
-        # configured we fall back to the legacy "anyone connected can drive".
-        from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
-        from gently.ui.web.auth import SESSION_COOKIE
-        _acct = get_account_store()
-        username = None
-        can_control = True  # legacy default when no accounts are configured
-        if _acct is not None and _acct.has_users():
-            # Viewing is open: anonymous clients may connect and *watch* the
-            # conversation. Only authenticated operators/admins can hold or
-            # take the control lock (enforced on the drive actions below).
-            _token = websocket.cookies.get(SESSION_COOKIE)
-            username = _acct.verify_session(_token) if _token else None
-            role = _acct.get_role(username) if username else None
-            can_control = role in CONTROL_ROLES
+        # Viewing is open: anonymous clients may connect and watch the
+        # conversation. Driving uses the same role resolver as REST: accounts
+        # rely on the signed session cookie; legacy no-account mode grants
+        # localhost control and requires X-Gently-Token for remote clients.
+        from gently.ui.web.auth import Role, current_username, resolve_role
+        username = current_username(websocket)
+        can_control = resolve_role(websocket) is Role.CONTROL
 
         # Assign a stable id for control arbitration. The label shown to other
         # clients is the username when authenticated, else a generic window id.

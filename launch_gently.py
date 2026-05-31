@@ -235,6 +235,12 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     store = FileStore(storage_dir)
 
     # ── Accounts / auth ───────────────────────────────────────────
+    # Handle --sessions (just list and exit)
+    if show_sessions:
+        list_sessions(store)
+        store.close()
+        return
+
     # Self-managed user accounts gate microscope control on the LAN. On first
     # run we bootstrap an admin and print its one-time password in the banner.
     # Set GENTLY_NO_AUTH=1 to disable accounts (legacy localhost-control mode).
@@ -247,12 +253,6 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             admin_creds = account_store.bootstrap_admin_if_empty()
         except Exception as e:
             logger.error("Account store init failed (continuing without auth): %s", e)
-
-    # Handle --sessions (just list and exit)
-    if show_sessions:
-        list_sessions(store)
-        store.close()
-        return
 
     # Web-only: the TUI is retired. The browser is the control surface and
     # the launcher just starts the server — no Node/dist requirement.
@@ -562,11 +562,6 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
 def cli_main():
     """Sync entry point for ``gently`` console script (pyproject.toml)."""
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY not set")
-        print("Set with: set ANTHROPIC_API_KEY=your-key")
-        exit(1)
-
     parser = argparse.ArgumentParser(description="Launch Microscopy Agent")
     parser.add_argument("--offline", action="store_true", help="Run without server connections")
     parser.add_argument("--sessions", action="store_true", help="List available sessions and exit")
@@ -576,6 +571,11 @@ def cli_main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open the web UI in a browser")
     args = parser.parse_args()
+
+    if not args.sessions and not os.getenv("ANTHROPIC_API_KEY"):
+        print("Error: ANTHROPIC_API_KEY not set")
+        print("Set with: set ANTHROPIC_API_KEY=your-key")
+        exit(1)
 
     log_level = "WARNING"
     if args.verbose:
