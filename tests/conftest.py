@@ -2,10 +2,41 @@
 Shared fixtures for gently tests.
 """
 
+import os
 import pytest
 from pathlib import Path
 
 from gently.core.event_bus import EventBus
+
+
+def pytest_addoption(parser):
+    """Command-line switches for opt-in hardware test runs."""
+    group = parser.getgroup("gently hardware")
+    group.addoption(
+        "--run-hardware",
+        action="store_true",
+        default=False,
+        help="run tests marked live_hardware against a connected device layer",
+    )
+    group.addoption(
+        "--hardware-url",
+        action="store",
+        default=os.environ.get("GENTLY_HARDWARE_URL", "http://127.0.0.1:60610"),
+        help="device-layer URL for tests marked live_hardware",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip live hardware tests unless explicitly requested."""
+    if config.getoption("--run-hardware"):
+        return
+
+    skip_live_hardware = pytest.mark.skip(
+        reason="requires --run-hardware and a connected device layer"
+    )
+    for item in items:
+        if "live_hardware" in item.keywords:
+            item.add_marker(skip_live_hardware)
 
 
 @pytest.fixture
@@ -56,3 +87,17 @@ def file_context_store(tmp_path):
 def event_bus():
     """Fresh EventBus, isolated from global singleton."""
     return EventBus(history_size=50)
+
+
+@pytest.fixture
+def hardware_url(pytestconfig):
+    """Device-layer URL used by opt-in live hardware tests."""
+    return pytestconfig.getoption("--hardware-url")
+
+
+@pytest.fixture
+def live_hardware_url(pytestconfig, hardware_url):
+    """Return the configured hardware URL, skipping unless live tests are enabled."""
+    if not pytestconfig.getoption("--run-hardware"):
+        pytest.skip("requires --run-hardware and a connected device layer")
+    return hardware_url
