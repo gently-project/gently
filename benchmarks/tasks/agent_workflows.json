@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "description": "Seed task suite for deterministic copilot workflow evaluation.",
+  "description": "Seed task suite for deterministic Gently agent workflow evaluation.",
   "tasks": [
     {
       "id": "navigation_move_to_embryo",

@@ -1,4 +1,4 @@
-"""Mock hardware client for copilot benchmark runs."""
+"""Mock hardware client for agent workflow benchmark runs."""
 
 from __future__ import annotations
 

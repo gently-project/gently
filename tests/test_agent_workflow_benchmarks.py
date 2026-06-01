@@ -1,6 +1,6 @@
 import pytest
 
-from benchmarks.evaluator import BenchmarkTask, CopilotBenchmarkEvaluator, load_tasks
+from benchmarks.evaluator import AgentWorkflowBenchmarkEvaluator, BenchmarkTask, load_tasks
 from benchmarks.mock_client import MockQueueServerClient
 
 
@@ -26,7 +26,7 @@ def test_evaluator_scores_expected_tool_sequence_and_params():
         expected_params={"acquire_volume": {"embryo_id": "embryo_1"}},
         max_tool_calls=2,
     )
-    evaluator = CopilotBenchmarkEvaluator(tasks=[task])
+    evaluator = AgentWorkflowBenchmarkEvaluator(tasks=[task])
 
     result = evaluator.evaluate_task(
         task,
@@ -46,7 +46,7 @@ def test_evaluator_penalizes_missing_tools_and_extra_calls():
         expected_params={"move_to_embryo": {"embryo_id": "embryo_2"}},
         max_tool_calls=1,
     )
-    evaluator = CopilotBenchmarkEvaluator(tasks=[task])
+    evaluator = AgentWorkflowBenchmarkEvaluator(tasks=[task])
 
     result = evaluator.evaluate_task(
         task,
@@ -67,7 +67,7 @@ def test_evaluator_reports_category_scores():
         BenchmarkTask("ok", "navigation", "Move", ["move_stage"]),
         BenchmarkTask("bad", "analysis", "Analyze", ["query_embryo_status"]),
     ]
-    evaluator = CopilotBenchmarkEvaluator(tasks=tasks)
+    evaluator = AgentWorkflowBenchmarkEvaluator(tasks=tasks)
 
     report = evaluator.evaluate_traces(
         {

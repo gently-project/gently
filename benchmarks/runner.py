@@ -64,17 +64,17 @@ async def run_agent_benchmark(args):
     return 0
 
 
-def run_copilot_benchmark(args):
-    """Score copilot workflow traces against the standard task suite."""
-    from .evaluator import CopilotBenchmarkEvaluator, load_tasks
+def run_workflow_benchmark(args):
+    """Score agent workflow traces against the standard task suite."""
+    from .evaluator import AgentWorkflowBenchmarkEvaluator, load_tasks
 
     tags = args.tags.split(",") if args.tags else None
     tasks = load_tasks(tags=tags)
-    evaluator = CopilotBenchmarkEvaluator(tasks=tasks)
+    evaluator = AgentWorkflowBenchmarkEvaluator(tasks=tasks)
 
     if not args.trace:
         logger.info("=" * 60)
-        logger.info("COPILOT WORKFLOW BENCHMARK TASKS")
+        logger.info("AGENT WORKFLOW BENCHMARK TASKS")
         logger.info("=" * 60)
         for task in tasks:
             logger.info("[%s] %s", task.id, task.prompt)
@@ -91,7 +91,7 @@ def run_copilot_benchmark(args):
     payload = report.to_dict()
 
     logger.info("=" * 60)
-    logger.info("COPILOT WORKFLOW BENCHMARK")
+    logger.info("AGENT WORKFLOW BENCHMARK")
     logger.info("=" * 60)
     logger.info("Tasks: %d", report.num_tasks)
     logger.info("Pass rate: %.1f%%", payload["summary"]["pass_rate"] * 100)
@@ -171,14 +171,22 @@ def main():
     agent_parser.add_argument("--run", action="store_true", help="Actually run (vs dry-run)")
     agent_parser.add_argument("--output", help="Output file for results")
 
-    # Copilot workflow benchmark
-    copilot_parser = subparsers.add_parser(
-        "copilot",
-        help="List or score deterministic copilot workflow benchmarks",
+    # Agent workflow benchmark
+    workflow_parser = subparsers.add_parser(
+        "workflow",
+        help="List or score deterministic agent workflow benchmarks",
     )
-    copilot_parser.add_argument("--tags", help="Comma-separated tags to filter")
-    copilot_parser.add_argument("--trace", help="JSON mapping task ids to tool-call traces")
-    copilot_parser.add_argument("--output", help="Output file for scored report")
+    workflow_parser.add_argument("--tags", help="Comma-separated tags to filter")
+    workflow_parser.add_argument("--trace", help="JSON mapping task ids to tool-call traces")
+    workflow_parser.add_argument("--output", help="Output file for scored report")
+
+    legacy_parser = subparsers.add_parser(
+        "copilot",
+        help=argparse.SUPPRESS,
+    )
+    legacy_parser.add_argument("--tags", help=argparse.SUPPRESS)
+    legacy_parser.add_argument("--trace", help=argparse.SUPPRESS)
+    legacy_parser.add_argument("--output", help=argparse.SUPPRESS)
 
     # Compare reports
     compare_parser = subparsers.add_parser("compare", help="Compare two reports")
@@ -189,8 +197,8 @@ def main():
 
     if args.command == "agent":
         return asyncio.run(run_agent_benchmark(args))
-    elif args.command == "copilot":
-        return run_copilot_benchmark(args)
+    elif args.command in {"workflow", "copilot"}:
+        return run_workflow_benchmark(args)
     elif args.command == "compare":
         return compare_reports(args)
     else:

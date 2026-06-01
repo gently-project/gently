@@ -1,4 +1,4 @@
-"""Deterministic copilot benchmark task scoring.
+"""Deterministic agent workflow benchmark task scoring.
 
 This module scores recorded/planned tool traces against benchmark task
 definitions. It does not call an LLM; callers can feed traces from a dry-run
@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 
-DEFAULT_TASKS_PATH = Path(__file__).parent / "tasks" / "copilot_workflows.json"
+DEFAULT_TASKS_PATH = Path(__file__).parent / "tasks" / "agent_workflows.json"
 
 
 @dataclass(frozen=True)
 class BenchmarkTask:
-    """One expected copilot workflow."""
+    """One expected Gently agent workflow."""
 
     id: str
     category: str
@@ -153,8 +153,8 @@ def _ordered_match_score(expected: Sequence[str], actual: Sequence[str]) -> floa
     return matched / len(expected)
 
 
-class CopilotBenchmarkEvaluator:
-    """Score copilot tool traces against workflow benchmark tasks."""
+class AgentWorkflowBenchmarkEvaluator:
+    """Score Gently agent tool traces against workflow benchmark tasks."""
 
     def __init__(self, tasks: Optional[Sequence[BenchmarkTask]] = None):
         self.tasks = list(tasks) if tasks is not None else load_tasks()
@@ -295,3 +295,8 @@ class CopilotBenchmarkEvaluator:
             results=list(results),
             metadata={"task_count": len(self.tasks)},
         )
+
+
+# Backward-compatible alias for older callers while the benchmark terminology
+# moves away from "copilot".
+CopilotBenchmarkEvaluator = AgentWorkflowBenchmarkEvaluator
