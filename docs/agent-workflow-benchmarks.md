@@ -40,6 +40,13 @@ declares:
 - `expected_params`: exact parameter checks for important tool calls.
 - `max_tool_calls`: an efficiency budget.
 - `failure_scenario` and `expected_recovery_tools` for recovery benchmarks.
+- `safety_constraints`: hardware or sample-safety requirements that must be
+  checked by a reviewer.
+- `scientific_validity`: checks for whether the run makes scientific sense.
+- `trace_quality_checks`: evidence needed to reconstruct what happened and why.
+- `operator_experience_checks`: checks that the operator can understand or act
+  on the result.
+- `expected_evidence`: artifacts or metadata that should exist after the run.
 
 ## Scoring
 
@@ -55,6 +62,11 @@ These are a first trace-based subset of the measurement contract above. They
 are useful for deterministic regressions, but should not be treated as a full
 quality benchmark until safety, scientific validity, trace quality, and
 operator experience have corresponding evaluators.
+
+Until those evaluators exist, each scored result also carries a
+`review_checklist` and `manual_review_required` flag. A trace can pass the
+deterministic score while still requiring human review of the listed safety,
+scientific, trace-quality, operator-experience, and evidence checks.
 
 ## Example
 

@@ -79,6 +79,18 @@ def run_workflow_benchmark(args):
         for task in tasks:
             logger.info("[%s] %s", task.id, task.prompt)
             logger.info("    category=%s expected=%s", task.category, task.expected_tools)
+            checklist_items = sum(
+                len(items)
+                for items in [
+                    task.safety_constraints,
+                    task.scientific_validity,
+                    task.trace_quality_checks,
+                    task.operator_experience_checks,
+                    task.expected_evidence,
+                ]
+            )
+            if checklist_items:
+                logger.info("    manual review checks=%d", checklist_items)
         logger.info("")
         logger.info("Pass --trace path/to/traces.json to score a run.")
         return 0
@@ -96,6 +108,7 @@ def run_workflow_benchmark(args):
     logger.info("Tasks: %d", report.num_tasks)
     logger.info("Pass rate: %.1f%%", payload["summary"]["pass_rate"] * 100)
     logger.info("Average score: %.1f%%", report.average_score * 100)
+    logger.info("Manual review tasks: %d", payload["summary"]["manual_review_tasks"])
     for category, score in report.category_scores.items():
         logger.info("  %s: %.1f%%", category, score * 100)
 

@@ -28,6 +28,11 @@ class BenchmarkTask:
     expected_params: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     expected_recovery_tools: List[str] = field(default_factory=list)
     failure_scenario: Optional[str] = None
+    safety_constraints: List[str] = field(default_factory=list)
+    scientific_validity: List[str] = field(default_factory=list)
+    trace_quality_checks: List[str] = field(default_factory=list)
+    operator_experience_checks: List[str] = field(default_factory=list)
+    expected_evidence: List[str] = field(default_factory=list)
     max_tool_calls: Optional[int] = None
     tags: List[str] = field(default_factory=list)
     weight: float = 1.0
@@ -42,6 +47,11 @@ class BenchmarkTask:
             expected_params=data.get("expected_params") or {},
             expected_recovery_tools=list(data.get("expected_recovery_tools") or []),
             failure_scenario=data.get("failure_scenario"),
+            safety_constraints=list(data.get("safety_constraints") or []),
+            scientific_validity=list(data.get("scientific_validity") or []),
+            trace_quality_checks=list(data.get("trace_quality_checks") or []),
+            operator_experience_checks=list(data.get("operator_experience_checks") or []),
+            expected_evidence=list(data.get("expected_evidence") or []),
             max_tool_calls=data.get("max_tool_calls"),
             tags=list(data.get("tags") or []),
             weight=float(data.get("weight", 1.0)),
@@ -63,10 +73,15 @@ class BenchmarkResult:
     error_handling_score: float
     total_score: float
     errors: List[str] = field(default_factory=list)
+    review_checklist: Mapping[str, List[str]] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
         return self.total_score >= 0.85 and not self.errors
+
+    @property
+    def manual_review_required(self) -> bool:
+        return any(self.review_checklist.values())
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -84,6 +99,12 @@ class BenchmarkResult:
             },
             "passed": self.passed,
             "errors": self.errors,
+            "manual_review_required": self.manual_review_required,
+            "review_checklist": {
+                name: list(checks)
+                for name, checks in self.review_checklist.items()
+                if checks
+            },
         }
 
 
@@ -108,6 +129,9 @@ class BenchmarkReport:
                 "pass_rate": self.num_passed / self.num_tasks if self.num_tasks else 0.0,
                 "average_score": self.average_score,
                 "category_scores": dict(self.category_scores),
+                "manual_review_tasks": sum(
+                    1 for result in self.results if result.manual_review_required
+                ),
             },
             "metadata": dict(self.metadata),
             "results": [result.to_dict() for result in self.results],
@@ -151,6 +175,16 @@ def _ordered_match_score(expected: Sequence[str], actual: Sequence[str]) -> floa
                 cursor = index + 1
                 break
     return matched / len(expected)
+
+
+def _review_checklist(task: BenchmarkTask) -> Dict[str, List[str]]:
+    return {
+        "safety_constraints": list(task.safety_constraints),
+        "scientific_validity": list(task.scientific_validity),
+        "trace_quality": list(task.trace_quality_checks),
+        "operator_experience": list(task.operator_experience_checks),
+        "expected_evidence": list(task.expected_evidence),
+    }
 
 
 class AgentWorkflowBenchmarkEvaluator:
@@ -199,6 +233,7 @@ class AgentWorkflowBenchmarkEvaluator:
             error_handling_score=round(error_handling_score, 4),
             total_score=round(total_score, 4),
             errors=errors,
+            review_checklist=_review_checklist(task),
         )
 
     def evaluate_traces(

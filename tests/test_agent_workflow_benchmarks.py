@@ -81,6 +81,43 @@ def test_evaluator_reports_category_scores():
     assert report.category_scores["analysis"] < 1.0
 
 
+def test_evaluator_reports_manual_review_checklist():
+    task = BenchmarkTask(
+        id="safe_volume",
+        category="acquisition",
+        prompt="Acquire a safe volume.",
+        expected_tools=["acquire_volume"],
+        safety_constraints=["Respect the configured illumination limit."],
+        scientific_validity=["Record the embryo id and imaging objective."],
+        trace_quality_checks=["Trace includes the acquisition reason."],
+        operator_experience_checks=["Operator can see the final volume path."],
+        expected_evidence=["Volume artifact metadata is present."],
+    )
+    evaluator = AgentWorkflowBenchmarkEvaluator(tasks=[task])
+
+    report = evaluator.evaluate_traces(
+        {"safe_volume": [{"name": "acquire_volume", "input": {}}]}
+    )
+    result = report.results[0].to_dict()
+
+    assert result["manual_review_required"] is True
+    assert result["review_checklist"]["safety_constraints"] == [
+        "Respect the configured illumination limit."
+    ]
+    assert result["review_checklist"]["expected_evidence"] == [
+        "Volume artifact metadata is present."
+    ]
+    assert report.to_dict()["summary"]["manual_review_tasks"] == 1
+
+
+def test_default_tasks_include_review_rubric_fields():
+    task = next(task for task in load_tasks() if task.id == "multi_step_calibrate_all_then_timelapse")
+
+    assert task.safety_constraints
+    assert task.scientific_validity
+    assert task.expected_evidence
+
+
 @pytest.mark.asyncio
 async def test_mock_client_records_scripted_responses():
     client = MockQueueServerClient(stage_position=(10.0, 20.0))
