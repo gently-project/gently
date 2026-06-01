@@ -64,6 +64,35 @@ async def run_agent_benchmark(args):
     return 0
 
 
+async def run_structured_plan_benchmark(args):
+    """Run the offline structured-plan replay benchmark."""
+    from .structured_plan_replay import run_structured_plan_replay
+
+    report = await run_structured_plan_replay(Path(args.workdir)) if args.workdir else None
+    if report is None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory(prefix="gently-structured-plan-") as tmp:
+            report = await run_structured_plan_replay(Path(tmp))
+
+    payload = report
+    logger.info("=" * 60)
+    logger.info("STRUCTURED PLAN REPLAY")
+    logger.info("=" * 60)
+    logger.info("Passed: %s", payload["passed"])
+    logger.info("Elapsed: %.3f ms", payload["elapsed_ms"])
+    logger.info("Expected: %s", payload["expected_counts"])
+    logger.info("Actual:   %s", payload["actual_counts"])
+
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info("Wrote report: %s", output)
+
+    return 0 if payload["passed"] else 1
+
+
 def compare_reports(args):
     """Compare two benchmark reports"""
     from .agent.evaluator import BenchmarkReport, compare_reports as _compare
@@ -132,10 +161,20 @@ def main():
     compare_parser.add_argument("before", help="Before report JSON")
     compare_parser.add_argument("after", help="After report JSON")
 
+    # Structured plan replay
+    plan_parser = subparsers.add_parser(
+        "structured-plan",
+        help="Run the offline structured-plan replay benchmark",
+    )
+    plan_parser.add_argument("--workdir", help="Directory for the temporary ContextStore database")
+    plan_parser.add_argument("--output", help="Output file for the JSON report")
+
     args = parser.parse_args()
 
     if args.command == "agent":
         return asyncio.run(run_agent_benchmark(args))
+    elif args.command == "structured-plan":
+        return asyncio.run(run_structured_plan_benchmark(args))
     elif args.command == "compare":
         return compare_reports(args)
     else:

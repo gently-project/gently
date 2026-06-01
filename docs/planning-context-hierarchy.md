@@ -98,3 +98,23 @@ This keeps campaign -> phase -> task construction explicit while reducing the
 tool-call chatter that occurs when the agent creates each campaign, item, and
 dependency separately. The lower-level tools remain available for incremental
 edits after the initial plan outline exists.
+
+## Offline Replay Benchmark
+
+The structured-plan path has a deterministic replay benchmark:
+
+```bash
+python -m benchmarks.runner structured-plan
+```
+
+or directly:
+
+```bash
+python -m benchmarks.structured_plan_replay
+```
+
+The replay creates a fresh local `ContextStore`, executes one
+`create_structured_plan` tool call, and verifies the expected campaign, two
+phases, three plan items, and two dependencies. It does not call an LLM, browser,
+or microscope server, so it can be used as a regression check for the planning
+tool shape even before a full agent benchmark exists.
