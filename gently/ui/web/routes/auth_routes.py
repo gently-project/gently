@@ -24,6 +24,15 @@ def create_router(server) -> APIRouter:
         # plain-HTTP LAN deployments.
         return request.url.scheme == "https"
 
+    def _require_admin(request: Request):
+        store = get_account_store()
+        if store is None:
+            return None, JSONResponse({"error": "accounts not configured"}, status_code=400)
+        requester = current_username(request)
+        if not requester or store.get_role(requester) != "admin":
+            return None, JSONResponse({"error": "admin role required"}, status_code=403)
+        return store, None
+
     @router.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request):
         store = get_account_store()
@@ -83,12 +92,10 @@ def create_router(server) -> APIRouter:
     @router.post("/api/auth/users")
     async def create_user(request: Request):
         """Admin-only: provision a new account."""
-        store = get_account_store()
-        if store is None:
-            return JSONResponse({"error": "accounts not configured"}, status_code=400)
+        store, error = _require_admin(request)
+        if error:
+            return error
         requester = current_username(request)
-        if not requester or store.get_role(requester) != "admin":
-            return JSONResponse({"error": "admin role required"}, status_code=403)
         try:
             body = await request.json()
         except Exception:
@@ -106,5 +113,52 @@ def create_router(server) -> APIRouter:
             return JSONResponse({"error": str(e)}, status_code=400)
         logger.info("admin %s created user %s (%s)", requester, new_user, role)
         return JSONResponse({"ok": True, "username": new_user, "role": role})
+
+    @router.get("/api/auth/users")
+    async def list_users(request: Request):
+        """Admin-only: list configured accounts."""
+        store, error = _require_admin(request)
+        if error:
+            return error
+        return JSONResponse({"ok": True, "users": store.list_users()})
+
+    @router.patch("/api/auth/users/{username}")
+    async def update_user(username: str, request: Request):
+        """Admin-only: change a role and/or reset a password."""
+        store, error = _require_admin(request)
+        if error:
+            return error
+        requester = current_username(request)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        changed = []
+        try:
+            if "role" in body and body["role"]:
+                store.set_role(username, body["role"])
+                changed.append("role")
+            if "password" in body and body["password"]:
+                store.reset_password(username, body["password"])
+                changed.append("password")
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        logger.info("admin %s updated user %s (%s)", requester, username, ",".join(changed))
+        return JSONResponse({"ok": True, "username": username, "changed": changed})
+
+    @router.delete("/api/auth/users/{username}")
+    async def delete_user(username: str, request: Request):
+        """Admin-only: remove an account."""
+        store, error = _require_admin(request)
+        if error:
+            return error
+        requester = current_username(request)
+        try:
+            store.delete_user(username)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        logger.info("admin %s deleted user %s", requester, username)
+        return JSONResponse({"ok": True, "username": username})
 
     return router

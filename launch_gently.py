@@ -21,6 +21,7 @@ Usage:
 """
 
 import asyncio
+import getpass
 import json
 import logging
 import os
@@ -35,7 +36,6 @@ import yaml
 
 from gently.log_config import configure_logging
 from gently.core.log_bridge import configure_log_bridge
-from gently.app.agent import MicroscopyAgent
 from gently.organisms import load_organism
 from gently.hardware import load_hardware, get_hardware
 from gently.settings import settings
@@ -93,6 +93,62 @@ def list_sessions(store: FileStore):
         print(f"  {item['session_id']}  {item['embryo_count']} embryos{time_str}")
     print()
     print("Use: python launch_gently.py --resume <id>")
+
+
+def _manage_users(args) -> int:
+    """Run account-management commands without starting the web server."""
+    from gently.ui.web.accounts import AccountStore, ROLES
+
+    store = AccountStore(settings.storage.base_path / "auth")
+
+    if args.users:
+        users = store.list_users()
+        if not users:
+            print("No web UI users configured.")
+            return 0
+        print("Web UI users")
+        print("-" * 30)
+        for user in users:
+            print(f"  {user['username']}\t{user['role']}")
+        return 0
+
+    if args.add_user:
+        password = args.password or getpass.getpass(f"Password for {args.add_user}: ")
+        store.create_user(args.add_user, password, role=args.role)
+        print(f"Created user {args.add_user} ({args.role}).")
+        return 0
+
+    if args.reset_password:
+        password = args.password or getpass.getpass(f"New password for {args.reset_password}: ")
+        store.reset_password(args.reset_password, password)
+        print(f"Reset password for {args.reset_password}.")
+        return 0
+
+    if args.set_role:
+        username, role = args.set_role
+        if role not in ROLES:
+            print(f"Error: role must be one of {', '.join(ROLES)}")
+            return 2
+        store.set_role(username, role)
+        print(f"Set {username} role to {role}.")
+        return 0
+
+    if args.delete_user:
+        store.delete_user(args.delete_user)
+        print(f"Deleted user {args.delete_user}.")
+        return 0
+
+    return 1
+
+
+def _has_user_management_command(args) -> bool:
+    return any([
+        args.users,
+        args.add_user,
+        args.reset_password,
+        args.set_role,
+        args.delete_user,
+    ])
 
 
 def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, resumed):
@@ -240,6 +296,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         list_sessions(store)
         store.close()
         return
+
+    from gently.app.agent import MicroscopyAgent
 
     # Self-managed user accounts gate microscope control on the LAN. On first
     # run we bootstrap an admin and print its one-time password in the banner.
@@ -509,7 +567,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         print("  First-run admin account created — sign in at the URL above:")
         print(f"      username: {_u}")
         print(f"      password: {_p}")
-        print("  (Save this now. Add users via the admin API; GENTLY_NO_AUTH=1 disables auth.)\n")
+        print("  (Save this now. Add users with --add-user or the admin API; GENTLY_NO_AUTH=1 disables auth.)\n")
 
     if viz_url and not no_browser:
         _open_browser(viz_url)
@@ -570,7 +628,23 @@ def cli_main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (INFO) logging")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open the web UI in a browser")
+    parser.add_argument("--users", action="store_true", help="List web UI users and exit")
+    parser.add_argument("--add-user", metavar="USERNAME", help="Create a web UI user and exit")
+    parser.add_argument("--reset-password", metavar="USERNAME", help="Reset a web UI user's password and exit")
+    parser.add_argument("--set-role", nargs=2, metavar=("USERNAME", "ROLE"),
+                        help="Set a web UI user's role: viewer, operator, or admin")
+    parser.add_argument("--delete-user", metavar="USERNAME", help="Delete a web UI user and exit")
+    parser.add_argument("--role", default="viewer", choices=("viewer", "operator", "admin"),
+                        help="Role for --add-user (default: viewer)")
+    parser.add_argument("--password", help="Password for --add-user or --reset-password")
     args = parser.parse_args()
+
+    if _has_user_management_command(args):
+        try:
+            sys.exit(_manage_users(args))
+        except ValueError as e:
+            print(f"Error: {e}")
+            sys.exit(2)
 
     if not args.sessions and not os.getenv("ANTHROPIC_API_KEY"):
         print("Error: ANTHROPIC_API_KEY not set")

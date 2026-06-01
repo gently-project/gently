@@ -118,6 +118,43 @@ class AccountStore:
         }
         self._save_users()
 
+    def set_role(self, username: str, role: str) -> None:
+        username = (username or "").strip()
+        if username not in self._users:
+            raise ValueError(f"user not found: {username}")
+        if role not in ROLES:
+            raise ValueError(f"role must be one of {ROLES}")
+        if self._users[username].get("role") == "admin" and role != "admin":
+            if self._admin_count() <= 1:
+                raise ValueError("cannot demote the last admin user")
+        self._users[username]["role"] = role
+        self._save_users()
+
+    def reset_password(self, username: str, password: str) -> None:
+        username = (username or "").strip()
+        if username not in self._users:
+            raise ValueError(f"user not found: {username}")
+        salt = secrets.token_bytes(16)
+        self._users[username].update({
+            "salt": salt.hex(),
+            "hash": self._hash(password, salt, _PBKDF2_ITERATIONS).hex(),
+            "iterations": _PBKDF2_ITERATIONS,
+            "password_updated_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        self._save_users()
+
+    def delete_user(self, username: str) -> None:
+        username = (username or "").strip()
+        if username not in self._users:
+            raise ValueError(f"user not found: {username}")
+        if self._users[username].get("role") == "admin" and self._admin_count() <= 1:
+            raise ValueError("cannot delete the last admin user")
+        del self._users[username]
+        self._save_users()
+
+    def _admin_count(self) -> int:
+        return sum(1 for rec in self._users.values() if rec.get("role") == "admin")
+
     def verify_password(self, username: str, password: str) -> Optional[str]:
         """Return the user's role if the password matches, else None."""
         rec = self._users.get((username or "").strip())

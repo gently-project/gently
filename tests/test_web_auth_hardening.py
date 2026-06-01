@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from gently.ui.web.accounts import AccountStore, set_account_store
 from gently.ui.web.auth import Role, SESSION_COOKIE, resolve_role
 from gently.ui.web.routes.images import create_router as create_images_router
+from gently.ui.web.routes.auth_routes import create_router as create_auth_router
 from gently.ui.web.routes.volumes import create_router as create_volumes_router
 from gently.ui.web.routes.websocket import _ws_can_control
 from gently.ui.web.upload_validation import decode_array_payload
@@ -58,6 +59,51 @@ def test_account_roles_drive_websocket_control(tmp_path):
 
     assert _ws_can_control(viewer) is False
     assert _ws_can_control(operator) is True
+
+
+def test_account_store_manages_roles_passwords_and_deletes(tmp_path):
+    store = AccountStore(tmp_path / "auth")
+    store.create_user("admin", "pw", role="admin")
+    store.create_user("viewer", "pw", role="viewer")
+
+    store.set_role("viewer", "operator")
+    store.reset_password("viewer", "new-pw")
+    assert store.get_role("viewer") == "operator"
+    assert store.verify_password("viewer", "new-pw") == "operator"
+
+    store.delete_user("viewer")
+    assert store.get_role("viewer") is None
+
+    with pytest.raises(ValueError, match="last admin"):
+        store.delete_user("admin")
+
+
+def test_admin_api_lists_updates_and_deletes_users(tmp_path):
+    store = AccountStore(tmp_path / "auth")
+    store.create_user("admin", "pw", role="admin")
+    store.create_user("viewer", "pw", role="viewer")
+    set_account_store(store)
+
+    app = FastAPI()
+    app.include_router(create_auth_router(SimpleNamespace(templates=None)))
+    client = TestClient(app)
+    client.cookies.set(SESSION_COOKIE, store.issue_session("admin"))
+
+    resp = client.get("/api/auth/users")
+    assert resp.status_code == 200
+    assert {u["username"] for u in resp.json()["users"]} == {"admin", "viewer"}
+
+    resp = client.patch(
+        "/api/auth/users/viewer",
+        json={"role": "operator", "password": "new-pw"},
+    )
+    assert resp.status_code == 200
+    assert store.get_role("viewer") == "operator"
+    assert store.verify_password("viewer", "new-pw") == "operator"
+
+    resp = client.delete("/api/auth/users/viewer")
+    assert resp.status_code == 200
+    assert store.get_role("viewer") is None
 
 
 def test_image_push_requires_control(monkeypatch):
