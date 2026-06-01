@@ -918,7 +918,7 @@ class MicroscopyAgent:
             user_message, cached_prompt, tools, self.mode, self._auto_save
         )
 
-    async def handle_message_stream(self, user_message: str):
+    async def handle_message_stream(self, user_message: str, autonomous: bool = False):
         """
         Handle message with streaming response.
 
@@ -929,6 +929,10 @@ class MicroscopyAgent:
         ----------
         user_message : str
             Message from user
+        autonomous : bool
+            When True (wake turns only), sets _autonomous_active after the
+            turn-lock is acquired so the registry backstop never fires while a
+            user turn is still holding the lock.
 
         Yields
         ------
@@ -949,6 +953,8 @@ class MicroscopyAgent:
         if lock is not None:
             await lock.acquire()
             acquired = True
+        if autonomous:
+            self._autonomous_active = True
         try:
             context_summary = await self.prompts.get_cached_context_summary(
                 self.experiment, self.timelapse_orchestrator, self.timeline_manager
@@ -980,6 +986,8 @@ class MicroscopyAgent:
             except StopAsyncIteration:
                 return
         finally:
+            if autonomous:
+                self._autonomous_active = False
             if acquired:
                 lock.release()
 
@@ -1011,8 +1019,7 @@ class MicroscopyAgent:
 
         await _emit({"type": "autonomous_start", "trigger": trigger or ""})
         text_parts = []
-        self._autonomous_active = True
-        agen = self.handle_message_stream(wake_note)
+        agen = self.handle_message_stream(wake_note, autonomous=True)
         sent_value = None
         try:
             while True:
@@ -1035,9 +1042,9 @@ class MicroscopyAgent:
         except Exception:
             logger.exception("run_wake_turn error")
         finally:
-            self._autonomous_active = False
             try:
-                # Release the turn-lock even if a picker hung / timed out.
+                # Closing the generator triggers handle_message_stream's finally,
+                # which resets _autonomous_active and releases the turn-lock.
                 await agen.aclose()
             except Exception:
                 pass
