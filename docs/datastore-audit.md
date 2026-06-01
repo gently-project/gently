@@ -21,6 +21,27 @@ For every data product Gently creates or consumes, answer:
 - Is there data Gently uses but does not persist?
 - Is there data Gently stores but never reads, displays, exports, or validates?
 
+## Audit Command
+
+Run a first-pass inventory against a Gently3/FileStore root:
+
+```shell
+python -m gently.core.datastore_audit D:/Gently3
+```
+
+Use JSON output for scripts:
+
+```shell
+python -m gently.core.datastore_audit D:/Gently3 --json --output audit.json
+```
+
+The command counts session metadata, timelines/events, interaction logs,
+snapshots, volumes, sidecars, sample records, projections, perception traces,
+debug exports, profile spans, campaign plans, incoming files, and logs. It also
+flags obvious browseability/provenance gaps, including missing `session.yaml`,
+unreadable YAML, volume TIFFs without `.meta.yaml` sidecars, snapshot TIFFs
+without sidecars, and sample directories without `embryo.yaml`.
+
 ## Inventory Template
 
 | Data product | Current path/table | Class | Producer | Consumer | Browse need | Gap |
