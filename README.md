@@ -178,6 +178,7 @@ That's the loop: **talk → plan → inspect.** With hardware connected (drop `-
 | [What Gently Can Do](docs/guides/capabilities.md) | Everyone | Perception, detection, plan mode, memory, mesh, safety |
 | [Build a Plugin](docs/guides/build-a-plugin.md) | Developers | Create organism and hardware plugins for other modalities |
 | [Hardware Setup](docs/guides/hardware-setup.md) | Labs | Connect a diSPIM, start the device layer, first acquisition |
+| [Datastore Audit](docs/datastore-audit.md) | Developers | Decide whether Gently3 can evolve or needs a Gently4 store API |
 
 ## Architecture
 
