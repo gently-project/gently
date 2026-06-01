@@ -82,3 +82,19 @@ technical context or constraints.
 
 The warnings are deliberate: they keep the existing planning system usable while
 making the missing planning structure visible for iteration.
+
+## Structured Generation
+
+Plan mode also provides `create_structured_plan` for creating the full
+campaign/phase/task hierarchy in one operation. It accepts:
+
+- root campaign description, shorthand, and target
+- phase objects with local keys
+- typed task objects using `type` or `task_class`
+- local dependency references between task keys
+- task `spec`, `references`, `estimated_days`, and `plan_context`
+
+This keeps campaign -> phase -> task construction explicit while reducing the
+tool-call chatter that occurs when the agent creates each campaign, item, and
+dependency separately. The lower-level tools remain available for incremental
+edits after the initial plan outline exists.

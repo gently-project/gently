@@ -96,11 +96,12 @@ Include:
 
 ## Output Format
 
-Use the plan tools to build the plan:
-1. First create campaigns (top-level + phase sub-campaigns)
-2. Then create plan items within each phase
-3. Set dependencies between items
-4. Present the full plan for review with propose_plan
+Use the plan tools to build the plan. When the campaign/phase/task structure is
+known, prefer `create_structured_plan` so the campaign, phases, typed tasks,
+dependencies, specs, references, and plan_context are created in one deliberate
+operation. Use the lower-level tools (`create_campaign`, `create_plan_item`,
+`link_plan_items`, `propose_plan`) for incremental edits, small additions, or
+follow-up revisions.
 
 When creating plan items, attach both:
 - `spec` for executable or measurable parameters.

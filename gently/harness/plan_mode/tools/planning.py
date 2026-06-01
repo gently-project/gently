@@ -17,6 +17,55 @@ from ...tools.registry import tool, ToolCategory, ToolExample
 # Campaign / Phase Management
 # ---------------------------------------------------------------------------
 
+
+def _normalize_shorthand_year(shorthand: Optional[str]) -> Optional[str]:
+    """Keep generated campaign labels aligned with the current year."""
+    if not shorthand:
+        return shorthand
+    import re
+    from datetime import datetime
+    current_year = str(datetime.now().year)
+    return re.sub(r"-20\d{2}$", f"-{current_year}", shorthand)
+
+
+def _normalize_plan_item_type(value: Optional[str]) -> str:
+    """Validate and normalize plan item task classes."""
+    from gently.harness.memory.model import PlanItemType
+
+    item_type = (value or "").strip().lower()
+    aliases = {
+        "decision": "decision_point",
+        "decision-point": "decision_point",
+        "decision point": "decision_point",
+    }
+    item_type = aliases.get(item_type, item_type)
+    valid = {member.value for member in PlanItemType}
+    if item_type not in valid:
+        raise ValueError(f"type must be one of {sorted(valid)}")
+    return item_type
+
+
+def _phase_key(entry: Dict, index: int) -> str:
+    """Return a stable local key for a phase entry."""
+    return str(entry.get("key") or entry.get("id") or entry.get("name") or index)
+
+
+def _item_key(entry: Dict, index: int) -> str:
+    """Return a stable local key for an item entry."""
+    return str(entry.get("key") or entry.get("id") or entry.get("title") or index)
+
+
+def _lookup_local_id(ref: str, item_ids: Dict[str, str]) -> Optional[str]:
+    """Resolve a dependency reference against item keys or existing IDs."""
+    if ref in item_ids:
+        return item_ids[ref]
+    ref_s = str(ref)
+    if ref_s in item_ids:
+        return item_ids[ref_s]
+    if ref_s.startswith("$") and ref_s[1:] in item_ids:
+        return item_ids[ref_s[1:]]
+    return ref_s or None
+
 @tool(
     name="create_campaign",
     description=(
@@ -50,11 +99,7 @@ async def create_campaign(
         return "Error: Context store not available"
 
     # Fix year in shorthand — models sometimes hallucinate the wrong year
-    if shorthand:
-        import re
-        from datetime import datetime
-        current_year = str(datetime.now().year)
-        shorthand = re.sub(r'-20\d{2}$', f'-{current_year}', shorthand)
+    shorthand = _normalize_shorthand_year(shorthand)
 
     store = agent.context_store
     cid = store.create_campaign(
@@ -66,6 +111,191 @@ async def create_campaign(
     if parent_id:
         return f"Created phase '{description}' (id: {cid}) under campaign {parent_id}"
     return f"Created campaign '{description}' (id: {cid})"
+
+
+@tool(
+    name="create_structured_plan",
+    description=(
+        "Create a complete campaign/phase/task plan in one operation. Use this "
+        "when the plan shape is known and you would otherwise call "
+        "create_campaign, create_plan_item, link_plan_items, and propose_plan "
+        "many times. Phases are a list of objects with description and optional "
+        "key/shorthand/target. Items are objects with key, phase, type or "
+        "task_class, title, description, spec, plan_context, references, "
+        "estimated_days, and depends_on. Dependency refs may point to item keys."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Create a two-phase F-drive focus-finding plan",
+            tool_input={
+                "description": "Safe DiSPIM F-drive focus finding",
+                "shorthand": "fdrive-focus-2026",
+                "target": "Find embryos, calibrate safely, and decide whether timelapse can start",
+                "phases": [
+                    {"key": "setup", "description": "Setup and calibration"},
+                    {"key": "decision", "description": "Timelapse readiness decision"},
+                ],
+                "items": [
+                    {
+                        "key": "find",
+                        "phase": "setup",
+                        "type": "imaging",
+                        "title": "Locate embryos in XY",
+                        "spec": {"sample_prep": "poly-lysine slide"},
+                        "plan_context": {
+                            "technical": "Use bottom overview camera for XY finding.",
+                            "constraints": ["Do not approach glass before focus safety is confirmed"],
+                        },
+                    },
+                    {
+                        "key": "go",
+                        "phase": "decision",
+                        "task_class": "decision_point",
+                        "title": "Decide whether to start timelapse",
+                        "depends_on": ["find"],
+                    },
+                ],
+            },
+        ),
+    ],
+)
+async def create_structured_plan(
+    description: str,
+    shorthand: str = None,
+    target: str = None,
+    phases: List[Dict] = None,
+    items: List[Dict] = None,
+    present_plan: bool = True,
+    context: Dict = None,
+) -> str:
+    """Create a full campaign/phase/task hierarchy from a single outline.
+
+    This reduces tool-call chatter during plan synthesis while preserving the
+    same Campaign and PlanItem records used by the rest of plan mode.
+    """
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
+        return "Error: Context store not available"
+
+    store = agent.context_store
+    phases = phases or []
+    items = items or []
+
+    campaign_id = store.create_campaign(
+        description=description,
+        shorthand=_normalize_shorthand_year(shorthand),
+        target=target,
+    )
+    campaign = store.get_campaign(campaign_id)
+
+    phase_ids: Dict[str, str] = {}
+    phase_count = 0
+    for idx, phase in enumerate(phases, 1):
+        if not isinstance(phase, dict):
+            return f"Error: phase {idx} must be an object"
+        phase_description = (phase.get("description") or phase.get("title") or "").strip()
+        if not phase_description:
+            return f"Error: phase {idx} needs a description"
+        phase_id = store.create_campaign(
+            description=phase_description,
+            shorthand=_normalize_shorthand_year(phase.get("shorthand")),
+            target=phase.get("target"),
+            parent_id=campaign_id,
+        )
+        key = _phase_key(phase, idx)
+        phase_ids[key] = phase_id
+        phase_ids[str(idx)] = phase_id
+        phase_count += 1
+
+    item_ids: Dict[str, str] = {}
+    item_count = 0
+    pending_dependencies: List[tuple[str, List[str]]] = []
+    errors: List[str] = []
+
+    for idx, item in enumerate(items, 1):
+        if not isinstance(item, dict):
+            errors.append(f"item {idx} must be an object")
+            continue
+
+        title = (item.get("title") or "").strip()
+        if not title:
+            errors.append(f"item {idx} needs a title")
+            continue
+
+        try:
+            item_type = _normalize_plan_item_type(
+                item.get("type") or item.get("task_class") or item.get("class")
+            )
+        except ValueError as exc:
+            errors.append(f"{title}: {exc}")
+            continue
+
+        phase_ref = item.get("phase")
+        target_campaign_id = campaign_id
+        if phase_ref is not None:
+            target_campaign_id = phase_ids.get(str(phase_ref))
+            if not target_campaign_id:
+                errors.append(f"{title}: unknown phase reference {phase_ref!r}")
+                continue
+
+        phase_order_raw = item.get("phase_order", -1)
+        phase_order = -1 if phase_order_raw is None else int(phase_order_raw)
+        item_id = store.create_plan_item(
+            campaign_id=target_campaign_id,
+            type=item_type,
+            title=title,
+            description=item.get("description"),
+            spec=item.get("spec"),
+            inherit_from=item.get("inherit_from"),
+            phase_order=phase_order,
+            references=item.get("references"),
+            estimated_days=item.get("estimated_days"),
+            plan_context=item.get("plan_context"),
+        )
+        key = _item_key(item, idx)
+        item_ids[key] = item_id
+        item_ids[str(idx)] = item_id
+        item_count += 1
+        depends_raw = item.get("depends_on") or []
+        depends = [depends_raw] if isinstance(depends_raw, str) else list(depends_raw)
+        pending_dependencies.append((item_id, depends))
+
+    linked = 0
+    local_item_ids = set(item_ids.values())
+    for item_id, refs in pending_dependencies:
+        for ref in refs:
+            dep_id = _lookup_local_id(str(ref), item_ids)
+            if dep_id and dep_id not in local_item_ids:
+                existing = store.resolve_plan_item(dep_id, campaign_id=campaign_id)
+                if not existing:
+                    errors.append(f"{item_id}: unknown dependency reference {ref!r}")
+                    continue
+                dep_id = existing.id
+            if not dep_id:
+                errors.append(f"{item_id}: unknown dependency reference {ref!r}")
+                continue
+            try:
+                store.add_plan_item_dependency(item_id, dep_id)
+                linked += 1
+            except Exception as exc:
+                errors.append(f"{item_id}: could not link dependency {ref!r}: {exc}")
+
+    lines = [
+        f"Created structured plan '{description}' (id: {campaign_id})",
+        f"Phases: {phase_count}",
+        f"Items: {item_count}",
+        f"Dependencies: {linked}",
+    ]
+    if errors:
+        lines.append("Warnings:")
+        lines.extend(f"- {err}" for err in errors)
+    if present_plan and campaign:
+        lines.append("")
+        lines.append(_render_plan(campaign, store))
+    else:
+        lines.append("Call propose_plan to review the plan.")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +599,12 @@ async def propose_plan(
         return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
     campaign_id = campaign.id
 
+    return _render_plan(campaign, store)
+
+
+def _render_plan(campaign, store) -> str:
+    """Render the full plan for review from an already resolved campaign."""
+    campaign_id = campaign.id
     lines = []
     lines.append(f"{'=' * 55}")
     lines.append(f" EXPERIMENTAL PLAN: {campaign.description}")
