@@ -1,4 +1,4 @@
-"""Persistent notes from the copilot to a coding agent."""
+"""Persistent notes from the Gently agent to a coding agent."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class CodingAgentNote:
     session_id: Optional[str] = None
     category: str = "feedback"
     severity: str = "info"
-    source: str = "copilot"
+    source: str = "gently_agent"
     context: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -35,7 +35,7 @@ class CodingAgentNote:
             session_id=data.get("session_id"),
             category=str(data.get("category", "feedback")),
             severity=str(data.get("severity", "info")),
-            source=str(data.get("source", "copilot")),
+            source=str(data.get("source", "gently_agent")),
             context=data.get("context") or {},
         )
 
@@ -66,7 +66,7 @@ class CodingNotesStore:
         session_id: Optional[str] = None,
         category: str = "feedback",
         severity: str = "info",
-        source: str = "copilot",
+        source: str = "gently_agent",
         context: Optional[Mapping[str, Any]] = None,
     ) -> CodingAgentNote:
         """Append a note and return the stored record."""

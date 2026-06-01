@@ -46,7 +46,7 @@ async def test_leave_coding_agent_note_tool_writes_to_session_dir(tmp_path):
     )
 
     result = await leave_coding_agent_note(
-        message="The copilot should surface detector errors to the user.",
+        message="The Gently agent should surface detector errors to the user.",
         category="bug",
         severity="warning",
         context_summary="Detector returned an exception during detection.",
@@ -60,6 +60,7 @@ async def test_leave_coding_agent_note_tool_writes_to_session_dir(tmp_path):
     assert "Saved coding-agent note" in result
     assert payload["session_id"] == "abc12345"
     assert payload["category"] == "bug"
+    assert payload["source"] == "gently_agent"
     assert payload["context"]["summary"].startswith("Detector returned")
 
 

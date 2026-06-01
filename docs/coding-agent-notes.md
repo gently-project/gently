@@ -1,6 +1,6 @@
 # Coding-Agent Notes
 
-The copilot can leave durable notes for a future coding-agent pass with the
+The Gently runtime agent can leave durable notes for a future coding-agent pass with the
 `leave_coding_agent_note` tool. Notes are append-only JSONL records intended for
 bug reports, internal errors, implementation feedback, or user requests that
 should be addressed in code.
@@ -28,7 +28,7 @@ Each record includes:
 - optional structured `context`
 
 The companion `list_coding_agent_notes` tool lists recent notes so the operator
-or copilot can confirm what has been captured.
+or Gently agent can confirm what has been captured.
 
 Example record:
 
@@ -40,7 +40,7 @@ Example record:
   "session_id": "abc12345",
   "category": "bug",
   "severity": "warning",
-  "source": "copilot",
+  "source": "gently_agent",
   "context": {"summary": "move_to_embryo skipped position lookup"}
 }
 ```
