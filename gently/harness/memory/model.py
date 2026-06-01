@@ -241,6 +241,24 @@ class BenchSpec:
 
 
 @dataclass
+class PlanContext:
+    """
+    Multi-level microscope thought context for a plan item.
+
+    Based on the technical, experimental, theoretical, and conceptual
+    hierarchy used to connect microscope operations to biological reasoning.
+    """
+    technical: Optional[str] = None
+    experimental: Optional[str] = None
+    theoretical: Optional[str] = None
+    conceptual: Optional[str] = None
+    sample_entity: Optional[str] = None
+    operator_context: Optional[str] = None
+    constraints: List[str] = field(default_factory=list)
+    success_question: Optional[str] = None
+
+
+@dataclass
 class PlanItem:
     """
     A single item in an experimental plan — imaging or not.
@@ -263,6 +281,7 @@ class PlanItem:
     claimed_by: Optional[str] = None         # instance_id of claiming node
     claimed_by_hostname: Optional[str] = None # human-readable hostname
     references: List[Dict[str, str]] = field(default_factory=list)  # Source citations
+    plan_context: Optional[PlanContext] = None  # Microscope thought hierarchy
 
     # Specifications (type-dependent)
     imaging_spec: Optional[ImagingSpec] = None

@@ -84,7 +84,10 @@ async def create_campaign(
         "Use estimated_days to indicate how many days this task takes "
         "(e.g. 1 for a quick imaging session, 14 for strain expansion). "
         "Use references to cite literature, databases, or other sources "
-        "(each with source, citation, and optional id/note)."
+        "(each with source, citation, and optional id/note). "
+        "Use plan_context to capture the microscope thought hierarchy: "
+        "technical, experimental, theoretical, and conceptual context, plus "
+        "sample_entity, operator_context, constraints, and success_question."
     ),
     category=ToolCategory.UTILITY,
     examples=[
@@ -120,6 +123,7 @@ async def create_plan_item(
     phase_order: int = -1,
     references: List[Dict] = None,
     estimated_days: int = None,
+    plan_context: Dict = None,
     context: Dict = None,
 ) -> str:
     """Create a plan item within a campaign/phase.
@@ -155,6 +159,7 @@ async def create_plan_item(
         phase_order=phase_order,
         references=references,
         estimated_days=estimated_days,
+        plan_context=plan_context,
     )
 
     # Include the human-friendly task number in the response
@@ -191,8 +196,9 @@ async def create_plan_item(
     name="update_plan_item",
     description=(
         "Update an existing plan item — change status, title, description, "
-        "outcome, spec, or references. Use this to mark items as completed, "
-        "skipped, update imaging specifications, or attach source citations."
+        "outcome, spec, plan_context, or references. Use this to mark items "
+        "as completed, skipped, update imaging specifications, attach source "
+        "citations, or refine the microscope thought hierarchy."
     ),
     category=ToolCategory.UTILITY,
 )
@@ -205,6 +211,7 @@ async def update_plan_item(
     spec: Dict = None,
     references: List[Dict] = None,
     estimated_days: int = None,
+    plan_context: Dict = None,
     campaign_id: str = None,
     context: Dict = None,
 ) -> str:
@@ -235,6 +242,7 @@ async def update_plan_item(
         spec=spec,
         references=references,
         estimated_days=estimated_days,
+        plan_context=plan_context,
     )
     changes = []
     if status:
@@ -247,6 +255,8 @@ async def update_plan_item(
         changes.append(f"title -> {title}")
     if references:
         changes.append(f"{len(references)} references attached")
+    if plan_context is not None:
+        changes.append("plan context updated")
     return f"Updated plan item '{item.title}' ({resolved_id}): {', '.join(changes) or 'updated'}"
 
 
@@ -412,6 +422,31 @@ async def propose_plan(
     return "\n".join(lines)
 
 
+def _plan_context_rows(plan_context, indent: str = "   ") -> List[str]:
+    """Format microscope thought hierarchy fields for text output."""
+    if not plan_context:
+        return []
+
+    rows = [f"{indent}Microscope thought context:"]
+    for attr, label in [
+        ("technical", "Technical"),
+        ("experimental", "Experimental"),
+        ("theoretical", "Theoretical"),
+        ("conceptual", "Conceptual"),
+        ("sample_entity", "Sample entity"),
+        ("operator_context", "Operator context"),
+        ("success_question", "Success question"),
+    ]:
+        val = getattr(plan_context, attr, None)
+        if val:
+            rows.append(f"{indent}  {label}: {val}")
+
+    constraints = getattr(plan_context, "constraints", None) or []
+    if constraints:
+        rows.append(f"{indent}  Constraints: {', '.join(constraints)}")
+    return rows
+
+
 def _format_plan_item(item, store, task_num: str = "") -> str:
     """Format a single plan item for display."""
     from gently.harness.memory.model import PlanItemStatus
@@ -472,6 +507,8 @@ def _format_plan_item(item, store, task_num: str = "") -> str:
             details.append(f"   Timeline: ~{spec.estimated_days} days")
         if spec.success_criteria:
             details.append(f"   Criteria: {spec.success_criteria}")
+
+    details.extend(_plan_context_rows(item.plan_context))
 
     if item.depends_on:
         dep_items = [store.get_plan_item(d) for d in item.depends_on]
@@ -1131,6 +1168,32 @@ def _export_date() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def _export_plan_context(plan_context) -> List[str]:
+    if not plan_context:
+        return []
+
+    lines = ["**Microscope Thought Context:**"]
+    for attr, label in [
+        ("technical", "Technical"),
+        ("experimental", "Experimental"),
+        ("theoretical", "Theoretical"),
+        ("conceptual", "Conceptual"),
+        ("sample_entity", "Sample entity"),
+        ("operator_context", "Operator context"),
+        ("success_question", "Success question"),
+    ]:
+        val = getattr(plan_context, attr, None)
+        if val:
+            lines.append(f"- {label}: {val}")
+
+    constraints = getattr(plan_context, "constraints", None) or []
+    if constraints:
+        lines.append(f"- Constraints: {', '.join(constraints)}")
+
+    lines.append("")
+    return lines
+
+
 def _export_item(item, store, num: str) -> List[str]:
     """Format a plan item for the export document."""
     from gently.harness.memory.model import PlanItemStatus
@@ -1197,6 +1260,8 @@ def _export_item(item, store, num: str) -> List[str]:
             lines.append(f"- Success criteria: {bs.success_criteria}")
         lines.append("")
 
+    lines.extend(_export_plan_context(item.plan_context))
+
     if item.depends_on:
         dep_items = [store.get_plan_item(d) for d in item.depends_on]
         dep_names = [d.title for d in dep_items if d]
@@ -1231,7 +1296,7 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
     from .validation import (
         HARDWARE_LIMITS, CONTROL_KEYWORDS,
         _check_dependency_cycles, _stage_order, _normalise_stage,
-        _get_temp_factor, STAGE_TIMING_20C,
+        _get_temp_factor, STAGE_TIMING_20C, _collect_context_warnings,
     )
 
     items = store.get_plan_items(campaign_id=campaign_id, include_children=True)
@@ -1269,6 +1334,9 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
                     issues.append(f"- **Error:** {label} — {field_name}={val} below min {lo}")
                 if hi is not None and val > hi:
                     issues.append(f"- **Error:** {label} — {field_name}={val} exceeds max {hi}")
+
+        for warning in _collect_context_warnings(label, item, spec):
+            issues.append(f"- **Warning:** {warning}")
 
     cycle_errors = _check_dependency_cycles(items)
     for cyc in cycle_errors:

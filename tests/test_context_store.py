@@ -10,6 +10,7 @@ from gently.harness.memory.model import (
     Confidence,
     Learning,
     Observation,
+    PlanContext,
     PlanItemStatus,
     Significance,
 )
@@ -215,6 +216,73 @@ class TestPlanItems:
         context_store.create_plan_item(campaign_id=cid, type="imaging", title="T3")
         imaging_items = context_store.get_plan_items(campaign_id=cid, type="imaging")
         assert len(imaging_items) == 2
+
+    def test_plan_item_preserves_microscope_thought_context(self, context_store):
+        cid = context_store.create_campaign(description="C1")
+        item_id = context_store.create_plan_item(
+            campaign_id=cid,
+            type="imaging",
+            title="Embryo timelapse",
+            plan_context={
+                "technical": "Bottom overview XY, F/head-axis alignment, calibration first.",
+                "experimental": "Ryan/Brie locate embryos and approve timelapse.",
+                "theoretical": "Developmental timing remains interpretable.",
+                "conceptual": "Biologist plans at the embryo-development level.",
+                "sample_entity": "C. elegans embryo",
+                "operator_context": "Immediate DiSPIM users Ryan and Brie",
+                "constraints": ["Avoid head-axis overtravel near glass"],
+                "success_question": "Can focus and calibration stay explicit?",
+            },
+        )
+
+        item = context_store.get_plan_item(item_id)
+        assert isinstance(item.plan_context, PlanContext)
+        assert item.plan_context.technical.startswith("Bottom overview")
+        assert item.plan_context.constraints == ["Avoid head-axis overtravel near glass"]
+
+        context_store.update_plan_item(
+            item_id,
+            plan_context={
+                "technical": "Calibration confirmed before timelapse.",
+                "experimental": "Operator approves first acquisition.",
+                "theoretical": "Reporter dynamics remain measurable.",
+                "conceptual": "Planning layer governs microscope interaction.",
+            },
+        )
+        updated = context_store.get_plan_item(item_id)
+        assert updated.plan_context.technical == "Calibration confirmed before timelapse."
+        assert updated.plan_context.conceptual == "Planning layer governs microscope interaction."
+
+        template_id = context_store.save_plan_template(
+            "context-template",
+            "Plan context template",
+            cid,
+        )
+        new_cid = context_store.apply_plan_template(template_id)
+        cloned = context_store.get_plan_items(campaign_id=new_cid)[0]
+        assert cloned.plan_context.theoretical == "Reporter dynamics remain measurable."
+
+
+class TestFileContextPlanItems:
+    def test_file_context_store_preserves_microscope_thought_context(self, file_context_store):
+        cid = file_context_store.create_campaign(description="C1")
+        item_id = file_context_store.create_plan_item(
+            campaign_id=cid,
+            type="imaging",
+            title="Embryo timelapse",
+            plan_context={
+                "technical": "F-drive focus finding and calibration before timelapse.",
+                "experimental": "Ryan/Brie workflow.",
+                "theoretical": "Developmental timing remains interpretable.",
+                "conceptual": "Biologist plans at embryo level.",
+                "constraints": ["Avoid overtravel toward glass"],
+            },
+        )
+
+        item = file_context_store.get_plan_item(item_id)
+        assert isinstance(item.plan_context, PlanContext)
+        assert item.plan_context.technical.startswith("F-drive focus")
+        assert item.plan_context.constraints == ["Avoid overtravel toward glass"]
 
 
 class TestObservations:

@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS plan_items (
     status TEXT DEFAULT 'planned',
     outcome TEXT,
     spec TEXT,
+    plan_context TEXT,
     inherit_from TEXT,
     planned_session_id TEXT,
     session_id TEXT,
@@ -298,6 +299,9 @@ class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin, MlPipelinesM
         if "references" not in pi_cols:
             conn.execute('ALTER TABLE plan_items ADD COLUMN "references" TEXT')
             logger.info("Migration: added 'references' column to plan_items")
+        if "plan_context" not in pi_cols:
+            conn.execute("ALTER TABLE plan_items ADD COLUMN plan_context TEXT")
+            logger.info("Migration: added 'plan_context' column to plan_items")
 
         # Mesh campaign coordination columns
         camp_cols = {row[1] for row in conn.execute("PRAGMA table_info(campaigns)").fetchall()}

@@ -59,6 +59,7 @@ from .model import (
     Observation,
     PlannedSession,
     PlannedSessionStatus,
+    PlanContext,
     PlanItem,
     PlanItemStatus,
     PlanItemType,
@@ -1097,6 +1098,7 @@ class FileContextStore:
         item_id: Optional[str] = None,
         references: Optional[List[Dict]] = None,
         estimated_days: Optional[int] = None,
+        plan_context: Optional[Dict] = None,
     ) -> str:
         pid = item_id or self._gen_id()
         now = self._now()
@@ -1125,6 +1127,7 @@ class FileContextStore:
             "estimated_days": estimated_days,
             "phase_order": phase_order,
             "references": references,
+            "plan_context": self._serialise_plan_context(plan_context),
             "depends_on": depends_on or [],
             "claimed_by": None,
             "claimed_by_hostname": None,
@@ -1277,6 +1280,7 @@ class FileContextStore:
         campaign_id: Optional[str] = None,
         references: Optional[List[Dict]] = None,
         estimated_days: Optional[int] = None,
+        plan_context: Optional[Dict] = None,
     ):
         loc = self._find_plan_item_location(item_id)
         if not loc:
@@ -1302,6 +1306,8 @@ class FileContextStore:
             item["phase_order"] = phase_order
         if references is not None:
             item["references"] = references
+        if plan_context is not None:
+            item["plan_context"] = self._serialise_plan_context(plan_context)
         if campaign_id is not None and campaign_id != old_campaign_id:
             # Move item to a different campaign
             items.pop(idx)
@@ -1545,6 +1551,8 @@ class FileContextStore:
 
             if item.references:
                 item_data["references"] = item.references
+            if item.plan_context:
+                item_data["plan_context"] = self._dataclass_to_sparse_dict(item.plan_context)
 
             serialized_items.append(item_data)
 
@@ -1643,6 +1651,7 @@ class FileContextStore:
                 spec=spec,
                 phase_order=item_data.get("phase_order", -1),
                 references=item_data.get("references"),
+                plan_context=item_data.get("plan_context"),
             )
             new_item_ids.append(item_id)
 
@@ -2449,6 +2458,44 @@ class FileContextStore:
         )
 
     @staticmethod
+    def _dataclass_to_sparse_dict(obj) -> Dict:
+        data: Dict[str, Any] = {}
+        for f in dataclasses.fields(obj):
+            val = getattr(obj, f.name)
+            if val is None:
+                continue
+            if isinstance(val, (list, dict)) and not val:
+                continue
+            data[f.name] = val
+        return data
+
+    @staticmethod
+    def _dict_to_plan_context(data) -> Optional[PlanContext]:
+        if not data:
+            return None
+        if isinstance(data, PlanContext):
+            return data
+        if not isinstance(data, dict):
+            return None
+        valid = {f.name for f in dataclasses.fields(PlanContext)}
+        kwargs = {k: v for k, v in data.items() if k in valid}
+        constraints = kwargs.get("constraints")
+        if constraints is None:
+            kwargs["constraints"] = []
+        elif isinstance(constraints, str):
+            kwargs["constraints"] = [constraints]
+        elif not isinstance(constraints, list):
+            kwargs["constraints"] = list(constraints)
+        return PlanContext(**kwargs)
+
+    @staticmethod
+    def _serialise_plan_context(data) -> Optional[Dict]:
+        context = FileContextStore._dict_to_plan_context(data)
+        if not context:
+            return None
+        return FileContextStore._dataclass_to_sparse_dict(context)
+
+    @staticmethod
     def _dict_to_plan_item(d: Dict) -> PlanItem:
         item_type = PlanItemType(d["type"])
         spec_data = d.get("spec")
@@ -2468,6 +2515,7 @@ class FileContextStore:
                 })
 
         references = d.get("references") or []
+        plan_context = FileContextStore._dict_to_plan_context(d.get("plan_context"))
 
         return PlanItem(
             id=d["id"],
@@ -2481,6 +2529,7 @@ class FileContextStore:
             claimed_by=d.get("claimed_by"),
             claimed_by_hostname=d.get("claimed_by_hostname"),
             references=references,
+            plan_context=plan_context,
             imaging_spec=imaging_spec,
             bench_spec=bench_spec,
             planned_session_id=d.get("planned_session_id"),

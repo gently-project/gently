@@ -47,6 +47,21 @@ TEMP_SCALE = {
 
 CONTROL_KEYWORDS = {"control", "wildtype", "n2", "wt", "wild-type", "wild type"}
 
+CONTEXT_LAYERS = ("technical", "experimental", "theoretical", "conceptual")
+
+EMBRYO_CONTEXT_KEYWORDS = {
+    "embryo", "embryos", "egg", "eggs", "c. elegans", "celegans",
+}
+
+TIMELAPSE_CONTEXT_KEYWORDS = {
+    "timelapse", "time-lapse", "time lapse", "longitudinal", "development",
+}
+
+DISPIM_SAFETY_KEYWORDS = {
+    "calibration", "calibrate", "f-drive", "f drive", "head axis",
+    "focus", "glass", "slide", "poly-lysine", "poly lysine",
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -137,6 +152,96 @@ def _normalise_stage(name: str) -> Optional[str]:
             return s
     aliases = {"3fold": "pretzel", "threefold": "pretzel", "3-fold": "pretzel"}
     return aliases.get(low.replace(" ", ""))
+
+
+def _missing_context_layers(item) -> List[str]:
+    """Return required thought-context layers that are missing."""
+    plan_context = getattr(item, "plan_context", None)
+    if not plan_context:
+        return list(CONTEXT_LAYERS)
+    return [
+        layer for layer in CONTEXT_LAYERS
+        if not getattr(plan_context, layer, None)
+    ]
+
+
+def _plan_context_text(item) -> str:
+    plan_context = getattr(item, "plan_context", None)
+    if not plan_context:
+        return ""
+    parts = []
+    for attr in (
+        "technical", "experimental", "theoretical", "conceptual",
+        "sample_entity", "operator_context", "success_question",
+    ):
+        val = getattr(plan_context, attr, None)
+        if val:
+            parts.append(str(val))
+    parts.extend(str(v) for v in getattr(plan_context, "constraints", []) or [])
+    return " ".join(parts).lower()
+
+
+def _item_text(item, spec=None) -> str:
+    parts = [item.title, item.description, item.outcome]
+    if spec:
+        for attr in (
+            "strain", "genotype", "reporter", "sample_prep", "target_window",
+            "start_stage", "stop_condition", "success_criteria",
+            "comparison_to",
+        ):
+            val = getattr(spec, attr, None)
+            if val:
+                parts.append(str(val))
+        if spec.num_embryos:
+            parts.append("embryo")
+        if spec.interval_s or spec.adaptive_intervals:
+            parts.append("timelapse")
+    return " ".join(filter(None, parts)).lower()
+
+
+def _needs_dispim_focus_context(item, spec=None) -> bool:
+    if item.type.value != "imaging" or not spec:
+        return False
+    text = _item_text(item, spec)
+    embryo_like = spec.num_embryos is not None or any(
+        kw in text for kw in EMBRYO_CONTEXT_KEYWORDS
+    )
+    timelapse_like = (
+        spec.interval_s is not None
+        or spec.adaptive_intervals is not None
+        or any(kw in text for kw in TIMELAPSE_CONTEXT_KEYWORDS)
+    )
+    dispim_like = (
+        spec.galvo_amplitude is not None
+        or spec.piezo_amplitude_um is not None
+        or "dispim" in text
+        or "spim" in text
+    )
+    return embryo_like and timelapse_like and (dispim_like or spec.num_slices is not None)
+
+
+def _has_dispim_focus_safety_context(item) -> bool:
+    context_text = _plan_context_text(item)
+    return any(kw in context_text for kw in DISPIM_SAFETY_KEYWORDS)
+
+
+def _collect_context_warnings(label: str, item, spec=None) -> List[str]:
+    warnings: List[str] = []
+    if item.type.value == "imaging":
+        missing_layers = _missing_context_layers(item)
+        if missing_layers:
+            warnings.append(
+                f"{label}: missing microscope thought context layers: "
+                f"{', '.join(missing_layers)}"
+            )
+
+    if _needs_dispim_focus_context(item, spec) and not _has_dispim_focus_safety_context(item):
+        warnings.append(
+            f"{label}: DiSPIM embryo timelapse should state calibration, "
+            "F-drive/head-axis focus finding, and glass-slide safety assumptions "
+            "in plan_context.technical or plan_context.constraints before acquisition."
+        )
+    return warnings
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +386,8 @@ async def validate_plan(
                 warnings.append(
                     f"{label}: missing imaging spec fields: {', '.join(missing_fields)}"
                 )
+
+        warnings.extend(_collect_context_warnings(label, item, spec))
 
     # ------------------------------------------------------------------
     # Plan-level checks

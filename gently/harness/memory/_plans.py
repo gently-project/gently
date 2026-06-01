@@ -8,18 +8,60 @@ self._gen_id() provided by the host class.
 import json
 import logging
 import sqlite3
+import dataclasses as _dc
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .model import (
     BenchSpec,
     ImagingSpec,
+    PlanContext,
     PlanItem,
     PlanItemStatus,
     PlanItemType,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _dataclass_to_dict(obj) -> Dict:
+    """Serialize a dataclass, omitting empty fields."""
+    data: Dict[str, Any] = {}
+    for f in _dc.fields(obj):
+        val = getattr(obj, f.name)
+        if val is None:
+            continue
+        if isinstance(val, (list, dict)) and not val:
+            continue
+        data[f.name] = val
+    return data
+
+
+def _coerce_plan_context(data) -> Optional[PlanContext]:
+    """Build a PlanContext from stored dict data while ignoring unknown keys."""
+    if not data:
+        return None
+    if isinstance(data, PlanContext):
+        return data
+    if not isinstance(data, dict):
+        return None
+    valid = {f.name for f in _dc.fields(PlanContext)}
+    kwargs = {k: v for k, v in data.items() if k in valid}
+    constraints = kwargs.get("constraints")
+    if constraints is None:
+        kwargs["constraints"] = []
+    elif isinstance(constraints, str):
+        kwargs["constraints"] = [constraints]
+    elif not isinstance(constraints, list):
+        kwargs["constraints"] = list(constraints)
+    return PlanContext(**kwargs)
+
+
+def _serialize_plan_context(data) -> Optional[Dict]:
+    context = _coerce_plan_context(data)
+    if not context:
+        return None
+    return _dataclass_to_dict(context)
 
 
 class PlansMixin:
@@ -43,6 +85,7 @@ class PlansMixin:
         item_id: Optional[str] = None,
         references: Optional[List[Dict]] = None,
         estimated_days: Optional[int] = None,
+        plan_context: Optional[Dict] = None,
     ) -> str:
         """Create a plan item. Returns its ID.
 
@@ -64,12 +107,13 @@ class PlansMixin:
         with self._tx():
             self._conn.execute(
                 "INSERT INTO plan_items "
-                "(id, campaign_id, type, title, description, spec, inherit_from, "
+                "(id, campaign_id, type, title, description, spec, plan_context, inherit_from, "
                 " planned_session_id, estimated_days, phase_order, \"references\", status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
                 (
                     pid, campaign_id, type, title, description,
                     json.dumps(spec) if spec else None,
+                    json.dumps(_serialize_plan_context(plan_context)) if plan_context else None,
                     inherit_from, planned_session_id, estimated_days, phase_order,
                     json.dumps(references) if references else None,
                     now, now,
@@ -307,6 +351,7 @@ class PlansMixin:
         campaign_id: Optional[str] = None,
         references: Optional[List[Dict]] = None,
         estimated_days: Optional[int] = None,
+        plan_context: Optional[Dict] = None,
     ):
         """Update a plan item. Only non-None values are applied."""
         now = self._now()
@@ -336,6 +381,9 @@ class PlansMixin:
         if references is not None:
             updates.append("\"references\" = ?")
             values.append(json.dumps(references))
+        if plan_context is not None:
+            updates.append("plan_context = ?")
+            values.append(json.dumps(_serialize_plan_context(plan_context)) if plan_context else None)
         if not updates:
             return
         updates.append("updated_at = ?")
@@ -589,21 +637,9 @@ class PlansMixin:
             }
             # Serialize spec
             if item.imaging_spec:
-                import dataclasses as _dc
-                spec_dict = {}
-                for f in _dc.fields(item.imaging_spec):
-                    val = getattr(item.imaging_spec, f.name)
-                    if val is not None:
-                        spec_dict[f.name] = val
-                item_data["spec"] = spec_dict
+                item_data["spec"] = _dataclass_to_dict(item.imaging_spec)
             elif item.bench_spec:
-                import dataclasses as _dc
-                spec_dict = {}
-                for f in _dc.fields(item.bench_spec):
-                    val = getattr(item.bench_spec, f.name)
-                    if val is not None:
-                        spec_dict[f.name] = val
-                item_data["spec"] = spec_dict
+                item_data["spec"] = _dataclass_to_dict(item.bench_spec)
 
             # Dependencies as relative indices within this campaign's items
             if item.depends_on:
@@ -616,6 +652,8 @@ class PlansMixin:
 
             if item.references:
                 item_data["references"] = item.references
+            if item.plan_context:
+                item_data["plan_context"] = _dataclass_to_dict(item.plan_context)
 
             serialized_items.append(item_data)
 
@@ -711,6 +749,7 @@ class PlansMixin:
                 spec=spec,
                 phase_order=item_data.get("phase_order", -1),
                 references=item_data.get("references"),
+                plan_context=item_data.get("plan_context"),
             )
             new_item_ids.append(item_id)
 
@@ -931,19 +970,19 @@ class PlansMixin:
 
         if spec_data:
             if item_type == PlanItemType.IMAGING:
-                import dataclasses as _dc
                 valid = {f.name for f in _dc.fields(ImagingSpec)}
                 imaging_spec = ImagingSpec(**{
                     k: v for k, v in spec_data.items() if k in valid
                 })
             else:
-                import dataclasses as _dc
                 valid = {f.name for f in _dc.fields(BenchSpec)}
                 bench_spec = BenchSpec(**{
                     k: v for k, v in spec_data.items() if k in valid
                 })
 
         references = json.loads(d["references"]) if d.get("references") else []
+        plan_context_data = json.loads(d["plan_context"]) if d.get("plan_context") else None
+        plan_context = _coerce_plan_context(plan_context_data)
 
         return PlanItem(
             id=item_id,
@@ -957,6 +996,7 @@ class PlansMixin:
             claimed_by=d.get("claimed_by"),
             claimed_by_hostname=d.get("claimed_by_hostname"),
             references=references,
+            plan_context=plan_context,
             imaging_spec=imaging_spec,
             bench_spec=bench_spec,
             planned_session_id=d.get("planned_session_id"),

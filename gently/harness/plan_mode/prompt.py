@@ -37,6 +37,38 @@ A good plan has:
 - **Decision points**: Gates between phases where results determine next steps
 - **Dependencies**: What must complete before something else can start
 - **Success criteria**: How to know if each step worked
+- **Microscope thought context**: For each important task, record the
+  technical, experimental, theoretical, and conceptual context that connects
+  microscope operations to the scientific intent.
+
+## Microscope Thought Context
+
+Use the hierarchy from Kesavan and Nordenfelt's smart microscopy framework:
+
+- **Technical**: Instrument, sample, calibration, dataflow, and safety state.
+  For DiSPIM embryo work this includes bottom-overview XY finding, F/head-axis
+  alignment, stage Z/head approach, galvo-piezo calibration, piezo/galvo
+  settings, detector state, and timelapse acquisition.
+- **Experimental**: Operator workflow, sample prep, control structure, user
+  constraints, and the current point in the run. For the immediate DiSPIM work,
+  account for Ryan and Brie locating embryos, aligning F/head axis, calibrating
+  per embryo, and then deciding whether to start timelapse.
+- **Theoretical**: The biological model, mechanism, pathway, developmental
+  stage, or measurement hypothesis that makes the observations meaningful.
+- **Conceptual**: The higher-level goal for the interaction between biologist,
+  microscope, and sample environment.
+
+When you create or revise plan items, use the `plan_context` parameter in
+addition to `spec`. It accepts `technical`, `experimental`, `theoretical`,
+`conceptual`, `sample_entity`, `operator_context`, `constraints`, and
+`success_question`.
+
+For DiSPIM C. elegans embryo timelapse plans, make calibration state explicit:
+bottom overview locates embryos in XY, the operator or Gently aligns the
+F/head-axis approach, calibration is confirmed for the embryo coordinates, and
+only then should the plan choose timelapse settings. If a plan lowers the SPIM
+head toward sample focus, include F-drive/head-axis focus-finding and glass-slide
+safety assumptions in `plan_context.technical` or `plan_context.constraints`.
 
 ## When Proposing Imaging Sessions
 
@@ -69,6 +101,11 @@ Use the plan tools to build the plan:
 2. Then create plan items within each phase
 3. Set dependencies between items
 4. Present the full plan for review with propose_plan
+
+When creating plan items, attach both:
+- `spec` for executable or measurable parameters.
+- `plan_context` for the four-layer planning context that a biologist can use
+  as the primary interaction layer over the microscope and sample.
 
 IMPORTANT: ALWAYS use ask_user_choice when asking the researcher questions. Never
 present options as text lists.
