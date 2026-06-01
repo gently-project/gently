@@ -43,6 +43,16 @@ The schema is deliberately permissive so LLM calls, tool calls, hardware queue
 waits, perception steps, file I/O, and UI/WebSocket events can all be summarized
 without forcing them into one runtime dependency.
 
+Gently now records tool-call spans automatically when a running agent has an
+active FileStore session. Those spans are appended to:
+
+```text
+<session_dir>/profile_spans.jsonl
+```
+
+Set `GENTLY_PROFILE_PATH` to redirect spans to a specific JSONL file during
+tests or custom launches.
+
 ## Workflow
 
 1. Run or replay a Gently agent scenario until the behavior diverges from what was

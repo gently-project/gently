@@ -14,9 +14,12 @@ Tests cover:
 """
 
 import asyncio
+import json
+from types import SimpleNamespace
 
 import pytest
 
+from gently.core.file_store import FileStore
 from gently.harness.tools.registry import (
     ToolRegistry,
     ToolCategory,
@@ -207,3 +210,27 @@ class TestExecution:
     async def test_execute_nonexistent_tool(self, registry):
         with pytest.raises(ValueError, match="Unknown tool"):
             await registry.execute("nonexistent", {})
+
+    @pytest.mark.asyncio
+    async def test_execute_records_profile_span_for_session_tool(self, registry, tmp_path):
+        def adder(a: int, b: int) -> str:
+            return str(a + b)
+
+        store = FileStore(tmp_path)
+        store.create_session("abc12345", name="profile")
+        agent = SimpleNamespace(store=store, session_id="abc12345")
+        registry.register_function(adder, name="adder", category=ToolCategory.UTILITY)
+
+        result = await registry.execute("adder", {"a": 2, "b": 5}, {"agent": agent})
+
+        profile_path = store._session_dir("abc12345") / "profile_spans.jsonl"
+        records = [
+            json.loads(line)
+            for line in profile_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert result == "7"
+        assert records[-1]["component"] == "tool"
+        assert records[-1]["operation"] == "adder"
+        assert records[-1]["tool_name"] == "adder"
+        assert records[-1]["status"] == "ok"
+        assert records[-1]["duration_ms"] >= 0
