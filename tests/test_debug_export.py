@@ -35,6 +35,25 @@ def test_prepare_debug_context_exports_session_bundle(tmp_path):
         session_dir / "events.jsonl",
         [{"event_type": "STAGE_MOVED", "data": {"x": 1}}],
     )
+    _write_jsonl(
+        session_dir / "profile.jsonl",
+        [
+            {
+                "timestamp": "2026-05-30T12:00:01",
+                "component": "llm",
+                "operation": "agent_turn",
+                "duration_ms": 1250.0,
+                "status": "ok",
+            },
+            {
+                "timestamp": "2026-05-30T12:00:02",
+                "component": "tool",
+                "operation": "acquire_volume",
+                "duration_ms": 320.5,
+                "status": "ok",
+            },
+        ],
+    )
 
     bundle = prepare_debug_context(
         "abc12345",
@@ -47,11 +66,17 @@ def test_prepare_debug_context_exports_session_bundle(tmp_path):
     context = (output_dir / "debug_context.md").read_text(encoding="utf-8")
     source_files = (output_dir / "source_files.txt").read_text(encoding="utf-8")
     artifacts = json.loads((output_dir / "artifacts.json").read_text(encoding="utf-8"))
+    profile = json.loads((output_dir / "profile_summary.json").read_text(encoding="utf-8"))
     transcript = (output_dir / "transcript_excerpt.jsonl").read_text(encoding="utf-8")
 
     assert "should check stored position" in context
+    assert "Profile Summary" in context
+    assert "llm.agent_turn" in context
     assert "gently/app/tools/acquisition_tools.py" in source_files
     assert artifacts["session_id"] == "abc12345"
+    assert artifacts["profile_summary"]["span_count"] == 2
+    assert profile["duration_by_component_ms"]["llm"] == 1250.0
+    assert profile["slowest_spans"][0]["operation"] == "agent_turn"
     assert "acquire_volume" in transcript
 
 

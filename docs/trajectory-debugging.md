@@ -23,11 +23,29 @@ The command writes:
 - `artifacts.json`: artifact inventory and source-file hints.
 - `transcript_excerpt.jsonl`: compact tail records from event, decision,
   timeline, and interaction logs.
+- `profile_summary.json`: profiler span counts, duration by component, and
+  slowest spans when `profile.jsonl` or `profile_spans.jsonl` exists.
 - `source_files.txt`: source files inferred from tool calls in the logs.
+
+## Profiler Span Format
+
+Runtime profilers can write append-only JSONL records to either `profile.jsonl`
+or `profile_spans.jsonl` in the session directory. The exporter recognizes
+records with these fields:
+
+- `timestamp` or `start_time`
+- `component`, `subsystem`, `agent`, or `tool_name`
+- `operation`, `name`, `tool_name`, or `event`
+- `duration_ms`, `elapsed_ms`, `wall_ms`, or `duration_s`
+- optional `status` or `outcome`
+
+The schema is deliberately permissive so LLM calls, tool calls, hardware queue
+waits, perception steps, file I/O, and UI/WebSocket events can all be summarized
+without forcing them into one runtime dependency.
 
 ## Workflow
 
-1. Run or replay a copilot scenario until the behavior diverges from what was
+1. Run or replay a Gently agent scenario until the behavior diverges from what was
    expected.
 2. Export the debug bundle with an annotation describing the expected behavior.
 3. Give the bundle to a coding agent with access to the repo.

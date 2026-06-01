@@ -37,10 +37,12 @@ class DebugBundle:
     annotation: Optional[str]
     artifacts: List[ArtifactSummary] = field(default_factory=list)
     source_files: List[str] = field(default_factory=list)
+    profile_summary: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["artifacts"] = [asdict(artifact) for artifact in self.artifacts]
+        data["profile_summary"] = dict(self.profile_summary)
         return data
 
 
@@ -97,6 +99,7 @@ def prepare_debug_context(
     artifacts = collect_artifacts(session_dir, root_path=root_path, session_id=session_id)
     source_files = infer_relevant_source_files(session_dir, artifacts)
     transcript_records = collect_transcript_excerpt(artifacts, max_records=max_records)
+    profile_summary = summarize_profile_records(artifacts)
 
     bundle = DebugBundle(
         session_id=session_id,
@@ -105,6 +108,7 @@ def prepare_debug_context(
         annotation=annotation,
         artifacts=artifacts,
         source_files=source_files,
+        profile_summary=profile_summary,
     )
 
     (output_dir / "artifacts.json").write_text(
@@ -116,6 +120,10 @@ def prepare_debug_context(
         encoding="utf-8",
     )
     _write_jsonl(output_dir / "transcript_excerpt.jsonl", transcript_records)
+    (output_dir / "profile_summary.json").write_text(
+        json.dumps(profile_summary, indent=2),
+        encoding="utf-8",
+    )
     (output_dir / "debug_context.md").write_text(
         build_debug_prompt(bundle, transcript_records),
         encoding="utf-8",
@@ -135,6 +143,8 @@ def collect_artifacts(
         ("events", session_dir / "events.jsonl"),
         ("decisions", session_dir / "decisions.jsonl"),
         ("timeline", session_dir / "timeline.jsonl"),
+        ("profile", session_dir / "profile.jsonl"),
+        ("profile_spans", session_dir / "profile_spans.jsonl"),
         ("interaction_log", session_dir / "interaction_log.jsonl"),
     ]
     if root_path is not None and session_id:
@@ -165,6 +175,67 @@ def collect_transcript_excerpt(
         for record in _read_jsonl_tail(Path(artifact.path), per_file):
             records.append({"artifact": artifact.kind, "record": record})
     return records[-max_records:]
+
+
+def summarize_profile_records(
+    artifacts: Sequence[ArtifactSummary],
+    *,
+    max_records: int = 1000,
+    max_slowest: int = 10,
+) -> Dict[str, Any]:
+    """Summarize profiler span logs for the debug bundle."""
+    profile_kinds = {"profile", "profile_spans"}
+    spans: List[Dict[str, Any]] = []
+    duration_by_component: Dict[str, float] = {}
+
+    for artifact in artifacts:
+        if not artifact.exists or artifact.kind not in profile_kinds:
+            continue
+        for record in _read_jsonl_tail(Path(artifact.path), max_records):
+            if not isinstance(record, Mapping):
+                continue
+            component = str(
+                record.get("component")
+                or record.get("subsystem")
+                or record.get("agent")
+                or record.get("tool_name")
+                or "unknown"
+            )
+            operation = str(
+                record.get("operation")
+                or record.get("name")
+                or record.get("tool_name")
+                or record.get("event")
+                or "unknown"
+            )
+            duration_ms = _duration_ms(record)
+            span = {
+                "artifact": artifact.kind,
+                "timestamp": record.get("timestamp") or record.get("start_time"),
+                "component": component,
+                "operation": operation,
+                "duration_ms": duration_ms,
+                "status": record.get("status") or record.get("outcome"),
+            }
+            spans.append(span)
+            if duration_ms is not None:
+                duration_by_component[component] = (
+                    duration_by_component.get(component, 0.0) + duration_ms
+                )
+
+    slowest = sorted(
+        [span for span in spans if span["duration_ms"] is not None],
+        key=lambda span: span["duration_ms"],
+        reverse=True,
+    )[:max_slowest]
+    return {
+        "span_count": len(spans),
+        "duration_by_component_ms": {
+            component: round(duration, 3)
+            for component, duration in sorted(duration_by_component.items())
+        },
+        "slowest_spans": slowest,
+    }
 
 
 def infer_relevant_source_files(
@@ -270,6 +341,10 @@ def build_debug_prompt(
             "",
             f"`transcript_excerpt.jsonl` contains {len(transcript_records)} compact records.",
             "",
+            "## Profile Summary",
+            "",
+            _format_profile_summary(bundle.profile_summary),
+            "",
             "## Suggested Debugging Output",
             "",
             "1. Root cause.",
@@ -333,6 +408,45 @@ def _find_tool_names(value: Any) -> Set[str]:
         for item in value:
             names.update(_find_tool_names(item))
     return names
+
+
+def _duration_ms(record: Mapping[str, Any]) -> Optional[float]:
+    for key in ("duration_ms", "elapsed_ms", "wall_ms"):
+        if key in record and record[key] is not None:
+            try:
+                return round(float(record[key]), 3)
+            except (TypeError, ValueError):
+                return None
+    if "duration_s" in record and record["duration_s"] is not None:
+        try:
+            return round(float(record["duration_s"]) * 1000.0, 3)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _format_profile_summary(summary: Mapping[str, Any]) -> str:
+    if not summary or not summary.get("span_count"):
+        return "No profiler spans were found."
+
+    lines = [f"Profiler spans: {summary.get('span_count')}"]
+    durations = summary.get("duration_by_component_ms") or {}
+    if durations:
+        lines.append("")
+        lines.append("Duration by component:")
+        for component, duration in durations.items():
+            lines.append(f"- {component}: {duration} ms")
+
+    slowest = summary.get("slowest_spans") or []
+    if slowest:
+        lines.append("")
+        lines.append("Slowest spans:")
+        for span in slowest[:5]:
+            lines.append(
+                f"- {span.get('component')}.{span.get('operation')}: "
+                f"{span.get('duration_ms')} ms"
+            )
+    return "\n".join(lines)
 
 
 def _write_jsonl(path: Path, records: Iterable[Mapping[str, Any]]) -> None:
