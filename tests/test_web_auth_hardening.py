@@ -1,10 +1,12 @@
 import base64
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from fastapi.templating import Jinja2Templates
 
 from gently.ui.web.accounts import AccountStore, set_account_store
 from gently.ui.web.auth import Role, SESSION_COOKIE, resolve_role
@@ -13,6 +15,11 @@ from gently.ui.web.routes.auth_routes import create_router as create_auth_router
 from gently.ui.web.routes.volumes import create_router as create_volumes_router
 from gently.ui.web.routes.websocket import _ws_can_control
 from gently.ui.web.upload_validation import decode_array_payload
+
+
+TEMPLATES = Jinja2Templates(
+    directory=str(Path(__file__).parents[1] / "gently" / "ui" / "web" / "templates")
+)
 
 
 class _Client:
@@ -78,6 +85,17 @@ def test_account_store_manages_roles_passwords_and_deletes(tmp_path):
         store.delete_user("admin")
 
 
+def test_account_store_rejects_duplicate_users(tmp_path):
+    store = AccountStore(tmp_path / "auth")
+    store.create_user("admin", "pw", role="admin")
+
+    with pytest.raises(ValueError, match="already exists"):
+        store.create_user("admin", "new-pw", role="viewer")
+
+    assert store.verify_password("admin", "pw") == "admin"
+    assert store.verify_password("admin", "new-pw") is None
+
+
 def test_admin_api_lists_updates_and_deletes_users(tmp_path):
     store = AccountStore(tmp_path / "auth")
     store.create_user("admin", "pw", role="admin")
@@ -104,6 +122,32 @@ def test_admin_api_lists_updates_and_deletes_users(tmp_path):
     resp = client.delete("/api/auth/users/viewer")
     assert resp.status_code == 200
     assert store.get_role("viewer") is None
+
+
+def test_admin_users_page_requires_admin_account(tmp_path):
+    store = AccountStore(tmp_path / "auth")
+    store.create_user("admin", "pw", role="admin")
+    store.create_user("viewer", "pw", role="viewer")
+    set_account_store(store)
+
+    app = FastAPI()
+    app.include_router(create_auth_router(SimpleNamespace(templates=TEMPLATES)))
+
+    anonymous = TestClient(app)
+    resp = anonymous.get("/admin/users", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/login"
+
+    viewer = TestClient(app)
+    viewer.cookies.set(SESSION_COOKIE, store.issue_session("viewer"))
+    assert viewer.get("/admin/users").status_code == 403
+
+    admin = TestClient(app)
+    admin.cookies.set(SESSION_COOKIE, store.issue_session("admin"))
+    resp = admin.get("/admin/users")
+    assert resp.status_code == 200
+    assert "User accounts" in resp.text
+    assert "admin-users-app" in resp.text
 
 
 def test_image_push_requires_control(monkeypatch):

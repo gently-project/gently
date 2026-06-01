@@ -106,6 +106,8 @@ class AccountStore:
         username = (username or "").strip()
         if not username:
             raise ValueError("username required")
+        if username in self._users:
+            raise ValueError(f"user already exists: {username}")
         if role not in ROLES:
             raise ValueError(f"role must be one of {ROLES}")
         salt = secrets.token_bytes(16)

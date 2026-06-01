@@ -40,7 +40,23 @@ def create_router(server) -> APIRouter:
             return RedirectResponse("/", status_code=302)
         if current_username(request):
             return RedirectResponse("/", status_code=302)
-        return server.templates.TemplateResponse("login.html", {"request": request})
+        return server.templates.TemplateResponse(request, "login.html")
+
+    @router.get("/admin/users", response_class=HTMLResponse)
+    async def admin_users_page(request: Request):
+        store = get_account_store()
+        if store is None or not store.has_users():
+            return RedirectResponse("/", status_code=302)
+        requester = current_username(request)
+        if not requester:
+            return RedirectResponse("/login", status_code=302)
+        if store.get_role(requester) != "admin":
+            return HTMLResponse("Forbidden", status_code=403)
+        return server.templates.TemplateResponse(
+            request,
+            "admin_users.html",
+            {"username": requester},
+        )
 
     @router.post("/api/auth/login")
     async def login(request: Request):

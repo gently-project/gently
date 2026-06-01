@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gently - Users</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <script>
+        const savedTheme = localStorage.getItem('gently-theme') || 'dark';
+        document.body.setAttribute('data-theme', savedTheme);
+    </script>
+
+    {% include '_header.html' %}
+
+    <main class="admin-users-page" id="admin-users-app" data-current-user="{{ username }}">
+        <section class="admin-users-shell">
+            <div class="admin-users-head">
+                <div>
+                    <h1>User accounts</h1>
+                    <p class="admin-users-subtitle">Viewer, operator, and admin access for this Gently instance.</p>
+                </div>
+                <span class="admin-users-status" id="admin-users-status" aria-live="polite"></span>
+            </div>
+
+            <form class="admin-user-create" id="admin-user-create">
+                <label>
+                    <span>Username</span>
+                    <input class="settings-input" type="text" name="username" autocomplete="username" required>
+                </label>
+                <label>
+                    <span>Password</span>
+                    <input class="settings-input" type="password" name="password" autocomplete="new-password" required>
+                </label>
+                <label>
+                    <span>Role</span>
+                    <select class="settings-input" name="role">
+                        <option value="viewer">Viewer</option>
+                        <option value="operator">Operator</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </label>
+                <button class="admin-primary-btn" type="submit">Create user</button>
+            </form>
+
+            <div class="admin-users-table-wrap">
+                <table class="admin-users-table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Password reset</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-users-tbody">
+                        <tr>
+                            <td colspan="4" class="admin-users-empty">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/js/admin-users.js"></script>
+</body>
+</html>

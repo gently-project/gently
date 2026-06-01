@@ -1525,6 +1525,205 @@ a.tab-link.active {
     font-family: monospace;
 }
 
+/* Admin users */
+.admin-users-page {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 1.5rem;
+    background: var(--bg-dark);
+}
+
+.admin-users-shell {
+    max-width: 1120px;
+    margin: 0 auto;
+}
+
+.admin-users-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.admin-users-head h1 {
+    margin: 0;
+    color: var(--accent);
+    font-size: 1.25rem;
+}
+
+.admin-users-subtitle {
+    margin-top: 0.25rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.admin-users-status {
+    min-height: 1.2rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: right;
+}
+
+.admin-users-status[data-tone="ok"] {
+    color: var(--accent-green);
+}
+
+.admin-users-status[data-tone="error"] {
+    color: var(--accent-orange);
+}
+
+.admin-user-create {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr) minmax(130px, 160px) auto;
+    gap: 0.75rem;
+    align-items: end;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+}
+
+.admin-user-create label,
+.admin-password-reset {
+    display: flex;
+    gap: 0.45rem;
+}
+
+.admin-user-create label {
+    flex-direction: column;
+}
+
+.admin-user-create span {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+}
+
+.admin-primary-btn,
+.admin-secondary-btn,
+.admin-danger-btn {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.45rem 0.75rem;
+    color: var(--text);
+    background: var(--bg-hover);
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.admin-primary-btn {
+    color: #fff;
+    border-color: var(--accent);
+    background: var(--accent);
+}
+
+.admin-secondary-btn:hover,
+.admin-danger-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+.admin-danger-btn {
+    color: var(--accent-orange);
+}
+
+.admin-danger-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.admin-users-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+}
+
+.admin-users-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.admin-users-table th,
+.admin-users-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.admin-users-table th {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: var(--bg-dark);
+}
+
+.admin-users-table tr:last-child td {
+    border-bottom: none;
+}
+
+.admin-users-name {
+    font-weight: 600;
+}
+
+.admin-current-user {
+    display: inline-flex;
+    margin-left: 0.5rem;
+    padding: 0.12rem 0.35rem;
+    border-radius: 4px;
+    color: var(--accent-green);
+    background: rgba(74, 222, 128, 0.12);
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.admin-password-reset {
+    align-items: center;
+}
+
+.admin-password-reset .settings-input {
+    min-width: 180px;
+}
+
+.admin-role-select {
+    min-width: 130px;
+}
+
+.admin-users-actions {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.admin-users-empty {
+    color: var(--text-muted);
+    text-align: center;
+}
+
+@media (max-width: 800px) {
+    .admin-users-page {
+        padding: 1rem;
+    }
+    .admin-users-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .admin-user-create {
+        grid-template-columns: 1fr;
+    }
+    .admin-password-reset {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
 /* ===================================================================
  * Calibration → Profile v2 — metrics-first 2x2 layout
  * =================================================================== */
