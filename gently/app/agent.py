@@ -997,8 +997,10 @@ class MicroscopyAgent:
         Runs through the normal streaming pipeline (so it acquires the turn-lock
         and is recorded to conversation history / auto-saved). Brackets the turn
         with an 'autonomous_start' (carrying the wake trigger) and a synthesized
-        'stream_end' so it streams to the web chat distinctly. Sets
-        _autonomous_active so the registry backstop refuses irreversible tools.
+        'stream_end' so it streams to the web chat distinctly. Passes
+        autonomous=True to handle_message_stream, which sets _autonomous_active
+        after acquiring the turn-lock so the registry backstop refuses
+        irreversible tools only while this turn holds the lock.
         When interactive (ASK mode) a choice_request round-trips through the
         operator; otherwise it is auto-cancelled. Run mode only.
         """
@@ -1043,8 +1045,9 @@ class MicroscopyAgent:
             logger.exception("run_wake_turn error")
         finally:
             try:
-                # Closing the generator triggers handle_message_stream's finally,
-                # which resets _autonomous_active and releases the turn-lock.
+                # If the lock was acquired, closing the generator triggers
+                # handle_message_stream's finally, resetting _autonomous_active
+                # and releasing the turn-lock.
                 await agen.aclose()
             except Exception:
                 pass
