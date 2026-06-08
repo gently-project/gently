@@ -425,6 +425,8 @@ class ToolRegistry:
         else:
             exec_context = self._context
 
+        start_time = time.time()
+
         # Hybrid-autonomy backstop: during an autonomous (wake) turn, a small set
         # of irreversible tools (laser-on, embryo termination, stopping the run)
         # must NEVER execute without a human — even if the model tries to call
@@ -436,6 +438,7 @@ class ToolRegistry:
             blocked = getattr(_agent, '_autonomous_blocked_tools', None) or ()
             if tool_name in blocked:
                 logger.info("Autonomy backstop blocked '%s' (irreversible)", tool_name)
+                _record_tool_span(exec_context, tool, start_time, "blocked")
                 return (f"'{tool_name}' is an irreversible action and cannot run "
                         f"autonomously. Ask the operator to confirm it.")
 
@@ -443,9 +446,8 @@ class ToolRegistry:
         if tool.requires_microscope:
             client = exec_context.get('client')
             if client is None:
+                _record_tool_span(exec_context, tool, start_time, "missing_microscope")
                 return "Error: Not connected to microscope server. Start the server and reconnect."
-
-        start_time = time.time()
 
         try:
             # Prepare arguments
@@ -464,12 +466,14 @@ class ToolRegistry:
 
             duration = time.time() - start_time
             logger.debug(f"Tool {tool_name} executed in {duration:.2f}s")
+            _record_tool_span(exec_context, tool, start_time, "ok")
 
             return result
 
         except Exception as e:
             import traceback
             logger.error(f"Tool {tool_name} failed: {e}")
+            _record_tool_span(exec_context, tool, start_time, "error", error=str(e))
             return f"Error executing {tool_name}: {str(e)}\n{traceback.format_exc()}"
 
     def __contains__(self, name: str) -> bool:
@@ -477,6 +481,37 @@ class ToolRegistry:
 
     def __len__(self) -> int:
         return len(self._tools)
+
+
+def _record_tool_span(
+    context: Dict[str, Any],
+    tool: ToolDefinition,
+    start_time: float,
+    status: str,
+    *,
+    error: Optional[str] = None,
+) -> None:
+    """Record one best-effort tool-call profiler span."""
+    try:
+        from gently.debug.profiler import record_profile_span
+
+        metadata = {
+            "tool_name": tool.name,
+            "category": tool.category.name.lower(),
+            "requires_microscope": tool.requires_microscope,
+        }
+        if error:
+            metadata["error"] = error
+        record_profile_span(
+            context,
+            component="tool",
+            operation=tool.name,
+            duration_ms=(time.time() - start_time) * 1000.0,
+            status=status,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("failed to record tool profiler span", exc_info=True)
 
 
 # Global registry instance
