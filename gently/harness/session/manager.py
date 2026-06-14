@@ -82,13 +82,18 @@ class SessionManager:
             embryo_states = experiment_data.get('embryos', {})
 
             for embryo_id, embryo_data in embryo_states.items():
-                pos = embryo_data.get('stage_position', {})
+                position_coarse = embryo_data.get('position_coarse')
+                position_fine = embryo_data.get('position_fine')
+                if position_coarse is None and position_fine is None:
+                    position_coarse = embryo_data.get('stage_position', {})
                 experiment.add_embryo(
                     embryo_id=embryo_id,
-                    position=pos,
+                    position=position_coarse or {},
+                    position_fine=position_fine or {},
                     calibration=embryo_data.get('calibration', {}),
                     user_label=embryo_data.get('user_label'),
                     uid=embryo_data.get('uid'),
+                    role=embryo_data.get('role', 'test'),
                 )
                 embryo = experiment.embryos[embryo_id]
                 embryo.nickname = embryo_data.get('nickname')
@@ -107,12 +112,22 @@ class SessionManager:
         store_embryos = self.store.list_embryos(session_id)
         for e in store_embryos:
             eid = e['embryo_id']
-            if eid not in experiment.embryos:
+            calibration = e.get('calibration') or {}
+            if isinstance(calibration, str):
+                calibration = json.loads(calibration) if calibration else {}
+            if eid in experiment.embryos:
+                embryo = experiment.embryos[eid]
+                if e.get('position_coarse') is not None:
+                    embryo.position_coarse = e.get('position_coarse') or {}
+                if e.get('position_fine') is not None:
+                    embryo.position_fine = e.get('position_fine') or {}
+            else:
                 experiment.add_embryo(
                     embryo_id=eid,
                     position=e.get('position_coarse') or {},
                     position_fine=e.get('position_fine') or {},
-                    calibration=json.loads(e['calibration']) if e.get('calibration') else {},
+                    calibration=calibration,
+                    role=e.get('role', 'test'),
                 )
 
         self.store.touch_session(session_id)
@@ -171,14 +186,14 @@ class SessionManager:
     def _sync_embryos_to_db(self, experiment):
         """Sync in-memory embryo state (positions, calibration) to the DB."""
         for embryo_id, embryo in experiment.embryos.items():
-            pos = embryo.stage_position or {}
             self.store.register_embryo(
                 self._session_id, embryo_id,
                 embryo_uid=getattr(embryo, 'uid', None),
                 nickname=getattr(embryo, 'user_label', None),
-                position_x=pos.get('x'),
-                position_y=pos.get('y'),
+                position_coarse=getattr(embryo, 'position_coarse', None) or {},
+                position_fine=getattr(embryo, 'position_fine', None) or {},
                 calibration=embryo.calibration,
+                role=getattr(embryo, 'role', None),
             )
 
     def list_sessions(self) -> List[Dict]:

@@ -17,6 +17,47 @@ from ..settings import settings
 logger = logging.getLogger(__name__)
 
 
+_TEXT_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_text_tool_calls(text: str) -> tuple[str, List[Dict[str, Any]]]:
+    """Extract JSON tool calls embedded in text fallback tags.
+
+    Some model/test harness paths may emit a tool request as text instead of
+    structured ``tool_use`` blocks.  Keep parsing permissive, but only return
+    well-formed objects that name a tool.
+    """
+    if not text:
+        return text, []
+
+    calls: List[Dict[str, Any]] = []
+
+    def _remove_or_collect(match: re.Match) -> str:
+        try:
+            payload = json.loads(match.group(1).strip())
+        except (TypeError, json.JSONDecodeError):
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        name = payload.get("name")
+        if not name:
+            return ""
+        tool_input = payload.get("input")
+        if tool_input is None:
+            tool_input = payload.get("arguments", {})
+        if tool_input is None:
+            tool_input = {}
+        calls.append({
+            "name": name,
+            "input": tool_input,
+            "id": payload.get("id"),
+        })
+        return ""
+
+    cleaned = _TEXT_TOOL_CALL_RE.sub(_remove_or_collect, text)
+    return cleaned, calls
+
+
 def _extend_tool_calls(out: List[Dict[str, Any]], content_blocks) -> None:
     """Append every tool_use block in content_blocks to out.
 

@@ -6,6 +6,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from gently.harness.session.manager import SessionManager
+from gently.harness.state import ExperimentState
 
 
 # ===========================================================================
@@ -159,3 +160,45 @@ class TestSessionLifecycle:
         mgr.store.save_session_snapshot.side_effect = Exception("DB error")
         # Should not raise
         mgr.auto_save(MagicMock(), [], "prompt")
+
+    def test_sync_embryos_preserves_coarse_and_fine_positions(self):
+        mgr = self._make_manager()
+        mgr._session_id = "s1"
+        experiment = ExperimentState()
+        experiment.add_embryo(
+            "e1",
+            position={"x": 1.0, "y": 2.0},
+            position_fine={"x": 1.5, "y": 2.5},
+        )
+
+        mgr._sync_embryos_to_db(experiment)
+
+        kwargs = mgr.store.register_embryo.call_args.kwargs
+        assert kwargs["position_coarse"] == {"x": 1.0, "y": 2.0}
+        assert kwargs["position_fine"] == {"x": 1.5, "y": 2.5}
+
+    def test_resume_snapshot_preserves_coarse_and_fine_positions(self):
+        mgr = self._make_manager()
+        mgr.store.get_session.return_value = {"session_id": "s1"}
+        mgr.store.load_session_snapshot.return_value = {
+            "conversation_history": [],
+            "experiment_data": {
+                "embryos": {
+                    "e1": {
+                        "position_coarse": {"x": 1.0, "y": 2.0},
+                        "position_fine": {"x": 1.5, "y": 2.5},
+                        "calibration": {},
+                        "role": "test",
+                    }
+                }
+            },
+        }
+        mgr.store.list_embryos.return_value = []
+        experiment = ExperimentState()
+
+        ok, _ = mgr._resume_session("s1", experiment)
+
+        assert ok is True
+        embryo = experiment.embryos["e1"]
+        assert embryo.position_coarse == {"x": 1.0, "y": 2.0}
+        assert embryo.position_fine == {"x": 1.5, "y": 2.5}

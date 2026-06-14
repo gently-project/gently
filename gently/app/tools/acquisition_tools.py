@@ -105,10 +105,10 @@ async def acquire_volume(
             if agent.store and agent.session_id:
                 try:
                     from pathlib import Path as _Path
-                    pos = embryo.stage_position or {}
                     agent.store.register_embryo(
                         agent.session_id, embryo_id,
-                        position_x=pos.get('x'), position_y=pos.get('y'),
+                        position_coarse=embryo.position_coarse or {},
+                        position_fine=embryo.position_fine or {},
                         calibration=embryo.calibration,
                         role=embryo.role,
                     )
