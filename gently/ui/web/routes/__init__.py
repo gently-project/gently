@@ -13,11 +13,11 @@ from .chat import create_router as create_chat_router
 from .context import create_router as create_context_router
 from .data import create_router as create_data_router
 from .experiments import create_router as create_experiments_router
-from .temperature import create_router as create_temperature_router
 from .images import create_router as create_images_router
 from .notebook import create_router as create_notebook_router
 from .pages import create_router as create_pages_router
 from .sessions import create_router as create_sessions_router
+from .temperature import create_router as create_temperature_router
 from .volumes import create_router as create_volumes_router
 from .websocket import create_router as create_websocket_router
 
