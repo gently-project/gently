@@ -1014,9 +1014,7 @@ class DiSPIMMicroscope(Microscope):
                     except Exception as exc:
                         logger.warning("Malformed lightsheet SSE payload skipped: %s", exc)
 
-    async def set_lightsheet_live_params(
-        self, galvo=None, piezo=None, exposure=None
-    ) -> dict:
+    async def set_lightsheet_live_params(self, galvo=None, piezo=None, exposure=None) -> dict:
         """POST live galvo/piezo/exposure to the device-layer lightsheet streamer."""
         body = {}
         if galvo is not None:
