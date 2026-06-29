@@ -171,14 +171,14 @@ class DeviceLayerServer(Service):
         # Lightsheet (SPIM) live stream — continuous sequence acquisition.
         self._ls_subscribers: list[asyncio.Queue] = []
         self._ls_task: asyncio.Task | None = None
-        self._ls_interval_sec: float = 0.0          # peek as fast as exposure allows
+        self._ls_interval_sec: float = 0.0  # peek as fast as exposure allows
         self._ls_target_max_dim: int = 512
         self._ls_jpeg_quality: int = 70
         self._ls_params: dict = {"galvo": 0.0, "piezo": 50.0, "exposure": 20.0}
         self._ls_seq_started: bool = False
-        self._ls_applied: dict = {}                  # last-applied galvo/piezo/exposure
-        self._ls_parked: dict = {}                   # last-parked galvo/piezo setPosition values
-        self._ls_spim_idle: bool = False             # whether SPIM state machine was set Idle this session
+        self._ls_applied: dict = {}  # last-applied galvo/piezo/exposure
+        self._ls_parked: dict = {}  # last-parked galvo/piezo setPosition values
+        self._ls_spim_idle: bool = False  # whether SPIM state machine was set Idle this session
 
         # Plans that hold MMCore for long performance-critical work.
         # Anything in this set runs with state polling paused.
@@ -1022,10 +1022,7 @@ class DeviceLayerServer(Service):
         if cam is None:
             raise RuntimeError("No lightsheet camera configured")
         p = self._ls_params
-        need_restart = (
-            not self._ls_seq_started
-            or self._ls_applied.get("exposure") != p["exposure"]
-        )
+        need_restart = not self._ls_seq_started or self._ls_applied.get("exposure") != p["exposure"]
         if need_restart:
             if core.isSequenceRunning():
                 core.stopSequenceAcquisition()
@@ -1039,8 +1036,8 @@ class DeviceLayerServer(Service):
     def _grab_lightsheet_frame_sync(self):
         """Park → ensure sequence running → peek the latest frame (never drain)."""
         try:
-            self._park_lightsheet_sync()                  # galvo/piezo applied live
-            self._ensure_lightsheet_sequence_sync()       # start / restart on exposure
+            self._park_lightsheet_sync()  # galvo/piezo applied live
+            self._ensure_lightsheet_sequence_sync()  # start / restart on exposure
             try:
                 from gently.hardware.dispim.devices.acquisition import _safe_obtain
             except (ImportError, AttributeError):
@@ -1083,7 +1080,9 @@ class DeviceLayerServer(Service):
                 tick = time.monotonic()
                 img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
                 payload = (
-                    self._encode_frame_for_stream(img, self._ls_target_max_dim, self._ls_jpeg_quality)
+                    self._encode_frame_for_stream(
+                        img, self._ls_target_max_dim, self._ls_jpeg_quality
+                    )
                     if img is not None
                     else None
                 )
