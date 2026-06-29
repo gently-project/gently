@@ -638,9 +638,7 @@ class MicroscopyAgent:
                 store=self.store,
                 claude_client=self.claude,
                 temperature_provider=lambda: (
-                    self.temperature_sampler.latest
-                    if self.temperature_sampler
-                    else None
+                    self.temperature_sampler.latest if self.temperature_sampler else None
                 ),
             )
         except Exception as e:
