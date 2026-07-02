@@ -62,3 +62,24 @@ def test_ground_truth_route_requires_int_start():
         "/api/embryos/e1/ground_truth", json={"stage": "bean", "start_timepoint": "x"}
     )
     assert resp.status_code == 400
+
+
+def test_ground_truth_route_benchmark_no_agent_uses_server_store():
+    """No agent (launch_viz_server mode) → falls back to server.gently_store."""
+    from gently.ui.web.auth import require_control
+    from gently.ui.web.routes.data import create_router
+
+    store = MagicMock()
+    server = MagicMock()
+    server.agent_bridge = None          # benchmark mode: no agent bridge
+    server.gently_store = store
+    app = FastAPI()
+    app.include_router(create_router(server))
+    app.dependency_overrides[require_control] = lambda: None
+    client = TestClient(app)
+    resp = client.post(
+        "/api/embryos/e1/ground_truth",
+        json={"stage": "comma", "start_timepoint": 5, "session_id": "demo"},
+    )
+    assert resp.status_code == 200
+    store.set_ground_truth.assert_called_once_with("demo", "e1", "comma", 5, None, None, None)

@@ -3262,7 +3262,7 @@ const EmbryosManager = {
                         </div>
                     </div>
                 ` : ''}
-                ${detection.detected ? this.renderAgreeDisagreeButtons(detection, index) : ''}
+                ${detection.detected ? this.renderGroundTruthControl(detection, index) : ''}
             </div>
         `;
     },
@@ -3291,6 +3291,77 @@ const EmbryosManager = {
                 </button>
             </div>
         `;
+    },
+
+    // Ground-truth stage authoring (ELN annotation flywheel write path).
+    // Replaces the localStorage-only Agree/Disagree dead-end: the human confirms
+    // or corrects the model's stage call, persisted via POST /api/embryos/{id}/
+    // ground_truth so it feeds accuracy + the HuggingFace export.
+    GT_STAGES: ['early', 'bean', 'comma', '1.5fold', '2fold', '3fold', 'pretzel', 'hatching', 'hatched'],
+
+    renderGroundTruthControl(detection, index) {
+        const key = `${this.selectedEmbryoId}-${detection.timepoint}`;
+        const gt = this.groundTruths[key];
+        const predicted = detection.stage || detection.predicted_stage
+            || (detection.findings && detection.findings.stage) || '';
+        const chosen = gt ? gt.stage : predicted;
+        const opts = this.GT_STAGES.map(s =>
+            `<option value="${s}"${s === chosen ? ' selected' : ''}>${s}</option>`
+        ).join('');
+        const badge = gt
+            ? `<span class="gt-badge" title="Human ground truth${gt.annotator ? ' by ' + gt.annotator : ''}">&#x2714; GT: ${gt.stage}</span>`
+            : '';
+        return `
+            <div class="gt-actions" data-tooltip="Confirm or correct the model's stage as ground truth — this feeds accuracy + the training set">
+                <span class="gt-label">Ground truth</span>
+                <select class="gt-stage-select" id="gt-sel-${index}">${opts}</select>
+                <button class="gt-confirm-btn"
+                        onclick="event.stopPropagation(); EmbryosManager.markGroundTruth(${index}, ${detection.timepoint}, document.getElementById('gt-sel-${index}').value)">
+                    ${gt ? 'Update' : '&#x2714; Confirm'}
+                </button>
+                ${badge}
+            </div>
+        `;
+    },
+
+    async markGroundTruth(index, timepoint, stage) {
+        const embryoId = this.selectedEmbryoId;
+        if (!embryoId || timepoint == null || !stage) return;
+        const wrap = document.getElementById(`gt-sel-${index}`);
+        const container = wrap ? wrap.closest('.gt-actions') : null;
+        try {
+            const res = await fetch(`/api/embryos/${embryoId}/ground_truth`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stage,
+                    start_timepoint: timepoint,
+                    session_id: this.currentSessionId,
+                }),
+            });
+            if (res.status === 401 || res.status === 403) {
+                if (container) container.classList.add('gt-need-control');
+                return;
+            }
+            if (!res.ok) { console.debug('ground truth failed:', await res.text()); return; }
+            const data = await res.json();
+            this.groundTruths[`${embryoId}-${timepoint}`] = { stage: data.stage, annotator: data.annotator };
+            if (container) {
+                container.classList.remove('gt-need-control');
+                let badge = container.querySelector('.gt-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'gt-badge';
+                    container.appendChild(badge);
+                }
+                badge.innerHTML = `&#x2714; GT: ${data.stage}`;
+                badge.title = 'Human ground truth' + (data.annotator ? ' by ' + data.annotator : '');
+                const btn = container.querySelector('.gt-confirm-btn');
+                if (btn) btn.textContent = 'Update';
+                container.classList.add('gt-saved-flash');
+                setTimeout(() => container.classList.remove('gt-saved-flash'), 900);
+            }
+        } catch (err) { console.debug('ground truth failed:', err); }
     },
 
     // Render a verification event card for the reasoning panel
@@ -3383,6 +3454,7 @@ const EmbryosManager = {
 
     // Track user agreement/disagreement with detections
     detectionAgreements: {},  // key: "{detector}-{timepoint}" -> true/false
+    groundTruths: {},  // key: "{embryo}-{timepoint}" -> {stage, annotator} (persisted GT)
 
     markAgreement(detectorName, timepoint, agrees) {
         const key = `${detectorName}-${timepoint}`;

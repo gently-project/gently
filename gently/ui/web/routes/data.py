@@ -165,9 +165,21 @@ def create_router(server) -> APIRouter:
         localStorage-only Agree/Disagree dead-end. Range-based (start/end
         timepoint) so a stretch can be confirmed in one write.
         """
-        agent = _require_agent_with_experiment()
-        store = getattr(agent, "store", None)
-        if store is None or not hasattr(store, "set_ground_truth"):
+        # Annotation doesn't need the agent — resolve a store with
+        # set_ground_truth from the agent if present, else the viz's own store
+        # (benchmark / no-agent mode).
+        bridge = getattr(server, "agent_bridge", None)
+        agent = getattr(bridge, "agent", None) if bridge is not None else None
+        store = None
+        for cand in (
+            getattr(agent, "store", None),
+            getattr(server, "gently_store", None),
+            getattr(server, "store", None),
+        ):
+            if cand is not None and hasattr(cand, "set_ground_truth"):
+                store = cand
+                break
+        if store is None:
             raise HTTPException(status_code=503, detail="No ground-truth store available")
         session_id = body.get("session_id") or getattr(agent, "session_id", None)
         if not session_id:
