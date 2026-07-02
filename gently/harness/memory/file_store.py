@@ -136,6 +136,11 @@ class FileContextStore:
             "ml/pipelines",
             "ml/runs",
             "ml/assessments",
+            # ELN scientific spine (optional overlays)
+            "strains",
+            "experiments",
+            "hypotheses",
+            "results",
         ):
             (self.agent_dir / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -160,6 +165,70 @@ class FileContextStore:
     def _campaign_folder(self, campaign_id: str) -> Path | None:
         """Return the folder for a campaign, or None."""
         return self._campaign_index.get(campaign_id)
+
+    # ------------------------------------------------------------------
+    # Scientific spine — Strain (ELN, phase 1). Optional overlay: nothing in
+    # the existing flow requires a Strain record; bare strain strings still work.
+    # ------------------------------------------------------------------
+
+    def create_strain(
+        self,
+        name: str,
+        genotype: str | None = None,
+        markers: list | None = None,
+        background: str | None = None,
+        source_lab: str | None = None,
+        organism_ref: str | None = None,
+        stock: dict | None = None,
+        author: str | None = None,
+        strain_id: str | None = None,
+    ) -> str:
+        """Create (or overwrite by id) a Strain record at agent/strains/{id}.yaml."""
+        sid = strain_id or self._gen_id()
+        now = self._now()
+        data = {
+            "id": sid,
+            "name": name,
+            "genotype": genotype,
+            "markers": list(markers or []),
+            "background": background,
+            "source_lab": source_lab,
+            "organism_ref": organism_ref,
+            "stock": stock or {},
+            "author": author,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._write_yaml(self.agent_dir / "strains" / f"{sid}.yaml", data)
+        logger.info(f"Created strain {sid} [{name}]")
+        return sid
+
+    def get_strain(self, strain_id: str) -> dict | None:
+        p = self.agent_dir / "strains" / f"{strain_id}.yaml"
+        return self._read_yaml(p) if p.exists() else None
+
+    def list_strains(self) -> list[dict]:
+        d = self.agent_dir / "strains"
+        if not d.exists():
+            return []
+        return [s for s in (self._read_yaml(f) for f in sorted(d.glob("*.yaml"))) if s]
+
+    def resolve_strain(self, ref: str | None) -> dict | None:
+        """Resolve a strain by id or (case-insensitive) name.
+
+        Back-compat: a bare string that matches no record returns None, so
+        callers keep the raw string as a display value — no forced migration.
+        """
+        if not ref:
+            return None
+        byid = self.get_strain(ref)
+        if byid:
+            return byid
+        rl = str(ref).strip().lower()
+        for s in self.list_strains():
+            if str(s.get("name", "")).strip().lower() == rl:
+                return s
+        return None
 
     # ------------------------------------------------------------------
     # Helpers
