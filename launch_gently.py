@@ -232,6 +232,7 @@ async def main(
     no_browser: bool = False,
     no_api: bool = False,
     no_auth: bool = False,
+    seed: bool = False,
 ):
     # Set up log file in storage directory
     # Unified with FileStore: logs live under the same root as data
@@ -546,6 +547,20 @@ async def main(
 
     agent_dir = storage_dir / "agent"
     context_store = FileContextStore(agent_dir)
+    # Optionally seed real research programs into an empty store so a fresh boot
+    # has real notebook content (Campaign/Strain/Experiment/Hypothesis) to work with.
+    if seed:
+        try:
+            from gently.eln.seed_loader import load_seed_dir
+
+            if not context_store.get_root_campaigns(status=None):
+                seed_dir = Path(__file__).resolve().parent / "seed" / "programs"
+                loaded = load_seed_dir(context_store, seed_dir)
+                logger.info("Seeded %d research programs from %s", len(loaded), seed_dir)
+            else:
+                logger.info("--seed: store already has campaigns; skipping seed load")
+        except Exception:
+            logger.exception("seed load failed")
     agent.set_context_store(context_store)
     bridge.init_wizard(context_store=context_store, claude_client=agent.claude)
 
@@ -665,6 +680,11 @@ def cli_main():
         action="store_true",
         help="Do not auto-open the web UI in a browser",
     )
+    parser.add_argument(
+        "--seed",
+        action="store_true",
+        help="Load the bundled seed research programs into the store if it has no campaigns",
+    )
     args = parser.parse_args()
 
     # An API key is required unless running in UI-only mode.
@@ -698,6 +718,7 @@ def cli_main():
                 no_browser=args.no_browser,
                 no_api=args.no_api,
                 no_auth=args.no_auth,
+                seed=args.seed,
             )
         )
     except (KeyboardInterrupt, RuntimeError, SystemExit):
