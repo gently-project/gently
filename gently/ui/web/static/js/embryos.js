@@ -3343,7 +3343,22 @@ const EmbryosManager = {
                 if (container) container.classList.add('gt-need-control');
                 return;
             }
-            if (!res.ok) { console.debug('ground truth failed:', await res.text()); return; }
+            if (!res.ok) {
+                console.debug('ground truth failed:', await res.text());
+                if (container) {
+                    container.classList.add('gt-need-control');
+                    const btn = container.querySelector('.gt-confirm-btn');
+                    if (btn) {
+                        const prev = btn.textContent;
+                        btn.textContent = 'Save failed';
+                        setTimeout(() => {
+                            btn.textContent = prev;
+                            container.classList.remove('gt-need-control');
+                        }, 1800);
+                    }
+                }
+                return;
+            }
             const data = await res.json();
             this.groundTruths[`${embryoId}-${timepoint}`] = { stage: data.stage, annotator: data.annotator };
             if (container) {
