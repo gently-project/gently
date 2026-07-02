@@ -4084,6 +4084,28 @@ kbd {
     border-right: 1px solid var(--border);
 }
 
+.vitals-hf {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+}
+.vitals-annic { font-size: 0.62rem; color: var(--text-muted); text-align: center; }
+.vitals-hf-btn {
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: rgba(96, 165, 250, 0.1);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.vitals-hf-btn:hover:not(:disabled) { background: rgba(96, 165, 250, 0.2); }
+.vitals-hf-btn:disabled { opacity: 0.5; cursor: default; }
+
 .vitals-name {
     font-weight: 700;
     font-size: 1rem;

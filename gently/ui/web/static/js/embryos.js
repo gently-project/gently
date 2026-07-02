@@ -800,6 +800,9 @@ const EmbryosManager = {
         html += '<div class="vitals-detail" id="vitals-detail"></div>';
         container.innerHTML = html;
 
+        // Lazy-load per-embryo annotation counts for the Push-to-HF affordance.
+        this._loadHfSummaries(container);
+
         // Click handlers on SVG data points
         container.querySelectorAll('.vitals-point').forEach(pt => {
             pt.addEventListener('click', (e) => {
@@ -952,10 +955,60 @@ const EmbryosManager = {
                     <span class="vitals-rate">${rate}</span>
                     <span class="vitals-eta">${eta}</span>
                     ${statusBadge}
+                    <span class="vitals-hf">
+                        <span class="vitals-annic" id="hf-count-${embryo.embryoId}">…</span>
+                        <button class="vitals-hf-btn"
+                                onclick="event.stopPropagation(); EmbryosManager.pushEmbryoToHf('${embryo.embryoId}')"
+                                title="Push this embryo's annotated timelapse to HuggingFace">Push to HF</button>
+                    </span>
                 </div>
                 <div class="vitals-chart-container">${svg}</div>
             </div>
         `;
+    },
+
+    // ── Per-embryo HuggingFace push (annotation flywheel terminal step) ──────
+    async _loadHfSummaries(container) {
+        const sid = this.currentSessionId || '';
+        const q = sid ? `?session_id=${encodeURIComponent(sid)}` : '';
+        for (const span of container.querySelectorAll('.vitals-annic')) {
+            const eid = span.id.replace('hf-count-', '');
+            try {
+                const res = await fetch(`/api/embryos/${eid}/annotation-summary${q}`);
+                if (!res.ok) continue;
+                const d = await res.json();
+                span.textContent = `${d.n_annotated}/${d.n_predictions} annotated`;
+                const btn = span.parentElement.querySelector('.vitals-hf-btn');
+                if (btn && !d.n_annotated) { btn.disabled = true; btn.title = 'No ground-truth annotations yet'; }
+            } catch (e) { /* leave placeholder */ }
+        }
+    },
+
+    async pushEmbryoToHf(embryoId) {
+        if (!window.confirm(
+            `Push ${embryoId}'s annotated timelapse to HuggingFace?\n` +
+            `(pskeshu/gently-perception-benchmark — this publishes the human ground truth + predictions.)`
+        )) return;
+        const span = document.getElementById(`hf-count-${embryoId}`);
+        const btn = span ? span.parentElement.querySelector('.vitals-hf-btn') : null;
+        const reset = (msg) => {
+            if (!btn) return;
+            btn.textContent = msg;
+            setTimeout(() => { btn.textContent = 'Push to HF'; btn.disabled = false; }, 2600);
+        };
+        if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
+        try {
+            const res = await fetch(`/api/embryos/${embryoId}/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true, session_id: this.currentSessionId }),
+            });
+            if (res.status === 401 || res.status === 403) return reset('Log in');
+            if (res.status === 503) return reset('Set HF_TOKEN');
+            if (!res.ok) { console.debug('hf export failed:', await res.text()); return reset('Failed'); }
+            const d = await res.json();
+            reset(`Pushed ${d.n} ✓`);
+        } catch (e) { console.debug('hf export error:', e); reset('Failed'); }
     },
 
     // Header panel collapse state
