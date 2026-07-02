@@ -150,6 +150,57 @@ def create_router(server) -> APIRouter:
                 logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
         return emb.to_dict()
 
+    @router.post(
+        "/api/embryos/{embryo_id}/ground_truth", dependencies=[Depends(require_control)]
+    )
+    async def set_embryo_ground_truth(
+        embryo_id: str,
+        body: dict = Body(...),  # noqa: B008
+    ):
+        """Author a ground-truth stage annotation over a timepoint range.
+
+        The ELN annotation flywheel's write path: the human (or agent-assisted
+        batch-confirm) corrects/confirms the model's stage call, persisted via
+        FileStore.set_ground_truth with annotator provenance — replacing the old
+        localStorage-only Agree/Disagree dead-end. Range-based (start/end
+        timepoint) so a stretch can be confirmed in one write.
+        """
+        agent = _require_agent_with_experiment()
+        store = getattr(agent, "store", None)
+        if store is None or not hasattr(store, "set_ground_truth"):
+            raise HTTPException(status_code=503, detail="No ground-truth store available")
+        session_id = body.get("session_id") or getattr(agent, "session_id", None)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No active session for ground truth")
+        stage = body.get("stage")
+        if not stage:
+            raise HTTPException(status_code=400, detail="Body needs a stage")
+        try:
+            start_tp = int(body.get("start_timepoint"))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="Body needs an integer start_timepoint"
+            ) from None
+        end_raw = body.get("end_timepoint")
+        try:
+            end_tp = int(end_raw) if end_raw is not None else None
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="end_timepoint must be an integer or null"
+            ) from None
+        store.set_ground_truth(
+            session_id, embryo_id, stage, start_tp, end_tp, body.get("annotator"), body.get("notes")
+        )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "embryo_id": embryo_id,
+            "stage": stage,
+            "start_timepoint": start_tp,
+            "end_timepoint": end_tp,
+            "annotator": body.get("annotator"),
+        }
+
     @router.delete("/api/embryos/{embryo_id}", dependencies=[Depends(require_control)])
     async def delete_embryo(embryo_id: str):
         """Remove an embryo from the experiment.
