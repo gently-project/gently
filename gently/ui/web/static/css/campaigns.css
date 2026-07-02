@@ -1687,3 +1687,49 @@
     }
     a { color: inherit; }
 }
+
+/* ── ELN scientific spine (experiments × arms × strains × hypotheses) ── */
+.eln-section { margin-top: 28px; }
+.eln-block-title {
+    font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-muted); margin: 20px 0 10px; display: flex; align-items: center; gap: 8px;
+}
+.eln-count {
+    font-size: 0.7rem; font-weight: 600; color: var(--accent);
+    background: rgba(96,165,250,0.12); border-radius: 999px; padding: 1px 8px;
+}
+.eln-strains { display: flex; flex-wrap: wrap; gap: 8px; }
+.eln-strain-chip {
+    display: inline-flex; flex-direction: column; gap: 1px;
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card);
+}
+.eln-strain-name { font-weight: 600; font-size: 0.82rem; color: var(--text); }
+.eln-strain-geno { font-size: 0.72rem; color: var(--text-muted); font-family: ui-monospace, monospace; }
+.eln-experiment {
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
+    margin-bottom: 12px; background: var(--bg-card);
+}
+.eln-exp-title { font-weight: 600; font-size: 0.9rem; color: var(--text); margin-bottom: 10px; }
+.eln-arms { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.eln-arm {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+    padding: 6px 10px; border-radius: 6px; background: var(--bg-hover); border-left: 3px solid var(--accent);
+}
+.eln-arm-control { border-left-color: var(--text-muted); }
+.eln-arm-name { font-weight: 600; font-size: 0.8rem; color: var(--text); min-width: 90px; }
+.eln-arm-strain {
+    font-size: 0.74rem; color: var(--accent); font-weight: 600;
+    background: rgba(96,165,250,0.1); border-radius: 4px; padding: 1px 6px;
+}
+.eln-arm-cond { font-size: 0.76rem; color: var(--text-muted); flex: 1; }
+.eln-hyps { display: flex; flex-direction: column; gap: 6px; }
+.eln-hyp { display: flex; align-items: baseline; gap: 8px; }
+.eln-hyp-status {
+    font-size: 0.66rem; font-weight: 700; text-transform: uppercase;
+    border-radius: 4px; padding: 2px 6px; white-space: nowrap;
+}
+.eln-hyp-proposed { color: var(--accent); background: rgba(96,165,250,0.12); }
+.eln-hyp-supported { color: var(--accent-green); background: rgba(74,222,128,0.12); }
+.eln-hyp-refuted { color: #f87171; background: rgba(248,113,113,0.12); }
+.eln-hyp-inconclusive { color: var(--accent-orange); background: rgba(251,146,60,0.12); }
+.eln-hyp-text { font-size: 0.8rem; color: var(--text); line-height: 1.4; }

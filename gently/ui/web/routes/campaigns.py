@@ -105,6 +105,40 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="Campaign not found")
         return tree
 
+    @router.get("/api/campaigns/{campaign_id}/eln")
+    async def get_campaign_eln(campaign_id: str):
+        """ELN scientific spine for a campaign: its experiments (arms × strain ×
+        condition + controls), the strains they use, and the hypotheses they test."""
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        cid = campaign.id
+        experiments = (
+            [e for e in cs.list_experiments() if e.get("campaign_ref") == cid]
+            if hasattr(cs, "list_experiments")
+            else []
+        )
+        exp_ids = {e["id"] for e in experiments}
+        all_hyps = cs.list_hypotheses() if hasattr(cs, "list_hypotheses") else []
+        hyp_by_exp: dict = {}
+        for h in all_hyps:
+            for er in h.get("experiment_refs") or []:
+                if er in exp_ids:
+                    hyp_by_exp.setdefault(er, []).append(h)
+        strains: list = []
+        seen: set = set()
+        for e in experiments:
+            for arm in e.get("arms") or []:
+                ref = arm.get("strain_ref")
+                rec = cs.resolve_strain(ref) if ref else None
+                arm["strain_name"] = rec["name"] if rec else ref
+                if rec and rec["id"] not in seen:
+                    seen.add(rec["id"])
+                    strains.append(rec)
+            e["hypotheses"] = hyp_by_exp.get(e["id"], [])
+        # deduped campaign-level hypotheses (seed links each to all its experiments)
+        hypotheses = [h for h in all_hyps if exp_ids & set(h.get("experiment_refs") or [])]
+        return {"experiments": experiments, "strains": strains, "hypotheses": hypotheses}
+
     @router.get("/api/campaigns/{campaign_id}/document")
     async def get_campaign_document(campaign_id: str):
         """Full plan as a structured document for the review page."""
