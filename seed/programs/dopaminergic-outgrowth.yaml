@@ -1,0 +1,186 @@
+# Seed research program: Catching Outgrowth — Dopaminergic Neuronal Outgrowth in C. elegans
+# Real, version-controlled Campaign/Strain/Experiment/Hypothesis (ELN spine dogfood).
+slug: dopaminergic-outgrowth
+campaign:
+  title: Catching Outgrowth — Dopaminergic Neuronal Outgrowth in C. elegans
+  goal: Quantify the outgrowth of the dat-1 dopaminergic neuron in the developing embryo — onset time,
+    extension rate, duration, morphology — by using expression onset as the trigger to switch from low-cadence
+    monitoring to high-cadence capture, and contrast it against an early-born, slow ventral-nerve-cord
+    neuron, building toward a dependency-map of how neural architecture develops.
+  description: 'Outgrowth has never been caught — the literature images neurons at their final, wired-and-still
+    stage because the growing neuroblast does not hold still. This program images the DEVELOPING dopaminergic
+    neuron instead of its endpoint. The dat-1 dopamine-transporter reporter (dat-1p::GFP, strain BZ555)
+    turns on around the 3-fold stage, marking the CEP/ADE dopaminergic neurons and opening the window
+    in which their dendrite extension can be imaged. gently sits in a low-cadence, low-dose monitor mode
+    until the dopaminergic_signal.py two-stage detector (Perceiver->Classifier) reports the signal appearing
+    (intensity_level >= MEDIUM -> speed_up; structure_quality = GOOD -> burst), then switches to high
+    cadence to capture the outgrowth trajectory at the time resolution its dynamics demand. The test case
+    that shapes the design is a timing contrast: an early, slow, long-window ventral-nerve-cord (DD/GABAergic)
+    neuron versus the later dat-1 dopaminergic neuron — reconstructing the ordering (scaffold-then-follower)
+    that is the unit of a developmental dependency map. A real obstacle is built into the biology: the
+    3-fold embryo twitches, which is exactly why nobody catches outgrowth at fine cadence; Richard''s
+    potassium-pump thermo-paralytic background (twitching stops at 25 C) is folded in as the motion-free
+    enabler, cross-linking the temperature seed program. This is the C. elegans first rung of Richard''s
+    ladder (worm -> mutant screen -> EM correlation -> zebrafish -> Danionella); the single deliverable
+    — outgrowth timing nobody has captured — is the proof the hammer builds houses.'
+strains:
+- name: BZ555
+  what: Canonical, CGC-available dopaminergic reporter and the primary dat-1 strain for this program.
+    Cytoplasmic GFP driven by the dat-1 (dopamine transporter) promoter labels all 8 dopaminergic neurons
+    (4 CEP, 2 ADE, 2 PDE). Its onset around the 3-fold stage marks the neuron and opens the outgrowth
+    window — the appearance of this signal (via dopaminergic_signal.py) is the trigger that switches acquisition
+    from low cadence to high cadence. CEP dendrite extension along the nose is the outgrowth event captured.
+  genotype: egIs1 [dat-1p::GFP]
+  markers:
+  - 'dat-1p::GFP (dopaminergic; 8 neurons: CEP/ADE/PDE)'
+  organism_ref: c_elegans
+- name: juIs76
+  what: Early-born, slow-outgrowth ventral-nerve-cord reference (Jin lab, CGC-available). GFP driven by
+    the unc-25 (GAD) promoter labels the GABAergic DD/VD motor neurons; the embryonic DD neurons extend
+    commissures over a long developmental window, providing the 'early slow VNC neuron' contrast to the
+    later dat-1 dopaminergic neuron in the timing/ordering comparison.
+  genotype: juIs76 [unc-25p::GFP; lin-15(+)]
+  markers:
+  - unc-25p::GFP (GABAergic DD/VD ventral-nerve-cord motor neurons)
+  organism_ref: c_elegans
+- name: dat-1p::GFP; unc-25p::mCherry dual-label (Richard — in construction)
+  what: 'Two-color line placing the early VNC (DD) neuron and the late dat-1 dopaminergic neuron in the
+    SAME embryo, so their outgrowth can be temporally ordered within one animal without cross-animal registration.
+    Being built by Richard (per notes: ''ventral nerve cord — Richard making the strain''). Until it is
+    available, the early-vs-late comparison runs the two single-color strains (juIs76, BZ555) as separate
+    arms staged to a common time-to-hatch clock.'
+  genotype: dat-1p::GFP; unc-25p::mCherry (target; cross of BZ555 x a red-VNC/GABAergic line)
+  markers:
+  - dat-1p::GFP (dopaminergic)
+  - unc-25p::mCherry (GABAergic VNC)
+  organism_ref: c_elegans
+- name: dat-1p::GFP; K-pump thermo-paralytic (Richard — in construction)
+  what: dat-1 reporter crossed into Richard's potassium-pump thermo-paralytic background, which stops
+    embryonic twitching at 25 C (the 3-fold stage). This makes motion-free, high-cadence imaging of dopaminergic
+    dendrite outgrowth possible through the twitching-prone 3-fold window that otherwise defeats fine-cadence
+    capture. In construction; baseline experiments substitute BZ555 held at 25 C until the cross is available.
+  genotype: egIs1 [dat-1p::GFP]; <K-pump thermo-paralytic allele> (Richard/Janelia)
+  markers:
+  - dat-1p::GFP (dopaminergic)
+  - K-pump thermo-paralysis (25 C twitch suppression at 3-fold)
+  organism_ref: c_elegans
+experiments:
+- title: Exp-1 — Expression-triggered capture of dat-1 dopaminergic outgrowth
+  note: 'Core method demonstration: monitor-until-signal then high-cadence, driven by gently/app/detectors/dopaminergic_signal.py.
+    Low-cadence low-dose watch until the detector reports the signal, then speed_up/burst to catch CEP
+    dendrite extension; ramp_down_power on SATURATING; stop on has_hatched. The point is to catch the
+    outgrowth trajectory while spending photodose only once it matters.'
+  arms:
+  - name: Adaptive (monitor->burst)
+    strain: BZ555
+    condition: 'Low-cadence monitor from 2-fold: 10 min interval, 488 nm @ 5%, ~40 slices. dopaminergic_signal.py
+      runs every timepoint; on intensity_level >= MEDIUM (speed_up) drop to 2 min cadence; on structure_quality
+      = GOOD (burst) fire 1 min bursts; ramp_down_power on SATURATING; stop on has_hatched. Captures dendrite
+      length-vs-time through hatch.'
+  - name: Fixed high-cadence (naive)
+    strain: BZ555
+    condition: Constant 2 min cadence, 488 nm @ 10%, ~40 slices, from 2-fold to hatch, no trigger. Reference
+      trajectory and the cumulative photodose the adaptive arm must beat.
+  controls:
+  - 'Low-cadence-only (never switches): constant 10 min cadence — temporal-undersampling control; expected
+    to FAIL to resolve outgrowth rate, proving the trigger is necessary.'
+  - 'Minimal-imaging developmental control: one volume at 2-fold and one at hatch, otherwise dark — establishes
+    unperturbed hatch rate/timing to compare imaged arms against.'
+  - 'Detector false-onset control: autofluorescence-only / pre-onset frames plus a no-embryo field scored
+    by dopaminergic_signal.py — measures the false MEDIUM/GOOD rate (photodose wasted on noise).'
+  export_repo: pskeshu/gently-dopaminergic-outgrowth
+- title: 'Exp-2 — Early-slow VNC vs late dat-1: outgrowth ordering (dependency map)'
+  note: 'Builds the ordering that a dependency map is made of: does the early VNC scaffold precede dopaminergic
+    extension? Two single-color arms now, staged to a common time-to-hatch clock; the dual-label same-embryo
+    arm activates when Richard''s strain lands, giving within-animal ordering.'
+  arms:
+  - name: Early VNC (DD)
+    strain: juIs76
+    condition: Adaptive monitor->burst tuned to unc-25p::GFP; capture DD commissural outgrowth onset,
+      extension rate, and duration (early-born, slow, long window).
+  - name: Late dat-1 DA
+    strain: BZ555
+    condition: Adaptive monitor->burst (as Exp-1 adaptive arm); capture dopaminergic outgrowth onset,
+      rate, and duration.
+  - name: Dual-label same-embryo
+    strain: dat-1p::GFP; unc-25p::mCherry dual-label (Richard — in construction)
+    condition: Two-color acquisition (488 + 561 nm) in one embryo for direct within-animal temporal ordering
+      of VNC vs DA outgrowth. Runs when the strain is available; until then ordering is inferred across
+      the two single-color arms via the common landmark clock.
+  controls:
+  - 'Common developmental clock: stage every embryo to time-before-hatch (plus the 2-fold landmark) so
+    cross-strain outgrowth times are comparable without the dual strain.'
+  - Per-strain minimal-imaging developmental control (hatch rate/timing) — confirm imaging does not shift
+    either neuron's schedule.
+- title: Exp-3 — Paralysis-assisted outgrowth capture (thermo-immobilization)
+  note: '3-fold twitching is the specific reason outgrowth has never been caught at fine cadence. Cross-links
+    the temperature seed program: Richard''s K-pump strain stops twitching at 25 C, enabling motion-free
+    high-cadence trajectories. Separates temperature''s developmental speedup from any imaging perturbation
+    via hatching-time distributions.'
+  arms:
+  - name: 25 C thermo-paralysis
+    strain: dat-1p::GFP; K-pump thermo-paralytic (Richard — in construction)
+    condition: 'Hold 25 C across the outgrowth window to suppress 3-fold twitching; high-cadence (1-2
+      min) motion-free capture of dopaminergic dendrite extension. Baseline until strain lands: BZ555
+      held at 25 C.'
+  - name: 20 C twitching (control)
+    strain: BZ555
+    condition: Standard 20 C, identical high-cadence — the twitch-corrupted baseline; quantifies the frame-to-frame
+      motion the paralysis arm removes.
+  controls:
+  - 'Thermal-only developmental control: unimaged embryos at 25 C vs 20 C — measure hatching-time distributions
+    to separate temperature''s developmental speedup from imaging perturbation.'
+  - 'Registration-error control: the same volume acquired back-to-back to bound the non-biological jitter
+    floor for tip-tracking.'
+hypotheses:
+- statement: dat-1p::GFP becomes detectable (dopaminergic_signal.py intensity_level >= MEDIUM) around
+    the 3-fold stage, and this expression onset reliably precedes and brackets the phase of maximal CEP
+    dendrite extension — making onset a usable trigger to open a high-cadence outgrowth-capture window.
+  predictions:
+  - In BZ555, the detector first reports MEDIUM intensity at ~3-fold, on the order of ~1-2 h before hatch
+    at 20 C, before structure_quality reaches GOOD.
+  - The adaptive (monitor->burst) arm captures the CEP dendrite length-vs-time trajectory at temporal
+    fidelity >= the fixed high-cadence arm.
+  - The low-cadence-only control fails to resolve the outgrowth rate (undersampled slope), confirming
+    the trigger is necessary to catch the dynamics.
+  note: Falsified if onset lags peak extension (dat-1 comes on only after outgrowth completes, consistent
+    with it being a terminal-differentiation gene) or if adaptive acquisition misses the trajectory —
+    either would force an earlier reporter.
+- statement: The early ventral-nerve-cord (DD) neuron begins and completes its outgrowth earlier and over
+    a longer, slower window than the dat-1 dopaminergic neuron, placing the VNC scaffold before dopaminergic
+    process extension in the developmental dependency map.
+  predictions:
+  - DD (unc-25p::GFP) outgrowth onset precedes detectable dat-1 dopaminergic outgrowth, measured against
+    a common time-to-hatch clock.
+  - DD outgrowth duration > dat-1 dopaminergic outgrowth duration, and DD mean extension rate < dat-1
+    rate (slow-and-long vs fast-and-late).
+  - In the dual-label same-embryo arm, VNC-before-DA ordering holds within individual animals, not only
+    across the population.
+  note: Refuted if dat-1 outgrowth precedes or co-occurs with DD outgrowth, or if durations/rates do not
+    separate — that would break the scaffold-then-follower assumption underlying the dependency map.
+- statement: Expression-triggered differential acquisition (monitor->burst) captures dopaminergic outgrowth
+    dynamics as completely as constant high-cadence imaging while delivering substantially less pre-onset
+    photodose and less perturbation.
+  predictions:
+  - Cumulative 488 nm dose (integral of power x exposure x frames) in the adaptive arm is materially lower
+    than the fixed high-cadence arm, with most savings accrued before onset.
+  - Outgrowth rate and duration measured from the adaptive arm are statistically indistinguishable from
+    the fixed high-cadence arm (no dynamics lost).
+  - Hatch rate and outgrowth completion in the adaptive arm are >= the fixed high-cadence arm (less phototoxic
+    perturbation).
+  note: This is the method's core claim. Refuted if the adaptive arm under-samples the dynamics OR fails
+    to reduce dose/perturbation — either outcome sinks the differential-acquisition premise.
+- statement: Thermo-paralysis at 25 C (K-pump background) suppresses 3-fold twitching enough to yield
+    motion-free, trackable dopaminergic outgrowth trajectories, without altering outgrowth kinematics
+    beyond the expected temperature-driven developmental speedup.
+  predictions:
+  - Frame-to-frame embryo / dendrite-tip displacement at 25 C paralysis is far below the 20 C twitching
+    baseline, approaching the registration-error floor.
+  - Dendrite-length-vs-time curves are recoverable (trackable tip) in the paralysis arm but corrupted
+    or untrackable in the twitching arm.
+  - Hatching-time distributions shift faster at 25 C, but outgrowth duration expressed in developmental
+    time (fraction of embryogenesis) is preserved vs 20 C — temperature rescales the clock without distorting
+    the process.
+  note: Refuted if 25 C changes outgrowth duration in developmental time (a thermal artifact, not just
+    a speedup) or if paralysis does not reduce motion enough to track the tip. Cross-links the temperature
+    -> hatching-time-distribution seed program.

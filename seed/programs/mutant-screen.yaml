@@ -1,0 +1,160 @@
+# Seed research program: Mutant screen — blind genotype calling from live embryo imaging
+# Real, version-controlled Campaign/Strain/Experiment/Hypothesis (ELN spine dogfood).
+slug: mutant-screen
+campaign:
+  title: Mutant screen — blind genotype calling from live embryo imaging
+  goal: Test whether the agent can image a mixed dish of two C. elegans genotypes and report, per embryo,
+    which is which — first by fluorescent marker (validation) and then by neuroanatomical phenotype alone
+    in a shared reporter (the real screen), with post-hatch locomotion as independent ground truth. The
+    classification is the readout.
+  description: 'Hari Shroff''s agentic-microscopy ''mutant screen'' case study. Embryos of two genotypes
+    are co-cultured on one dish; the agent detects every embryo (bright-field localization), assigns each
+    a genotype call with confidence, and reports the mixed-population breakdown — the per-embryo call,
+    scored against ground truth, is the experiment''s output. Difficulty is graded across two experiments.
+    Experiment 1 (marker-based) mixes unlabeled wild type (N2) with a pan-neuronal TagRFP reporter (otIs355)
+    and calls genotype from marker presence in one volume — this validates the multi-embryo role/classification/reporting
+    machinery and the ''differential acquisition by expression'' path from Hari''s plan. Experiment 2
+    (phenotype-based, the novel screen) mixes two strains carrying the SAME TagRFP marker — unc-6(+) reporter
+    vs unc-6(ev400); reporter — so marker presence is uninformative and genotype must be read from the
+    axon-guidance phenotype: unc-6/netrin loss displaces the nerve ring and misroutes commissures (danienella
+    outgrowth/guidance axis). Ground truth is obtained without a blinding co-marker by continuing acquisition
+    through hatch and confirming each call against the post-hatch Unc locomotion phenotype (ties in Hari''s
+    hatching-detection subproblem). This exercises multi-embryo roles, per-embryo classification + population
+    reporting, and the assisted scoring loop: an accuracy Result (predicted genotype vs behavior-confirmed
+    genotype) proposes a Hypothesis verdict for human confirmation, then exports a genotype-classification
+    benchmark to HuggingFace.'
+strains:
+- name: N2
+  what: Wild-type Bristol reference. The unlabeled 'other' genotype in the Experiment-1 mixed dish and
+    the marker-negative control that sets the false-positive rate for marker-based genotype calling. Carries
+    no transgene, so it is TagRFP-dark under 561 nm.
+  genotype: wild type (Bristol isolate)
+  markers: []
+  organism_ref: celegans
+- name: otIs355
+  what: 'Pan-neuronal nuclear-TagRFP reporter (Hobert lab, integrated array) in an unc-6(+) wild-type
+    background. Serves two roles: the TagRFP+ arm in Experiment 1 (marker-detectable), and the unc-6(+)
+    reporter control arm in Experiment 2 (same marker as the mutant, so it is separable from the mutant
+    only by neuroanatomy). Nuclear-localized RFP in every neuron gives a clean per-embryo detectable signal
+    and resolves the nerve-ring/commissure pattern used for phenotypic calling. FLAG: confirm the exact
+    CGC strain designation carrying otIs355 before ordering.'
+  genotype: otIs355 [rab-3p(prom1)::2xNLS::TagRFP]
+  markers:
+  - rab-3p::2xNLS::TagRFP (pan-neuronal, nuclear)
+  organism_ref: celegans
+- name: unc-6(ev400); otIs355
+  what: 'The mutant arm — the unc-6 null (ev400, canonical Hedgecock/Culotti X-linked deletion allele
+    of UNC-6/netrin) crossed into the otIs355 pan-neuronal reporter, so it carries the SAME TagRFP marker
+    as the otIs355 control and cannot be told apart by marker presence. UNC-6/netrin loss causes dorsoventral
+    axon-guidance defects: a displaced/misshapen nerve ring and misrouted commissures visible in the reporter
+    during embryogenesis, and an uncoordinated (Unc) locomotion phenotype after hatch that provides ground
+    truth. Built in-lab by crossing otIs355 to unc-6(ev400); ~10 days to a homozygous GFP+/Unc line (per
+    PLAN_MODE genetics item).'
+  genotype: unc-6(ev400) X; otIs355 [rab-3p(prom1)::2xNLS::TagRFP]
+  markers:
+  - rab-3p::2xNLS::TagRFP (pan-neuronal, nuclear)
+  organism_ref: celegans
+experiments:
+- title: Experiment 1 — Marker-based genotype call (validation of the screen machinery)
+  arms:
+  - name: WT (N2)
+    strain: N2
+    condition: Co-cultured on a shared dish with otIs355; bright-field localization of every embryo, then
+      a single 488/561 nm marker-check volume. Expected TagRFP-negative → called wild type.
+  - name: Reporter (otIs355)
+    strain: otIs355
+    condition: Co-cultured on the same shared dish with N2; same bright-field localization + single 561
+      nm marker volume. Expected pan-neuronal nuclear TagRFP-positive → called reporter.
+  controls:
+  - Pure-N2 dish imaged blind with identical settings — measures the marker false-positive rate (autofluorescence
+    / bleed-through called as reporter).
+  - Pure-otIs355 dish imaged blind with identical settings — measures the marker false-negative rate (dim/early
+    embryos missed as WT) and detection sensitivity vs stage.
+  - 561 nm laser-off (bright-field only) acquisition — confirms calls are driven by marker fluorescence,
+    not a morphology confound.
+  - Known mix ratio (e.g. 50:50 plated by count) — the reported population breakdown is scored against
+    the plated ratio.
+  export_repo: 'pskeshu/gently-genotype-screen (FLAG: create/verify HF repo; falls back to pskeshu/gently-perception-benchmark)'
+  note: 'Trivial-by-design: this is the ''differential acquisition by expression'' path and validates
+    multi-embryo roles, per-embryo classification, and population reporting before Experiment 2 asks the
+    hard question. Ground truth = the marker channel itself (unambiguous). A candidate Result of kind=accuracy
+    scores predicted vs marker-ground-truth genotype per embryo; needs no timelapse (single decision volume).'
+- title: Experiment 2 — Phenotype-based genotype call (the mutant screen; marker is uninformative)
+  arms:
+  - name: unc-6(+) reporter
+    strain: otIs355
+    condition: 'Co-cultured on a shared dish with unc-6(ev400); otIs355 — BOTH TagRFP+, so marker presence
+      does not distinguish them. Timelapse through embryogenesis (bean → 3-fold) then continued to hatch.
+      Genotype called from pan-neuronal nerve-ring position + commissure guidance in the reporter. Expected:
+      wild-type nerve-ring/commissure pattern; normal post-hatch locomotion.'
+  - name: unc-6(ev400) reporter
+    strain: unc-6(ev400); otIs355
+    condition: 'Same shared dish, same acquisition. Genotype called from the reporter phenotype. Expected:
+      displaced/misshapen nerve ring + misrouted (dorsoventral) commissures during elongation; post-hatch
+      uncoordinated (Unc) locomotion confirming the call.'
+  controls:
+  - Pure-otIs355 dish imaged blind — establishes the unc-6(+) phenotype prior and the classifier's per-arm
+    base rate.
+  - Pure-unc-6(ev400); otIs355 dish imaged blind — establishes the mutant phenotype prior; confirms Unc
+    penetrance/expressivity for ground-truth reliability.
+  - Stage-matched scoring — calls are compared only within matched developmental stage so genotype is
+    not read off a developmental-timing difference (guards H2's stage-dependence claim).
+  - Imaged-vs-unimaged hatch-timing band — a sibling cohort monitored at low cadence (no timelapse dose)
+    so continuing acquisition to hatch is shown not to create or shift the phenotype/hatch timing beyond
+    the control band.
+  - Post-hatch locomotion assay — short movement observation per hatched larva (Unc vs WT) is the definitive
+    independent ground truth against which embryo-morphology calls are scored.
+  export_repo: 'pskeshu/gently-genotype-screen (FLAG: create/verify HF repo; falls back to pskeshu/gently-perception-benchmark)'
+  note: The real screen. No blinding co-marker is used; ground truth comes from the post-hatch Unc phenotype
+    (H3 loop). unc-6/netrin is the guidance gene from the danienella outgrowth axis, so the phenotype
+    the classifier reads is genuine developmental-connectomics signal. Candidate Result kind=accuracy
+    scores embryo-morphology genotype call vs behavior-confirmed genotype, stratified by stage; a second
+    Result scores concordance between the two independent readouts. Needs the unc-6(ev400); otIs355 cross
+    complete (dependency).
+hypotheses:
+- statement: In a mixed dish of unlabeled N2 and pan-neuronal-TagRFP otIs355, per-embryo genotype is separable
+    at near-ceiling accuracy from marker presence in a single volume — validating the multi-embryo classify-and-report
+    machinery.
+  predictions:
+  - Per-embryo genotype-call accuracy >=0.98 vs marker ground truth on the mixed dish.
+  - Pure-N2 control yields <2% false-positive (marker-called) rate; pure-otIs355 control yields <2% false-negative
+    rate.
+  - A single 488/561 nm marker volume suffices — no timelapse needed; decision latency < one acquisition
+    cycle per embryo.
+  - The reported population breakdown matches the plated mix ratio within counting error.
+  note: 'Falsifier: accuracy near 50% (chance) or FP/FN >10% refutes — would indicate autofluorescence/bleed-through
+    or an exposure confound rather than a working marker channel. This is the cheap validation gate before
+    Experiment 2.'
+- statement: unc-6(ev400) genotype is separable from unc-6(+) using embryonic neuroanatomy alone (a shared
+    TagRFP reporter, marker-uninformative), above chance, and the separability increases monotonically
+    with developmental stage as the nerve ring and commissures form.
+  predictions:
+  - Per-embryo genotype accuracy from reporter morphology is significantly above the 50% chance rate (target
+    >=0.75) vs behavior-confirmed ground truth.
+  - 'Accuracy is stage-dependent: near chance before the nerve ring resolves (pre-comma/bean), rising
+    after the 1.5-fold stage once commissures are laid down; a monotone increase across bean -> comma
+    -> 1.5-fold -> 2-fold -> 3-fold.'
+  - 'Errors are systematic, not random: mutant->WT misses dominate early (phenotype not yet manifest),
+    and confident correct calls concentrate at late elongation.'
+  - 'The signal is neuroanatomical, not timing: calls survive stage-matched scoring (Experiment-2 control).'
+  note: 'This is the novel result — genotype read from a developing axon-guidance phenotype, tied to the
+    UNC-6/netrin outgrowth axis. Falsifier: accuracy indistinguishable from 50% at ALL stages -> the phenotype
+    is not resolvable at gently''s marker/resolution, refuting the phenotype-based screen (would fall
+    back to requiring a marker, i.e. Experiment 1 only).'
+- statement: 'Embryonic morphology-based genotype calls are confirmed by the post-hatch locomotion phenotype,
+    so the ground-truth loop closes unattended: the genotype the agent assigns from the embryo predicts
+    whether the hatched larva is Unc.'
+  predictions:
+  - Concordance between the embryo-morphology call and the post-hatch Unc/WT locomotion call is >= the
+    Experiment-2 morphology accuracy (both read the same latent genotype); disagreements localize to embryos
+    the agent scored low-confidence.
+  - Hatch is detectable from imaging alone (field-clearing / vermiform escape from the eggshell) with
+    recall >=0.9, so the classify-then-confirm loop runs without a human.
+  - Continuing acquisition to hatch does not shift per-genotype hatch timing beyond the imaged-vs-unimaged
+    control band — imaging reveals the phenotype, it does not create it.
+  - unc-6(ev400) Unc penetrance is high enough (from the pure-mutant control) that behavior is a reliable
+    per-embryo ground-truth label.
+  note: 'Falsifier: embryo calls and post-hatch behavior calls are uncorrelated -> the ''phenotype'' the
+    classifier reads in the embryo is an imaging artifact, not genotype, and Experiment 2''s accuracy
+    is spurious. This hypothesis also exercises Hari''s hatching-detection subproblem as the trigger that
+    ends each embryo''s track.'

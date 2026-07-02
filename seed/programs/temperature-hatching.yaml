@@ -1,0 +1,182 @@
+# Seed research program: Temperature → hatching-time distributions (K-pump thermo strain)
+# Real, version-controlled Campaign/Strain/Experiment/Hypothesis (ELN spine dogfood).
+slug: temperature-hatching
+campaign:
+  title: Temperature → hatching-time distributions (K-pump thermo strain)
+  goal: Quantify the distribution of C. elegans embryonic hatching times and measure how the two moves
+    the smart-microscope makes on its temperature setpoint — thermo-cycling to 25 °C for paralysis-free
+    imaging windows, and the imaging (photodose) itself — perturb that distribution, using Richard Ikegami's
+    temperature-sensitive potassium-channel strain that stops twitching at 25 °C from the 3-fold stage.
+  description: 'The late C. elegans embryo (3-fold → hatch) twitches vigorously, which motion-blurs 3D
+    light-sheet acquisition exactly in the developmental window we most want to image. Richard''s strain
+    carries a temperature-sensitive gain-of-function two-pore potassium channel (twk-18(cn110gf) class):
+    at the restrictive temperature (25 °C) the body-wall muscle hyperpolarizes and the embryo goes still
+    from the 3-fold stage, giving a paralysis-free imaging window; at 20 °C it twitches normally. This
+    turns the diSPIM''s temperature setpoint (ACUITYnano thermal controller, exposed as a settable axis)
+    into a scientific instrument, not just an environmental knob — the agent thermo-cycles: hold 20 °C,
+    ramp to 25 °C to silence twitching for a clean high-cadence window, return to 20 °C. Every such move
+    is a perturbation. The scientific question is the DISTRIBUTION of hatching times and how it shifts:
+    hatching time is a stochastic per-embryo quantity with a mode and a right-skewed tail, and we want
+    to know whether (a) thermalization alone perturbs it, (b) imaging/photodose perturbs it, and (c) whether
+    intermittent thermo-cycling is gentler than continuous 25 °C paralysis. Hatch is detected by bright-field
+    eggshell breach (an existing, validated case study); staging and hatch-timing are anchored to a ubiquitous
+    nuclear reporter. This campaign is the primary driver for a future typed Actuator axis (setpoint →
+    actuator generalization) and exports its hatch-detection frames as perception training data.'
+strains:
+- name: RK-KP1
+  what: 'Richard Ikegami''s K-pump thermo strain: temperature-sensitive gain-of-function two-pore potassium
+    channel that paralyzes body-wall muscle (stops embryonic twitching) at the restrictive temperature
+    25 °C from the 3-fold stage, while twitching normally at the permissive 20 °C. Carries a ubiquitous
+    nuclear reporter for staging and hatch-timing. The instrument for paralysis-free late-embryo light-sheet
+    imaging.'
+  genotype: twk-18(cn110gf); stIs10026[his-72p::HIS-24::mCherry] (N2 background)
+  markers:
+  - his-72p::HIS-24::mCherry (ubiquitous nuclear — staging + hatch timing)
+  - bright-field eggshell / hatch morphology
+  - body-wall muscle twitch (motion index readout)
+  organism_ref: celegans
+- name: WT-HIS
+  what: 'Matched-marker wild-type control: identical ubiquitous nuclear reporter but wild-type twk-18,
+    so it twitches normally at BOTH 20 °C and 25 °C. Establishes that paralysis is K-channel-specific
+    (not a generic heat artifact) and, unimaged at 20 °C, provides the wild-type reference hatching-time
+    distribution against which the K-pump strain''s is compared.'
+  genotype: stIs10026[his-72p::HIS-24::mCherry] (N2 background, wild-type twk-18)
+  markers:
+  - his-72p::HIS-24::mCherry (ubiquitous nuclear — staging + hatch timing)
+  - bright-field eggshell / hatch morphology
+  - body-wall muscle twitch (motion index readout)
+  organism_ref: celegans
+experiments:
+- title: 'Exp A — Paralysis validation: does 25 °C silence twitching, and is it K-channel-specific?'
+  arms:
+  - name: KP restrictive
+    strain: RK-KP1
+    condition: 'Constant 25 °C from comma stage. At 3-fold onset run a 10-min motion-assay window: bright-field
+      + nuclear frames every 30 s; compute a motion index (frame-to-frame difference of the segmented
+      embryo). Expect twitching abolished (paralysis).'
+  - name: KP permissive
+    strain: RK-KP1
+    condition: Constant 20 °C. Identical 3-fold motion-assay window. Expect normal twitching — the permissive-temperature
+      control for the same genotype.
+  - name: WT restrictive
+    strain: WT-HIS
+    condition: Constant 25 °C. Identical 3-fold motion-assay window. Expect normal twitching — shows paralysis
+      is specific to the mutant K-channel, not a heat effect on any embryo.
+  controls:
+  - WT-HIS constant 20 °C motion-assay window — wild-type twitch baseline
+  - 'Reversibility check: hold RK-KP1 at 25 °C (paralyzed), ramp back to 20 °C, confirm twitching resumes
+    within one thermal time-constant — rules out heat damage vs reversible channel gating'
+  - n ≥ 8 embryos per arm; motion index blinded to arm during scoring
+  note: 'This is the tool-axis validator: it certifies that the temperature setpoint buys a genuine paralysis-free
+    window before any hatching-distribution claim rests on that protocol. Exercises the ACUITYnano setpoint
+    end-to-end (ramp, stabilize, hold, reverse).'
+- title: 'Exp B — Does the imaging protocol perturb the hatching-time distribution? (2×2: temperature
+    protocol × imaging)'
+  arms:
+  - name: Cycled + imaged
+    strain: RK-KP1
+    condition: Base 20 °C; agent ramps to 25 °C to open paralysis-free windows and images high-cadence
+      3D light-sheet (~1-min interval, 488 nm for the nuclear marker) through 3-fold → hatch, returning
+      to 20 °C between windows. The full working protocol — both perturbations present (thermalization
+      + photodose).
+  - name: Cycled + unimaged
+    strain: RK-KP1
+    condition: Identical 20↔25 °C thermo-cycling schedule but shutter CLOSED (no light). Isolates the
+      thermalization perturbation alone. Hatch detected by periodic low-dose bright-field only.
+  - name: Constant-20 + imaged
+    strain: RK-KP1
+    condition: Constant 20 °C (embryo twitches — motion-blurred 3D) with the same imaging cadence and
+      cumulative photodose as Cycled+imaged. Isolates the imaging/photodose perturbation alone, thermally
+      unperturbed.
+  - name: Constant-20 + unimaged
+    strain: RK-KP1
+    condition: Constant 20 °C, hatch detected by periodic low-dose bright-field only. The reference hatching-time
+      distribution — neither perturbation applied.
+  controls:
+  - Off-instrument incubator population of RK-KP1 at 20 °C, never mounted — off-instrument reference distribution
+    controlling for mounting/handling stress
+  - n ≥ 20 embryos per arm for distribution statistics (median, CV, 90th-percentile tail, arrest fraction)
+  - Match cumulative photodose between the two imaged arms so the imaged-vs-unimaged contrast is clean
+  export_repo: pskeshu/gently-hatching-time
+  note: Hatch detected by bright-field eggshell breach (validated case study). Hatching time measured
+    as minutes from a fixed nuclear-marker developmental landmark (3-fold onset) to eggshell breach, normalizing
+    out per-embryo mounting-time differences. The 2×2 factorial cleanly separates thermalization from
+    photodose. Exports bright-field hatch ± nuclear-stage frames + human ground truth to HuggingFace as
+    hatch-detection training data (approval-gated push).
+- title: 'Exp C — Protocol optimization: is intermittent thermo-cycling gentler than continuous 25 °C
+    paralysis?'
+  arms:
+  - name: Constant-25 imaged
+    strain: RK-KP1
+    condition: Constant 25 °C — continuous paralysis, development ~30% faster (~10 h to hatch). High-cadence
+      3D through 3-fold → hatch. Simplest paralysis strategy, but sustained elevated temperature throughout.
+  - name: Thermo-cycled imaged
+    strain: RK-KP1
+    condition: Base 20 °C with brief 25 °C windows for imaging only (the Exp B Cycled+imaged protocol).
+      Embryo spends most of development at 20 °C; elevated only during acquisition windows.
+  - name: Constant-20 unimaged baseline
+    strain: RK-KP1
+    condition: Constant 20 °C, no imaging (bright-field hatch detection only). Baseline distribution (~14
+      h) for shape comparison after regressing out the developmental-rate shift.
+  controls:
+  - WT-HIS constant 25 °C unimaged — temperature-only effect on the wild-type hatch distribution, separating
+    heat effects from K-channel-gating effects
+  - Match cumulative photodose between the two imaged arms so the comparison isolates temperature protocol,
+    not light dose
+  - n ≥ 20 embryos per arm
+  note: 'Outcome = perturbation of hatch-time DISTRIBUTION SHAPE (skew, CV, tail, arrest fraction) after
+    regressing out the mean developmental-rate shift that 25 °C trivially causes, PLUS hatch-success rate
+    and mean motion-blur during imaging windows. If thermo-cycling gives equal image quality with less
+    distribution perturbation it is Pareto-better. Directly motivates the typed Actuator axis: the agent
+    choosing a temperature schedule to minimize a perturbation objective.'
+hypotheses:
+- statement: In the K-pump strain, raising temperature to 25 °C abolishes embryonic twitching from the
+    3-fold stage onward (a reversible, K-channel-gated paralysis), whereas wild-type embryos twitch normally
+    at both 20 °C and 25 °C.
+  predictions:
+  - RK-KP1 motion index at 3-fold drops ≥ 90% relative to its own 20 °C value within one thermal stabilization
+    time-constant of reaching 25 °C.
+  - WT-HIS motion index at 25 °C is statistically indistinguishable from WT-HIS at 20 °C (twitching persists)
+    — paralysis is mutant-specific, not a heat artifact.
+  - 'Paralysis is reversible: returning RK-KP1 from 25 °C to 20 °C restores twitching, ruling out thermal
+    damage.'
+  note: Falsified if RK-KP1 still twitches at 25 °C, if WT is silenced at 25 °C, or if paralysis does
+    not reverse on cooling. This is the premise the whole protocol rests on (Exp A).
+- statement: 'Thermalization is gentle but light is not: thermo-cycling alone (unimaged) leaves the hatching-time
+    distribution statistically indistinguishable from the constant-20 °C unimaged baseline, while imaging
+    (photodose) shifts the distribution — delaying median hatch and/or inflating its spread and late tail.'
+  predictions:
+  - Cycled+unimaged median hatch time lies within a pre-registered equivalence margin of Constant-20+unimaged,
+    and the two distributions do not differ by a two-sample Kolmogorov–Smirnov test.
+  - Both imaged arms show a rightward median shift and/or larger CV and heavier 90th-percentile tail versus
+    their unimaged counterparts.
+  - The imaging effect scales with cumulative photodose (more/faster windows → larger shift), a dose–response
+    within the imaged arms.
+  note: Falsified if Cycled+unimaged differs from baseline as much as the imaged arms do (thermalization,
+    not light, dominates), or if imaging leaves the distribution unchanged. Tested by the Exp B 2×2 factorial.
+- statement: Intermittent thermo-cycling perturbs the hatching-time distribution less than continuous
+    25 °C paralysis, at equal imaging quality — so thermo-cycling is Pareto-preferable despite constant-25
+    °C giving simpler continuous paralysis.
+  predictions:
+  - Constant-25 °C shifts the median hatch earlier (~10 h vs ~14 h, the expected developmental-rate effect)
+    but, after regressing out that mean shift, its residual distribution is broader (higher CV / heavier
+    tail) and its hatch-success rate lower than thermo-cycled.
+  - Motion-blur during the 25 °C imaging windows is comparable between constant-25 and thermo-cycled (both
+    paralyzed while imaging), so image quality is not sacrificed by cycling.
+  - WT-HIS at constant 25 °C unimaged shows a smaller distribution-shape perturbation than RK-KP1 at constant
+    25 °C, indicating part of the constant-25 penalty is K-channel-gating load, not temperature alone.
+  note: Falsified if constant-25 °C hatch distribution is no broader than thermo-cycled with equal hatch
+    success (constant-25 would then be preferable for its simplicity). Tested by Exp C; directly motivates
+    a temperature-schedule Actuator objective.
+- statement: Baseline hatching times are right-skewed (approximately log-normal), and perturbations act
+    primarily on the right tail — increasing the fraction of late-hatchers and arrests — rather than translating
+    the mode.
+  predictions:
+  - The Constant-20+unimaged hatch-time histogram fits a log-normal better than a normal distribution
+    (lower AIC) with positive skew.
+  - Under imaging and under sustained heat, the distribution mode is approximately preserved while the
+    90th-percentile hatch time and the arrest fraction rise.
+  - The coefficient of variation increases monotonically with photodose across the imaged conditions.
+  note: Falsified if perturbation shifts the whole distribution (mode moves) without tail inflation, or
+    if the baseline is symmetric. This is the distribution-shape hypothesis — the reason the study measures
+    the full distribution, not just a mean hatch time.

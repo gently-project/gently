@@ -1,0 +1,179 @@
+# Seed research program: Embryo developmental-stage classification — nuclear + bright-field fusion, with hatching detection
+# Real, version-controlled Campaign/Strain/Experiment/Hypothesis (ELN spine dogfood).
+slug: stage-classification
+campaign:
+  title: Embryo developmental-stage classification — nuclear + bright-field fusion, with hatching detection
+  goal: 'Build an accurate, calibrated stage classifier for live C. elegans embryos on the diSPIM using
+    gently-perception, fusing label-free bright-field morphology with a nuclear fluorescence channel,
+    and detect the hatching event in real time by switching to high cadence. Run this program as the annotation->HuggingFace
+    flywheel engine: gently-perception predictions -> in-ELN human ground-truth correction -> an accuracy
+    Result per run -> approval-gated export to pskeshu/gently-perception-benchmark.'
+  description: 'gently-perception emits per-timepoint stage predictions (comma, 1.5-fold, 2-fold, 3-fold,
+    pretzel) on live embryos. Bright-field alone captures gross morphology (elongation, eggshell, movement)
+    but saturates as a staging cue once the body is fully folded: 2-fold and 3-fold look nearly identical
+    by outline. A ubiquitous nuclear reporter carries an orthogonal signal — nuclear count, packing, and
+    the ordered lattice of the elongating body — that keeps changing across exactly those late transitions
+    and collapses abruptly at hatch. This campaign tests whether fusing the two modalities beats either
+    alone, whether an adaptive monitor-until-3-fold -> high-cadence switch localizes the fast, stochastic
+    hatch event, and whether the human-corrected benchmark generalizes across nuclear-labelling density.
+    Ground truth is authored in-ELN on the Vitals stage strip (agent pre-screens high-agreement stretches
+    for one-range confirm; human decides the transitional frames), scored as a Result of kind:accuracy
+    (predicted vs ground truth per run), and exported to the shared benchmark on human approval. This
+    is seed program #1 from Hari Shroff''s agentic-microscopy paper plan (bright-field detection is DONE;
+    staging + hatching detection is next), and it is the primary near-term driver of the ELN scientific
+    spine.'
+strains:
+- name: RW10226
+  what: 'Ubiquitous nuclear-GFP lineaging strain — every nucleus in the embryo is labelled through embryogenesis.
+    The gold-standard substrate for nuclear-based stage classification (StarryNite/AceTree lineaging use
+    it) and the primary strain of this campaign: the ordered nuclear lattice reports on stage across the
+    late transitions where bright-field outline saturates, and its collapse plus larval translation marks
+    hatch. Imaged BF-only, nuclear-only, or fused across the arms of Experiment 1.'
+  genotype: zuIs178 [his-72p::HIS-72::GFP; unc-119(+)] V; stIs10024 [pie-1p::H2B::GFP; unc-119(+)]
+  markers:
+  - his-72::GFP (ubiquitous somatic nuclear, 488 nm)
+  - pie-1p::H2B::GFP (early/germline nuclear, 488 nm)
+  organism_ref: celegans
+- name: OH-otIs355
+  what: 'Pan-neuronal but nuclear-localized (2xNLS) TagRFP reporter (Stefanakis, Carrera & Hobert 2015)
+    — a SPARSE nuclear pattern: only neuronal nuclei, not the whole embryo. This is the contrast strain
+    for Experiment 3: it tests whether stage classification needs the dense whole-embryo nuclear lattice
+    or whether a sparse nuclear subset suffices, and quantifies how far a benchmark calibrated on ubiquitous
+    nuclei transfers to a sparse pattern. Its red channel (561 nm) also leaves 488 free for future co-imaging.'
+  genotype: otIs355 [rab-3(prom1)::2xNLS::TagRFP]
+  markers:
+  - rab-3p::2xNLS::TagRFP (pan-neuronal nuclear, 561 nm)
+  organism_ref: celegans
+- name: N2
+  what: 'Wild-type Bristol — no reporter. Provides the label-free bright-field-only condition: the negative
+    arm that isolates exactly how much the nuclear channel adds to staging accuracy, and the cleanest
+    strain for scoring hatch morphology without any phototoxic fluorescence load. Also the over-sampled
+    BF hatch-witness strain in Experiment 2.'
+  genotype: wild-type (Bristol N2)
+  markers: []
+  organism_ref: celegans
+experiments:
+- title: Fusion vs single-modality stage classification (within-embryo paired)
+  arms:
+  - name: bf-only
+    strain: RW10226
+    condition: Bright-field transmitted-light max-projection only fed to gently-perception; nuclear GFP
+      channel withheld. Per-timepoint stage prediction over comma->1.5-fold->2-fold->3-fold->pretzel.
+  - name: nuclear-only
+    strain: RW10226
+    condition: 488 nm nuclear-GFP max-projection only fed to gently-perception; bright-field withheld.
+      Same timepoints.
+  - name: fusion
+    strain: RW10226
+    condition: Bright-field + nuclear-GFP fused (paired side-by-side projection) fed to gently-perception
+      in one call. Same timepoints, same embryos as the other two arms.
+  controls:
+  - Expert manual ground-truth staging on the full 3D volumes, authored in-ELN on the Vitals stage strip
+    (agent bulk-proposes high-agreement stretches; human confirms transitional frames) — the accuracy
+    reference for all three arms.
+  - 'Within-embryo paired design: the identical embryos and identical acquired volumes are scored under
+    all three input conditions, so input modality is the only variable (no acquisition, mounting, or embryo-to-embryo
+    confound).'
+  - N2 wild-type bright-field-only condition as the label-free floor — how far can you stage with zero
+    fluorescence and zero photodose.
+  export_repo: pskeshu/gently-perception-benchmark
+  note: Scored per run as a Result of kind:accuracy (top-1 stage accuracy + full confusion matrix, predicted
+    vs in-ELN ground truth). Because all three arms read the same volumes, the fusion-vs-single comparison
+    is a paired test. Corrected {projection ref, prediction, ground truth, provenance, strain} rows are
+    the export payload; the push to pskeshu/gently-perception-benchmark is approval-gated (require_control
+    + explicit confirm; HF_TOKEN from env).
+- title: Hatching detection — adaptive high-cadence vs fixed low-cadence
+  arms:
+  - name: adaptive-high-fusion
+    strain: RW10226
+    condition: Monitor at 10 min baseline until the 3-fold stage is detected, then switch to 30 s cadence
+      with BF+nuclear fusion until hatch is called. Hatch = collapse of the ordered nuclear lattice +
+      larva translating out of the eggshell (BF).
+  - name: adaptive-high-bf
+    strain: N2
+    condition: Same monitor-until-3-fold -> 30 s high-cadence switch, bright-field only (no fluorescence).
+      Tests hatch detectability from morphology + movement alone.
+  - name: fixed-low
+    strain: RW10226
+    condition: Fixed 10 min cadence throughout (no adaptive switch), BF+nuclear — the undersampled comparator
+      that cannot localize a sub-interval event.
+  controls:
+  - 'Over-sampled bright-field hatch witness: a subset of N2 embryos imaged at 5 s BF-only through the
+    peri-hatch window to establish the true hatch timestamp as ground truth (BF-only + minimal exposure
+    to avoid perturbing the event being measured).'
+  - Endpoint-only (near-unmonitored) embryos scored for hatch success/timing to bound how much the high-cadence
+    imaging load itself delays or perturbs hatching (photodose control).
+  export_repo: pskeshu/gently-perception-benchmark
+  note: 'Hatch-timing Result of kind:accuracy = |predicted hatch frame - witness ground-truth hatch time|,
+    per arm. The hatching subproblem is why staging needs a real-time cadence controller, not just a post-hoc
+    classifier: hatch is short and stochastic and only recoverable above a cadence threshold. Exported
+    as a hatching split of the benchmark.'
+- title: Nuclear-pattern generalization — ubiquitous vs sparse-neuronal nuclei
+  arms:
+  - name: ubiquitous
+    strain: RW10226
+    condition: Fusion staging (BF + nuclear GFP) on the dense whole-embryo nuclear lattice. Same acquisition
+      geometry and cadence as the sparse arm.
+  - name: sparse-neuronal
+    strain: OH-otIs355
+    condition: Fusion staging (BF + nuclear TagRFP, 561 nm) on the sparse pan-neuronal nuclear subset
+      only. Matched geometry/cadence.
+  controls:
+  - Expert in-ELN ground-truth staging authored separately per strain (the sparse and dense patterns are
+    annotated independently).
+  - Matched acquisition geometry, cadence, and equal annotation budget across strains so the only variable
+    is nuclear-labelling density (channel wavelength noted as a covariate).
+  export_repo: pskeshu/gently-perception-benchmark
+  note: 'Tests strain-transfer of the exported benchmark: does a classifier / few-shot pool calibrated
+    on ubiquitous nuclei (RW10226) hold up on a sparse neuronal pattern (otIs355)? Quantifies a nuclear-density
+    dependence that the benchmark should record as a per-strain slice.'
+hypotheses:
+- statement: Fusing bright-field morphology with a nuclear fluorescence channel yields higher developmental-stage
+    classification accuracy than either modality alone, with the largest gain concentrated at the late
+    transitions (2-fold<->3-fold, 3-fold<->pretzel) where bright-field outline saturates but nuclear count
+    and lattice arrangement keep changing.
+  predictions:
+  - 'On the same paired embryos, top-1 stage accuracy: fusion > nuclear-only > bf-only.'
+  - The fusion gain over the best single modality is concentrated at the 2-fold->3-fold and 3-fold->pretzel
+    boundaries — the largest reduction in off-diagonal confusion-matrix mass sits there.
+  - bf-only systematically confuses 2-fold and 3-fold (elongation outline nearly identical); adding the
+    nuclear channel resolves that specific confusion.
+  - 'REFUTED IF: fusion does not beat the best single modality by a meaningful margin on the paired embryos,
+    or the gain is uniform across stages rather than concentrated at late transitions.'
+  note: 'The core claim of program #1 and the reason a single-channel classifier is not enough. Tested
+    by Experiment 1 as a within-embryo paired comparison.'
+- statement: Hatching is a fast, stochastic event whose timestamp is only recoverable above a cadence
+    threshold; an adaptive monitor-until-3-fold -> high-cadence switch localizes hatch to within one interval,
+    while a fixed low-cadence schedule cannot — and the nuclear channel flags hatch more reliably than
+    bright-field alone.
+  predictions:
+  - The adaptive high-cadence (30 s) arm localizes hatch to within +/-1 frame of the 5 s over-sampled
+    bright-field witness; the fixed 10 min arm has error on the order of its interval.
+  - Fusion hatch-detection precision > bf-only precision, because the ordered nuclear lattice collapses
+    at hatch as an additional, earlier cue alongside larval movement.
+  - Hatch is signalled by simultaneous (within 1-2 frames) collapse of the nuclear lattice and larval
+    translation out of the eggshell in bright-field.
+  - 'REFUTED IF: the fixed low-cadence schedule recovers hatch time as accurately as the adaptive high-cadence
+    switch, or bf-only matches fusion hatch precision.'
+  note: The hatching-detection subproblem. Tested by Experiment 2; the photodose control bounds whether
+    the imaging needed to catch hatch perturbs the hatch itself.
+- statement: 'The in-ELN annotation flywheel converges: human correction of gently-perception predictions
+    raises measured accuracy over successive export rounds, and a benchmark calibrated on ubiquitous nuclei
+    transfers imperfectly to a sparse neuronal nuclear pattern — a quantifiable strain-specificity gap
+    the benchmark must record.'
+  predictions:
+  - The accuracy Result computed per export round rises as corrected frames accumulate in pskeshu/gently-perception-benchmark
+    and the few-shot pool grows.
+  - At equal annotation budget, model accuracy on sparse-neuronal nuclei (otIs355) is lower than on ubiquitous
+    nuclei (RW10226), revealing a nuclear-density dependence.
+  - The agent's pre-screened high-agreement stretches (bulk range-confirm) match human ground truth at
+    a high rate, so human effort concentrates on transitional frames rather than the full timeline.
+  - 'REFUTED IF: accumulated corrected annotations do not improve accuracy across rounds, or accuracy
+    is strain-independent (no ubiquitous-vs-sparse gap).'
+  note: 'Validates the flywheel as an engine, not just a pipe. Tested across Experiment 1 (round-over-round
+    accuracy) and Experiment 3 (cross-strain transfer). Identifier flags: RW10226 is the Bao-lab lineaging
+    strain — verify the exact zuIs178/stIs10024 transgene strings against CGC before the first benchmark
+    push. otIs355 [rab-3(prom1)::2xNLS::TagRFP] is real (Stefanakis/Hobert 2015); confirm the CGC strain
+    designation that carries it (placeholder name OH-otIs355 used here). OH904/rab-3p::GFP is cited in
+    PLAN_MODE_DESIGN as pan-neuronal but is not used in this program — otIs355 is the nuclear-localized
+    pan-neuronal reporter this program needs.'
