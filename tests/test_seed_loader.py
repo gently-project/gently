@@ -35,6 +35,6 @@ def test_load_real_seed_dir():
     with tempfile.TemporaryDirectory() as td:
         s = FileContextStore(Path(td) / "agent")
         loaded = load_seed_dir(s, seed_dir)
-        assert len(loaded) == 4                       # the 4 real programs
+        assert len(loaded) == 4  # the 4 real programs
         assert len(s.list_experiments()) >= 4
         assert len(s.list_strains()) >= 4

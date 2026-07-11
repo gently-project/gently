@@ -30,7 +30,7 @@ def test_list_strains(tmp_path):
 def test_resolve_strain_by_id_and_name(tmp_path):
     s = FileContextStore(tmp_path / "agent")
     sid = s.create_strain("N2")
-    assert s.resolve_strain(sid)["name"] == "N2"          # by id
-    assert s.resolve_strain("n2")["id"] == sid            # case-insensitive name
-    assert s.resolve_strain("nonexistent") is None        # bare string, no match → None
+    assert s.resolve_strain(sid)["name"] == "N2"  # by id
+    assert s.resolve_strain("n2")["id"] == sid  # case-insensitive name
+    assert s.resolve_strain("nonexistent") is None  # bare string, no match → None
     assert s.resolve_strain(None) is None

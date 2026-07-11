@@ -24,7 +24,7 @@ def _client(store):
 
 def _store_with(preds, gt):
     store = MagicMock()
-    store.set_ground_truth = MagicMock()   # identifies it as the GT/FileStore
+    store.set_ground_truth = MagicMock()  # identifies it as the GT/FileStore
     store.get_predictions.return_value = preds
     store.get_ground_truth.return_value = gt
     return store
@@ -64,8 +64,10 @@ def test_export_success_pushes(monkeypatch):
     def fake_push(records, **kw):
         seen.update(n=len(records), repo=kw.get("repo"))
         return {
-            "repo": kw.get("repo"), "split": kw.get("split", "train"),
-            "n": len(records), "revision": None,
+            "repo": kw.get("repo"),
+            "split": kw.get("split", "train"),
+            "n": len(records),
+            "revision": None,
         }
 
     monkeypatch.setattr(hf_connector, "push_dataset", fake_push)

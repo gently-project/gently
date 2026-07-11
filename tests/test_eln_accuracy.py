@@ -11,7 +11,7 @@ def test_stage_at_timepoint_covers_range():
     assert acc.stage_at_timepoint(gt, 5) == "bean"
     assert acc.stage_at_timepoint(gt, 10) == "bean"
     assert acc.stage_at_timepoint(gt, 11) == "comma"
-    assert acc.stage_at_timepoint(gt, 999) == "comma"   # open-ended reaches on
+    assert acc.stage_at_timepoint(gt, 999) == "comma"  # open-ended reaches on
 
 
 def test_stage_at_timepoint_no_coverage():
@@ -21,8 +21,8 @@ def test_stage_at_timepoint_no_coverage():
 
 def test_score_accuracy_mix():
     preds = [
-        {"timepoint": 1, "predicted_stage": "bean"},    # correct
-        {"timepoint": 6, "predicted_stage": "comma"},   # wrong (gt bean)
+        {"timepoint": 1, "predicted_stage": "bean"},  # correct
+        {"timepoint": 6, "predicted_stage": "comma"},  # wrong (gt bean)
         {"timepoint": 12, "predicted_stage": "comma"},  # correct
         {"timepoint": 50, "predicted_stage": "pretzel"},  # unscored (no gt)
     ]
@@ -43,7 +43,7 @@ def test_accuracy_result_shape_and_draft_when_unscorable():
     gt = [{"stage": "bean", "start_timepoint": 0, "end_timepoint": 10}]
     r = acc.accuracy_result("s1", "e1", preds, gt, run_id="run7", annotator="kesh")
     assert r["kind"] == "accuracy"
-    assert r["value"] is None            # nothing scorable
+    assert r["value"] is None  # nothing scorable
     assert r["status"] == "draft"
     assert r["inputs"]["run_id"] == "run7"
     assert r["provenance"]["author"] == "kesh"

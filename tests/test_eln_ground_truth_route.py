@@ -13,7 +13,7 @@ def _build_client(store):
     app = FastAPI()
     server = MagicMock()
     agent = MagicMock()
-    agent.experiment = MagicMock()      # hasattr(agent, "experiment") → True
+    agent.experiment = MagicMock()  # hasattr(agent, "experiment") → True
     agent.store = store
     agent.session_id = "s1"
     server.agent_bridge.agent = agent
@@ -30,9 +30,7 @@ def test_ground_truth_route_persists_range():
         json={"stage": "comma", "start_timepoint": 40, "end_timepoint": 58, "annotator": "kesh"},
     )
     assert resp.status_code == 200
-    store.set_ground_truth.assert_called_once_with(
-        "s1", "embryo_1", "comma", 40, 58, "kesh", None
-    )
+    store.set_ground_truth.assert_called_once_with("s1", "embryo_1", "comma", 40, 58, "kesh", None)
     assert resp.json()["stage"] == "comma"
 
 
@@ -45,7 +43,7 @@ def test_ground_truth_route_open_ended_end():
     )
     assert resp.status_code == 200
     args = store.set_ground_truth.call_args[0]
-    assert args[3] == 90 and args[4] is None      # end_timepoint None = open-ended
+    assert args[3] == 90 and args[4] is None  # end_timepoint None = open-ended
 
 
 def test_ground_truth_route_requires_stage():
@@ -71,7 +69,7 @@ def test_ground_truth_route_benchmark_no_agent_uses_server_store():
 
     store = MagicMock()
     server = MagicMock()
-    server.agent_bridge = None          # benchmark mode: no agent bridge
+    server.agent_bridge = None  # benchmark mode: no agent bridge
     server.gently_store = store
     app = FastAPI()
     app.include_router(create_router(server))

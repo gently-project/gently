@@ -20,7 +20,7 @@ def test_create_and_get_experiment(tmp_path):
 def test_arm_strain_alias(tmp_path):
     s = FileContextStore(tmp_path / "agent")
     eid = s.create_experiment("e", arms=[{"name": "a", "strain": "N2", "condition": "c"}])
-    assert s.get_experiment(eid)["arms"][0]["strain_ref"] == "N2"   # `strain` → strain_ref
+    assert s.get_experiment(eid)["arms"][0]["strain_ref"] == "N2"  # `strain` → strain_ref
 
 
 def test_link_session_to_arm(tmp_path):

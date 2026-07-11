@@ -17,7 +17,7 @@ from gently.eln.accuracy import stage_at_timepoint
 def _as_dict(x) -> dict:
     if isinstance(x, dict):
         return x
-    if is_dataclass(x):
+    if is_dataclass(x) and not isinstance(x, type):
         return asdict(x)
     if hasattr(x, "__dict__"):
         return dict(x.__dict__)
@@ -67,17 +67,23 @@ def collect_embryo_annotations(
         gt_stage = stage_at_timepoint(gt, tp) if tp is not None else None
         if annotated_only and gt_stage is None:
             continue
-        rows.append({
-            "session_id": session_id,
-            "embryo_id": embryo_id,
-            "timepoint": tp,
-            "predicted_stage": _pred_stage(rec),
-            "ground_truth_stage": gt_stage,
-            "stage": gt_stage,  # hf_connector.build_records falls back to `stage`
-            "annotator": _annotator_at(gt, tp),
-            "strain": strain,
-            "provenance": {"session_id": session_id, "embryo_id": embryo_id, "source": "gently"},
-        })
+        rows.append(
+            {
+                "session_id": session_id,
+                "embryo_id": embryo_id,
+                "timepoint": tp,
+                "predicted_stage": _pred_stage(rec),
+                "ground_truth_stage": gt_stage,
+                "stage": gt_stage,  # hf_connector.build_records falls back to `stage`
+                "annotator": _annotator_at(gt, tp),
+                "strain": strain,
+                "provenance": {
+                    "session_id": session_id,
+                    "embryo_id": embryo_id,
+                    "source": "gently",
+                },
+            }
+        )
     return rows
 
 

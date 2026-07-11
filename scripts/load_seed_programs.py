@@ -29,6 +29,7 @@ def main():
         base = Path(args.storage)
     else:
         from gently.settings import settings
+
         base = settings.storage.base_path
 
     agent_dir = base / "agent"
@@ -39,7 +40,9 @@ def main():
         camp = store.get_campaign(rec["campaign_id"])
         title = ""
         if camp is not None:
-            title = (getattr(camp, "shorthand", None) or getattr(camp, "description", "") or "")[:60]
+            title = (getattr(camp, "shorthand", None) or getattr(camp, "description", "") or "")[
+                :60
+            ]
         print(
             f"  {rec['campaign_id']}  {title}  "
             f"({len(rec['strain_ids'])} strains, {len(rec['experiment_ids'])} experiments, "

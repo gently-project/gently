@@ -7,7 +7,8 @@ from gently.harness.memory.file_store import FileContextStore
 def test_save_and_filter_results(tmp_path):
     s = FileContextStore(tmp_path / "agent")
     r = accuracy_result(
-        "sess", "emb",
+        "sess",
+        "emb",
         [{"timepoint": 1, "predicted_stage": "bean"}],
         [{"stage": "bean", "start_timepoint": 0, "end_timepoint": 5}],
     )

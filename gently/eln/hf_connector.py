@@ -42,18 +42,20 @@ def build_records(annotations: list[dict]) -> list[dict]:
     """
     rows = []
     for a in annotations:
-        rows.append({
-            "session_id": a.get("session_id"),
-            "embryo_id": a.get("embryo_id"),
-            "image_ref": a.get("image_ref"),
-            "predicted_stage": a.get("predicted_stage"),
-            "ground_truth_stage": a.get("ground_truth_stage") or a.get("stage"),
-            "start_timepoint": a.get("start_timepoint"),
-            "end_timepoint": a.get("end_timepoint"),
-            "annotator": a.get("annotator"),
-            "strain": a.get("strain"),
-            "provenance": a.get("provenance") or {},
-        })
+        rows.append(
+            {
+                "session_id": a.get("session_id"),
+                "embryo_id": a.get("embryo_id"),
+                "image_ref": a.get("image_ref"),
+                "predicted_stage": a.get("predicted_stage"),
+                "ground_truth_stage": a.get("ground_truth_stage") or a.get("stage"),
+                "start_timepoint": a.get("start_timepoint"),
+                "end_timepoint": a.get("end_timepoint"),
+                "annotator": a.get("annotator"),
+                "strain": a.get("strain"),
+                "provenance": a.get("provenance") or {},
+            }
+        )
     return rows
 
 

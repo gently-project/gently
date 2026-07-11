@@ -249,12 +249,14 @@ class FileContextStore:
         now = self._now()
         norm_arms = []
         for a in arms or []:
-            norm_arms.append({
-                "name": a.get("name"),
-                "strain_ref": a.get("strain_ref") or a.get("strain"),
-                "condition": a.get("condition"),
-                "session_ids": list(a.get("session_ids") or []),
-            })
+            norm_arms.append(
+                {
+                    "name": a.get("name"),
+                    "strain_ref": a.get("strain_ref") or a.get("strain"),
+                    "condition": a.get("condition"),
+                    "session_ids": list(a.get("session_ids") or []),
+                }
+            )
         data = {
             "id": eid,
             "title": title,

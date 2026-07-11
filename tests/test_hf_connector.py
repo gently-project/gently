@@ -6,12 +6,21 @@ from gently.eln import hf_connector as hc
 
 
 def test_build_records_maps_prediction_and_ground_truth():
-    rows = hc.build_records([{
-        "session_id": "s", "embryo_id": "e", "predicted_stage": "comma",
-        "stage": "bean", "start_timepoint": 10, "end_timepoint": 20,
-        "annotator": "kesh", "strain": "OH904",
-    }])
-    assert rows[0]["ground_truth_stage"] == "bean"   # falls back to `stage`
+    rows = hc.build_records(
+        [
+            {
+                "session_id": "s",
+                "embryo_id": "e",
+                "predicted_stage": "comma",
+                "stage": "bean",
+                "start_timepoint": 10,
+                "end_timepoint": 20,
+                "annotator": "kesh",
+                "strain": "OH904",
+            }
+        ]
+    )
+    assert rows[0]["ground_truth_stage"] == "bean"  # falls back to `stage`
     assert rows[0]["predicted_stage"] == "comma"
     assert rows[0]["start_timepoint"] == 10
     assert rows[0]["strain"] == "OH904"

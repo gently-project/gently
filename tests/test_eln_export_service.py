@@ -20,13 +20,13 @@ def test_collect_pairs_predictions_with_gt_ranges():
     ]
     gt = [{"stage": "bean", "start_timepoint": 0, "end_timepoint": 10, "annotator": "kesh"}]
     rows = es.collect_embryo_annotations(_store(preds, gt), "s1", "e1", strain="OH904")
-    assert len(rows) == 2                       # only annotated timepoints
+    assert len(rows) == 2  # only annotated timepoints
     assert rows[0]["ground_truth_stage"] == "bean"
     assert rows[0]["predicted_stage"] == "bean"
-    assert rows[1]["predicted_stage"] == "comma"   # tp 6, still in [0,10]
+    assert rows[1]["predicted_stage"] == "comma"  # tp 6, still in [0,10]
     assert rows[0]["annotator"] == "kesh"
     assert rows[0]["strain"] == "OH904"
-    assert rows[0]["stage"] == "bean"           # build_records fallback key
+    assert rows[0]["stage"] == "bean"  # build_records fallback key
 
 
 def test_collect_include_unannotated():

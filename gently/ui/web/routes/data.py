@@ -167,9 +167,7 @@ def create_router(server) -> APIRouter:
                 logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
         return emb.to_dict()
 
-    @router.post(
-        "/api/embryos/{embryo_id}/ground_truth", dependencies=[Depends(require_control)]
-    )
+    @router.post("/api/embryos/{embryo_id}/ground_truth", dependencies=[Depends(require_control)])
     async def set_embryo_ground_truth(
         embryo_id: str,
         body: dict = Body(...),  # noqa: B008
@@ -192,8 +190,8 @@ def create_router(server) -> APIRouter:
         if not stage:
             raise HTTPException(status_code=400, detail="Body needs a stage")
         try:
-            start_tp = int(body.get("start_timepoint"))
-        except (TypeError, ValueError):
+            start_tp = int(body["start_timepoint"])
+        except (KeyError, TypeError, ValueError):
             raise HTTPException(
                 status_code=400, detail="Body needs an integer start_timepoint"
             ) from None
