@@ -149,7 +149,7 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
         # Collect all items across the tree and enrich with deps/dependents
-        bibliography = []
+        bibliography: list[Any] = []
         ref_index = {}  # dedup by (source, key)
 
         # Pre-index every item in the tree once. The naive enrichment used to call
