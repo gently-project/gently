@@ -278,6 +278,7 @@ async function openCampaign(campaignId) {
     await Promise.all([
         loadDocument(campaignId),
         loadVersions(campaignId),
+        loadEln(campaignId),
     ]);
 
     // If we don't have campaigns list yet (direct URL), load in background
@@ -458,6 +459,9 @@ function renderPlanDoc() {
         html += renderPhaseBlock(child, idx + 1);
     });
 
+    // ELN scientific spine — experiments × arms × strains × hypotheses
+    html += renderElnSection();
+
     // Bibliography
     html += renderBibliography();
 
@@ -466,6 +470,82 @@ function renderPlanDoc() {
 
     html += '</div>';
     $canvasContent.innerHTML = html;
+}
+
+// ── ELN scientific spine (Strain / Experiment / Hypothesis) ──────────────
+async function loadEln(campaignId) {
+    try {
+        const res = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/eln`);
+        state.elnData = res.ok ? await res.json() : null;
+    } catch (e) {
+        state.elnData = null;
+    }
+}
+
+function _clip(s, n) {
+    s = s || '';
+    return s.length > n ? esc(s.slice(0, n)) + '…' : esc(s);
+}
+
+function renderElnSection() {
+    const eln = state.elnData;
+    if (!eln) return '';
+    const experiments = eln.experiments || [];
+    const strains = eln.strains || [];
+    if (experiments.length === 0 && strains.length === 0) return '';
+
+    let html = '<div class="eln-section">';
+
+    if (strains.length) {
+        html += `<div class="eln-block-title">Strains <span class="eln-count">${strains.length}</span></div>`;
+        html += '<div class="eln-strains">';
+        for (const s of strains) {
+            html += `<div class="eln-strain-chip" title="${esc(s.genotype || s.name || '')}">
+                <span class="eln-strain-name">${esc(s.name || s.id)}</span>
+                ${s.genotype ? `<span class="eln-strain-geno">${_clip(s.genotype, 48)}</span>` : ''}
+            </div>`;
+        }
+        html += '</div>';
+    }
+
+    if (experiments.length) {
+        html += `<div class="eln-block-title">Experiments <span class="eln-count">${experiments.length}</span></div>`;
+        for (const e of experiments) {
+            html += `<div class="eln-experiment"><div class="eln-exp-title">${esc(e.title || e.id)}</div>`;
+            const arms = e.arms || [];
+            const controls = e.controls || [];
+            if (arms.length) {
+                html += '<div class="eln-arms">';
+                for (const a of arms) {
+                    const isCtl = controls.includes(a.name);
+                    html += `<div class="eln-arm${isCtl ? ' eln-arm-control' : ''}">
+                        <span class="eln-arm-name">${esc(a.name || '')}</span>
+                        ${a.strain_name ? `<span class="eln-arm-strain">${esc(a.strain_name)}</span>` : ''}
+                        ${a.condition ? `<span class="eln-arm-cond" title="${esc(a.condition)}">${_clip(a.condition, 140)}</span>` : ''}
+                    </div>`;
+                }
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+    }
+
+    const hyps = eln.hypotheses || [];
+    if (hyps.length) {
+        html += `<div class="eln-block-title">Hypotheses <span class="eln-count">${hyps.length}</span></div>`;
+        html += '<div class="eln-hyps">';
+        for (const h of hyps) {
+            const st = h.status || 'proposed';
+            html += `<div class="eln-hyp">
+                <span class="eln-hyp-status eln-hyp-${esc(st)}">${esc(st)}</span>
+                <span class="eln-hyp-text" title="${esc(h.statement || '')}">${_clip(h.statement, 220)}</span>
+            </div>`;
+        }
+        html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
 }
 
 function renderPhaseBlock(child, phaseNum) {

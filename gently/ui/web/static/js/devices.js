@@ -2066,6 +2066,13 @@ const DevicesManager = (function () {
                     return;
                 }
             }
+            // Specimen-safety confirm: turning the laser ON delivers excitation
+            // light to live specimens (phototoxicity). Turning OFF never confirms
+            // — the safe direction needs no friction.
+            if (!window.confirm(
+                `Turn the laser ON (${config})?\n` +
+                `This delivers excitation light to live specimens.`
+            )) return;
             await setLaserPreset(config);
         }
     }
@@ -2153,6 +2160,11 @@ const DevicesManager = (function () {
         if (!_lsTempInput) return;
         const target = parseFloat(_lsTempInput.value);
         if (isNaN(target) || target < 0 || target > 99.9) return;
+        // Specimen-safety confirm (see setTemperature): perturbs live embryos.
+        if (!window.confirm(
+            `Set water temperature to ${target.toFixed(1)} °C?\n` +
+            `This changes the thermal environment around live embryos.`
+        )) return;
         try {
             await fetch('/api/devices/temperature/set', {
                 method: 'POST',
@@ -2346,6 +2358,16 @@ const DevicesManager = (function () {
         if (isNaN(target) || target < 0 || target > 99.9) {
             _tempReadout.textContent = '0–99.9 °C';
             setTimeout(loadTemperatureStatus, 1500);
+            return;
+        }
+        // Specimen-safety confirm: a setpoint change perturbs the thermal
+        // environment around live embryos — unlike the reversible map edits,
+        // this affects the biology, so gate it behind an explicit confirm.
+        if (!window.confirm(
+            `Set water temperature to ${target.toFixed(1)} °C?\n` +
+            `This changes the thermal environment around live embryos.`
+        )) {
+            loadTemperatureStatus();
             return;
         }
         _tempBusy = true;

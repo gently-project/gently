@@ -800,6 +800,9 @@ const EmbryosManager = {
         html += '<div class="vitals-detail" id="vitals-detail"></div>';
         container.innerHTML = html;
 
+        // Lazy-load per-embryo annotation counts for the Push-to-HF affordance.
+        this._loadHfSummaries(container);
+
         // Click handlers on SVG data points
         container.querySelectorAll('.vitals-point').forEach(pt => {
             pt.addEventListener('click', (e) => {
@@ -952,10 +955,60 @@ const EmbryosManager = {
                     <span class="vitals-rate">${rate}</span>
                     <span class="vitals-eta">${eta}</span>
                     ${statusBadge}
+                    <span class="vitals-hf">
+                        <span class="vitals-annic" id="hf-count-${embryo.embryoId}">…</span>
+                        <button class="vitals-hf-btn"
+                                onclick="event.stopPropagation(); EmbryosManager.pushEmbryoToHf('${embryo.embryoId}')"
+                                title="Push this embryo's annotated timelapse to HuggingFace">Push to HF</button>
+                    </span>
                 </div>
                 <div class="vitals-chart-container">${svg}</div>
             </div>
         `;
+    },
+
+    // ── Per-embryo HuggingFace push (annotation flywheel terminal step) ──────
+    async _loadHfSummaries(container) {
+        const sid = this.currentSessionId || '';
+        const q = sid ? `?session_id=${encodeURIComponent(sid)}` : '';
+        for (const span of container.querySelectorAll('.vitals-annic')) {
+            const eid = span.id.replace('hf-count-', '');
+            try {
+                const res = await fetch(`/api/embryos/${eid}/annotation-summary${q}`);
+                if (!res.ok) continue;
+                const d = await res.json();
+                span.textContent = `${d.n_annotated}/${d.n_predictions} annotated`;
+                const btn = span.parentElement.querySelector('.vitals-hf-btn');
+                if (btn && !d.n_annotated) { btn.disabled = true; btn.title = 'No ground-truth annotations yet'; }
+            } catch (e) { /* leave placeholder */ }
+        }
+    },
+
+    async pushEmbryoToHf(embryoId) {
+        if (!window.confirm(
+            `Push ${embryoId}'s annotated timelapse to HuggingFace?\n` +
+            `(pskeshu/gently-perception-benchmark — this publishes the human ground truth + predictions.)`
+        )) return;
+        const span = document.getElementById(`hf-count-${embryoId}`);
+        const btn = span ? span.parentElement.querySelector('.vitals-hf-btn') : null;
+        const reset = (msg) => {
+            if (!btn) return;
+            btn.textContent = msg;
+            setTimeout(() => { btn.textContent = 'Push to HF'; btn.disabled = false; }, 2600);
+        };
+        if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
+        try {
+            const res = await fetch(`/api/embryos/${embryoId}/export`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm: true, session_id: this.currentSessionId }),
+            });
+            if (res.status === 401 || res.status === 403) return reset('Log in');
+            if (res.status === 503) return reset('Set HF_TOKEN');
+            if (!res.ok) { console.debug('hf export failed:', await res.text()); return reset('Failed'); }
+            const d = await res.json();
+            reset(`Pushed ${d.n} ✓`);
+        } catch (e) { console.debug('hf export error:', e); reset('Failed'); }
     },
 
     // Header panel collapse state
@@ -3262,7 +3315,7 @@ const EmbryosManager = {
                         </div>
                     </div>
                 ` : ''}
-                ${detection.detected ? this.renderAgreeDisagreeButtons(detection, index) : ''}
+                ${detection.detected ? this.renderGroundTruthControl(detection, index) : ''}
             </div>
         `;
     },
@@ -3291,6 +3344,92 @@ const EmbryosManager = {
                 </button>
             </div>
         `;
+    },
+
+    // Ground-truth stage authoring (ELN annotation flywheel write path).
+    // Replaces the localStorage-only Agree/Disagree dead-end: the human confirms
+    // or corrects the model's stage call, persisted via POST /api/embryos/{id}/
+    // ground_truth so it feeds accuracy + the HuggingFace export.
+    GT_STAGES: ['early', 'bean', 'comma', '1.5fold', '2fold', '3fold', 'pretzel', 'hatching', 'hatched'],
+
+    renderGroundTruthControl(detection, index) {
+        const key = `${this.selectedEmbryoId}-${detection.timepoint}`;
+        const gt = this.groundTruths[key];
+        const predicted = detection.stage || detection.predicted_stage
+            || (detection.findings && detection.findings.stage) || '';
+        const chosen = gt ? gt.stage : predicted;
+        const opts = this.GT_STAGES.map(s =>
+            `<option value="${s}"${s === chosen ? ' selected' : ''}>${s}</option>`
+        ).join('');
+        const badge = gt
+            ? `<span class="gt-badge" title="Human ground truth${gt.annotator ? ' by ' + gt.annotator : ''}">&#x2714; GT: ${gt.stage}</span>`
+            : '';
+        return `
+            <div class="gt-actions" data-tooltip="Confirm or correct the model's stage as ground truth — this feeds accuracy + the training set">
+                <span class="gt-label">Ground truth</span>
+                <select class="gt-stage-select" id="gt-sel-${index}">${opts}</select>
+                <button class="gt-confirm-btn"
+                        onclick="event.stopPropagation(); EmbryosManager.markGroundTruth(${index}, ${detection.timepoint}, document.getElementById('gt-sel-${index}').value)">
+                    ${gt ? 'Update' : '&#x2714; Confirm'}
+                </button>
+                ${badge}
+            </div>
+        `;
+    },
+
+    async markGroundTruth(index, timepoint, stage) {
+        const embryoId = this.selectedEmbryoId;
+        if (!embryoId || timepoint == null || !stage) return;
+        const wrap = document.getElementById(`gt-sel-${index}`);
+        const container = wrap ? wrap.closest('.gt-actions') : null;
+        try {
+            const res = await fetch(`/api/embryos/${embryoId}/ground_truth`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    stage,
+                    start_timepoint: timepoint,
+                    session_id: this.currentSessionId,
+                }),
+            });
+            if (res.status === 401 || res.status === 403) {
+                if (container) container.classList.add('gt-need-control');
+                return;
+            }
+            if (!res.ok) {
+                console.debug('ground truth failed:', await res.text());
+                if (container) {
+                    container.classList.add('gt-need-control');
+                    const btn = container.querySelector('.gt-confirm-btn');
+                    if (btn) {
+                        const prev = btn.textContent;
+                        btn.textContent = 'Save failed';
+                        setTimeout(() => {
+                            btn.textContent = prev;
+                            container.classList.remove('gt-need-control');
+                        }, 1800);
+                    }
+                }
+                return;
+            }
+            const data = await res.json();
+            this.groundTruths[`${embryoId}-${timepoint}`] = { stage: data.stage, annotator: data.annotator };
+            if (container) {
+                container.classList.remove('gt-need-control');
+                let badge = container.querySelector('.gt-badge');
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'gt-badge';
+                    container.appendChild(badge);
+                }
+                badge.innerHTML = `&#x2714; GT: ${data.stage}`;
+                badge.title = 'Human ground truth' + (data.annotator ? ' by ' + data.annotator : '');
+                const btn = container.querySelector('.gt-confirm-btn');
+                if (btn) btn.textContent = 'Update';
+                container.classList.add('gt-saved-flash');
+                setTimeout(() => container.classList.remove('gt-saved-flash'), 900);
+            }
+        } catch (err) { console.debug('ground truth failed:', err); }
     },
 
     // Render a verification event card for the reasoning panel
@@ -3383,6 +3522,7 @@ const EmbryosManager = {
 
     // Track user agreement/disagreement with detections
     detectionAgreements: {},  // key: "{detector}-{timepoint}" -> true/false
+    groundTruths: {},  // key: "{embryo}-{timepoint}" -> {stage, annotator} (persisted GT)
 
     markAgreement(detectorName, timepoint, agrees) {
         const key = `${detectorName}-${timepoint}`;

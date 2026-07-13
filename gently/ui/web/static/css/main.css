@@ -4084,6 +4084,28 @@ kbd {
     border-right: 1px solid var(--border);
 }
 
+.vitals-hf {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin-top: 2px;
+}
+.vitals-annic { font-size: 0.62rem; color: var(--text-muted); text-align: center; }
+.vitals-hf-btn {
+    font-size: 0.62rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: rgba(96, 165, 250, 0.1);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.vitals-hf-btn:hover:not(:disabled) { background: rgba(96, 165, 250, 0.2); }
+.vitals-hf-btn:disabled { opacity: 0.5; cursor: default; }
+
 .vitals-name {
     font-weight: 700;
     font-size: 1rem;
@@ -6763,6 +6785,66 @@ kbd {
     padding: 0.75rem 1rem;
     background: var(--bg-hover);
     border-top: 1px solid var(--border);
+}
+
+/* Ground-truth stage authoring (ELN annotation flywheel write path) */
+.gt-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.75rem 1rem;
+    background: var(--bg-hover);
+    border-top: 1px solid var(--border);
+    transition: background 0.3s ease;
+}
+.gt-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+}
+.gt-stage-select {
+    padding: 0.4rem 0.55rem;
+    font-size: 0.8rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+}
+.gt-stage-select:hover { border-color: var(--accent); }
+.gt-confirm-btn {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--accent-green);
+    background: rgba(74, 222, 128, 0.12);
+    color: var(--accent-green);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.gt-confirm-btn:hover { background: rgba(74, 222, 128, 0.22); }
+.gt-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: auto;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.76rem;
+    font-weight: 600;
+    border-radius: 999px;
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+    border: 1px solid var(--accent-green);
+}
+.gt-actions.gt-saved-flash { background: rgba(74, 222, 128, 0.16); }
+.gt-actions.gt-need-control .gt-confirm-btn {
+    border-color: var(--accent-orange);
+    color: var(--accent-orange);
+    background: rgba(251, 146, 60, 0.12);
 }
 
 .vlm-action-btn {

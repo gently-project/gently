@@ -136,6 +136,11 @@ class FileContextStore:
             "ml/pipelines",
             "ml/runs",
             "ml/assessments",
+            # ELN scientific spine (optional overlays)
+            "strains",
+            "experiments",
+            "hypotheses",
+            "results",
         ):
             (self.agent_dir / subdir).mkdir(parents=True, exist_ok=True)
 
@@ -160,6 +165,211 @@ class FileContextStore:
     def _campaign_folder(self, campaign_id: str) -> Path | None:
         """Return the folder for a campaign, or None."""
         return self._campaign_index.get(campaign_id)
+
+    # ------------------------------------------------------------------
+    # Scientific spine — Strain (ELN, phase 1). Optional overlay: nothing in
+    # the existing flow requires a Strain record; bare strain strings still work.
+    # ------------------------------------------------------------------
+
+    def create_strain(
+        self,
+        name: str,
+        genotype: str | None = None,
+        markers: list | None = None,
+        background: str | None = None,
+        source_lab: str | None = None,
+        organism_ref: str | None = None,
+        stock: dict | None = None,
+        author: str | None = None,
+        strain_id: str | None = None,
+    ) -> str:
+        """Create (or overwrite by id) a Strain record at agent/strains/{id}.yaml."""
+        sid = strain_id or self._gen_id()
+        now = self._now()
+        data = {
+            "id": sid,
+            "name": name,
+            "genotype": genotype,
+            "markers": list(markers or []),
+            "background": background,
+            "source_lab": source_lab,
+            "organism_ref": organism_ref,
+            "stock": stock or {},
+            "author": author,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._write_yaml(self.agent_dir / "strains" / f"{sid}.yaml", data)
+        logger.info(f"Created strain {sid} [{name}]")
+        return sid
+
+    def get_strain(self, strain_id: str) -> dict | None:
+        p = self.agent_dir / "strains" / f"{strain_id}.yaml"
+        return self._read_yaml(p) if p.exists() else None
+
+    def list_strains(self) -> list[dict]:
+        d = self.agent_dir / "strains"
+        if not d.exists():
+            return []
+        return [s for s in (self._read_yaml(f) for f in sorted(d.glob("*.yaml"))) if s]
+
+    def resolve_strain(self, ref: str | None) -> dict | None:
+        """Resolve a strain by id or (case-insensitive) name.
+
+        Back-compat: a bare string that matches no record returns None, so
+        callers keep the raw string as a display value — no forced migration.
+        """
+        if not ref:
+            return None
+        byid = self.get_strain(ref)
+        if byid:
+            return byid
+        rl = str(ref).strip().lower()
+        for s in self.list_strains():
+            if str(s.get("name", "")).strip().lower() == rl:
+                return s
+        return None
+
+    # ------------------------------------------------------------------
+    # Scientific spine — Experiment (ELN, phase 2). Optional overlay.
+    # ------------------------------------------------------------------
+
+    def create_experiment(
+        self,
+        title: str,
+        campaign_ref: str | None = None,
+        arms: list | None = None,
+        controls: list | None = None,
+        replicate_of: str | None = None,
+        export: dict | None = None,
+        author: str | None = None,
+        experiment_id: str | None = None,
+    ) -> str:
+        eid = experiment_id or self._gen_id()
+        now = self._now()
+        norm_arms = []
+        for a in arms or []:
+            norm_arms.append(
+                {
+                    "name": a.get("name"),
+                    "strain_ref": a.get("strain_ref") or a.get("strain"),
+                    "condition": a.get("condition"),
+                    "session_ids": list(a.get("session_ids") or []),
+                }
+            )
+        data = {
+            "id": eid,
+            "title": title,
+            "campaign_ref": campaign_ref,
+            "hypothesis_refs": [],
+            "arms": norm_arms,
+            "controls": list(controls or []),
+            "replicate_of": replicate_of,
+            "export": export or {},
+            "notes": None,
+            "status": "active",
+            "author": author,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._write_yaml(self.agent_dir / "experiments" / f"{eid}.yaml", data)
+        logger.info(f"Created experiment {eid} [{title[:50]}]")
+        return eid
+
+    def get_experiment(self, experiment_id: str) -> dict | None:
+        p = self.agent_dir / "experiments" / f"{experiment_id}.yaml"
+        return self._read_yaml(p) if p.exists() else None
+
+    def list_experiments(self) -> list[dict]:
+        d = self.agent_dir / "experiments"
+        if not d.exists():
+            return []
+        return [e for e in (self._read_yaml(f) for f in sorted(d.glob("*.yaml"))) if e]
+
+    def link_session_to_arm(self, experiment_id: str, arm_name: str, session_id: str) -> bool:
+        e = self.get_experiment(experiment_id)
+        if not e:
+            return False
+        for arm in e.get("arms", []):
+            if arm.get("name") == arm_name:
+                if session_id not in arm.setdefault("session_ids", []):
+                    arm["session_ids"].append(session_id)
+                e["updated_at"] = self._now()
+                self._write_yaml(self.agent_dir / "experiments" / f"{experiment_id}.yaml", e)
+                return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Scientific spine — Hypothesis (ELN, phase 3). Optional overlay.
+    # ------------------------------------------------------------------
+    _HYP_STATUSES = ("proposed", "supported", "refuted", "inconclusive")
+
+    def create_hypothesis(
+        self,
+        statement: str,
+        predictions: list | None = None,
+        experiment_refs: list | None = None,
+        author: str | None = None,
+        hypothesis_id: str | None = None,
+    ) -> str:
+        hid = hypothesis_id or self._gen_id()
+        data = {
+            "id": hid,
+            "statement": statement,
+            "status": "proposed",
+            "predictions": list(predictions or []),
+            "experiment_refs": list(experiment_refs or []),
+            "author": author,
+            "basis": [],
+            "created_at": self._now(),
+        }
+        self._write_yaml(self.agent_dir / "hypotheses" / f"{hid}.yaml", data)
+        return hid
+
+    def get_hypothesis(self, hypothesis_id: str) -> dict | None:
+        p = self.agent_dir / "hypotheses" / f"{hypothesis_id}.yaml"
+        return self._read_yaml(p) if p.exists() else None
+
+    def list_hypotheses(self) -> list[dict]:
+        d = self.agent_dir / "hypotheses"
+        if not d.exists():
+            return []
+        return [h for h in (self._read_yaml(f) for f in sorted(d.glob("*.yaml"))) if h]
+
+    def set_hypothesis_status(self, hypothesis_id: str, status: str) -> bool:
+        if status not in self._HYP_STATUSES:
+            raise ValueError(f"status must be one of {self._HYP_STATUSES}")
+        h = self.get_hypothesis(hypothesis_id)
+        if not h:
+            return False
+        h["status"] = status
+        self._write_yaml(self.agent_dir / "hypotheses" / f"{hypothesis_id}.yaml", h)
+        return True
+
+    # ------------------------------------------------------------------
+    # Scientific spine — Result (ELN, phase 3). Optional overlay.
+    # ------------------------------------------------------------------
+
+    def save_result(self, result: dict, result_id: str | None = None) -> str:
+        rid = result_id or result.get("id") or self._gen_id()
+        data = dict(result)
+        data["id"] = rid
+        data.setdefault("created_at", self._now())
+        self._write_yaml(self.agent_dir / "results" / f"{rid}.yaml", data)
+        return rid
+
+    def get_result(self, result_id: str) -> dict | None:
+        p = self.agent_dir / "results" / f"{result_id}.yaml"
+        return self._read_yaml(p) if p.exists() else None
+
+    def list_results(self, experiment_ref: str | None = None) -> list[dict]:
+        d = self.agent_dir / "results"
+        if not d.exists():
+            return []
+        out = [r for r in (self._read_yaml(f) for f in sorted(d.glob("*.yaml"))) if r]
+        if experiment_ref is not None:
+            out = [r for r in out if r.get("experiment_ref") == experiment_ref]
+        return out
 
     # ------------------------------------------------------------------
     # Helpers

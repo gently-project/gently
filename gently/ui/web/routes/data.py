@@ -100,6 +100,23 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=503, detail="Agent not ready")
         return agent
 
+    def _gt_store():
+        """Resolve a FileStore (with set_ground_truth) + the agent, if any.
+
+        Annotation/export don't need the full agent — fall back to the viz's own
+        store so they work in benchmark / no-agent mode too.
+        """
+        bridge = getattr(server, "agent_bridge", None)
+        agent = getattr(bridge, "agent", None) if bridge is not None else None
+        for cand in (
+            getattr(agent, "store", None),
+            getattr(server, "gently_store", None),
+            getattr(server, "store", None),
+        ):
+            if cand is not None and hasattr(cand, "set_ground_truth"):
+                return cand, agent
+        return None, agent
+
     @router.put("/api/embryos/{embryo_id}/position", dependencies=[Depends(require_control)])
     async def update_embryo_position(
         embryo_id: str,
@@ -149,6 +166,108 @@ def create_router(server) -> APIRouter:
             except Exception:
                 logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
         return emb.to_dict()
+
+    @router.post("/api/embryos/{embryo_id}/ground_truth", dependencies=[Depends(require_control)])
+    async def set_embryo_ground_truth(
+        embryo_id: str,
+        body: dict = Body(...),  # noqa: B008
+    ):
+        """Author a ground-truth stage annotation over a timepoint range.
+
+        The ELN annotation flywheel's write path: the human (or agent-assisted
+        batch-confirm) corrects/confirms the model's stage call, persisted via
+        FileStore.set_ground_truth with annotator provenance — replacing the old
+        localStorage-only Agree/Disagree dead-end. Range-based (start/end
+        timepoint) so a stretch can be confirmed in one write.
+        """
+        store, agent = _gt_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="No ground-truth store available")
+        session_id = body.get("session_id") or getattr(agent, "session_id", None)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No active session for ground truth")
+        stage = body.get("stage")
+        if not stage:
+            raise HTTPException(status_code=400, detail="Body needs a stage")
+        try:
+            start_tp = int(body["start_timepoint"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="Body needs an integer start_timepoint"
+            ) from None
+        end_raw = body.get("end_timepoint")
+        try:
+            end_tp = int(end_raw) if end_raw is not None else None
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="end_timepoint must be an integer or null"
+            ) from None
+        store.set_ground_truth(
+            session_id, embryo_id, stage, start_tp, end_tp, body.get("annotator"), body.get("notes")
+        )
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "embryo_id": embryo_id,
+            "stage": stage,
+            "start_timepoint": start_tp,
+            "end_timepoint": end_tp,
+            "annotator": body.get("annotator"),
+        }
+
+    @router.get("/api/embryos/{embryo_id}/annotation-summary")
+    async def embryo_annotation_summary(embryo_id: str, session_id: str | None = None):
+        """{n_predictions, n_annotated} for the per-embryo Push-to-HuggingFace affordance."""
+        from gently.eln.export_service import annotation_summary
+
+        store, agent = _gt_store()
+        sid = session_id or getattr(agent, "session_id", None)
+        if store is None or not sid:
+            return {"n_predictions": 0, "n_annotated": 0}
+        return annotation_summary(store, sid, embryo_id)
+
+    @router.post("/api/embryos/{embryo_id}/export", dependencies=[Depends(require_control)])
+    async def export_embryo_to_hf(
+        embryo_id: str,
+        body: dict = Body(...),  # noqa: B008
+    ):
+        """Approval-gated push of a per-embryo annotated timelapse to HuggingFace.
+
+        The flywheel's terminal step: {prediction, human ground truth, provenance,
+        strain} rows -> the shared benchmark dataset. Gated three ways (explicit
+        confirm + require_control + HF_TOKEN); never automatic.
+        """
+        from gently.eln import export_service, hf_connector
+
+        if not body.get("confirm"):
+            raise HTTPException(
+                status_code=400, detail="export requires confirm=true (approval gate)"
+            )
+        store, agent = _gt_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="No store available")
+        session_id = body.get("session_id") or getattr(agent, "session_id", None)
+        if not session_id:
+            raise HTTPException(status_code=400, detail="No active session")
+        if not hf_connector.token_present():
+            raise HTTPException(
+                status_code=503, detail="HF_TOKEN not set — set it to enable HuggingFace export"
+            )
+        rows = export_service.collect_embryo_annotations(
+            store, session_id, embryo_id, strain=body.get("strain")
+        )
+        if not rows:
+            raise HTTPException(status_code=400, detail="no annotated timepoints to export")
+        records = hf_connector.build_records(rows)
+        try:
+            summary = hf_connector.push_dataset(
+                records,
+                repo=body.get("repo") or hf_connector.DEFAULT_REPO,
+                split=body.get("split", "train"),
+            )
+        except hf_connector.HFExportError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        return {"ok": True, "embryo_id": embryo_id, **summary}
 
     @router.delete("/api/embryos/{embryo_id}", dependencies=[Depends(require_control)])
     async def delete_embryo(embryo_id: str):
