@@ -24,7 +24,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -35,11 +35,12 @@ logger = logging.getLogger(__name__)
 
 # Optional imports
 try:
+    import uvicorn
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
-    from fastapi.middleware.cors import CORSMiddleware
-    import uvicorn
+
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
@@ -60,8 +61,7 @@ class _InvalidHttpFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         if "Invalid HTTP request received" in msg:
-            logger.debug("uvicorn dropped non-HTTP bytes on viz port "
-                         "(probable TLS/peer mismatch)")
+            logger.debug("uvicorn dropped non-HTTP bytes on viz port (probable TLS/peer mismatch)")
             return False
         return True
 
@@ -76,25 +76,39 @@ STATIC_DIR = _WEB_DIR / "static"
 
 try:
     from PIL import Image
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
 
 # Import data models and components
-from .models import (
-    ClientInfo, Volume3DData, ImageData, EmbryoImageCache,
-    CALIBRATION_TYPES, VOLUME_TYPES, ANALYSIS_TYPES, VOLUME_3D_TYPES,
+from .connection_manager import ConnectionManager  # noqa: E402
+from .image_store import ImageStore  # noqa: E402
+from .models import (  # noqa: E402
+    ANALYSIS_TYPES,
+    CALIBRATION_TYPES,
+    VOLUME_3D_TYPES,
+    VOLUME_TYPES,
+    ClientInfo,
+    EmbryoImageCache,
+    ImageData,
+    Volume3DData,
 )
-from .image_store import ImageStore
-from .timelapse_tracker import TimelapseStateTracker
-from .connection_manager import ConnectionManager
+from .timelapse_tracker import TimelapseStateTracker  # noqa: E402
 
 # Re-export for backward compatibility
 __all__ = [
-    'VisualizationServer', 'create_visualization_server',
-    'ClientInfo', 'Volume3DData', 'ImageData', 'EmbryoImageCache',
-    'CALIBRATION_TYPES', 'VOLUME_TYPES', 'ANALYSIS_TYPES', 'VOLUME_3D_TYPES',
-    'ImageStore',
+    "VisualizationServer",
+    "create_visualization_server",
+    "ClientInfo",
+    "Volume3DData",
+    "ImageData",
+    "EmbryoImageCache",
+    "CALIBRATION_TYPES",
+    "VOLUME_TYPES",
+    "ANALYSIS_TYPES",
+    "VOLUME_3D_TYPES",
+    "ImageStore",
 ]
 
 
@@ -130,8 +144,8 @@ class VisualizationServer(Service):
         event_bus=None,
         sessions_dir: str = str(settings.storage.sessions_dir),
         gently_store=None,
-        ssl_certfile: str = None,
-        ssl_keyfile: str = None,
+        ssl_certfile: str | None = None,
+        ssl_keyfile: str | None = None,
     ):
         super().__init__(name="visualization", service_type="http", host=host, port=port)
         if not FASTAPI_AVAILABLE:
@@ -147,6 +161,16 @@ class VisualizationServer(Service):
         self.sessions_dir = Path(sessions_dir)
         self.gently_store = gently_store  # FileStore for persistent volume/projection access
         self.context_store = None  # FileContextStore — set via set_context_store()
+        # Wired in by launch_gently after construction (optional subsystems).
+        self.agent_bridge: Any = None
+        self.mesh_service: Any = None
+        self.device_supervisor: Any = None  # DeviceLayerSupervisor (RFC #78)
+        # Callable that stops the WHOLE backend (launcher keep-alive included);
+        # POST /api/shutdown uses it for the desktop shell handshake (issue #85).
+        self.request_shutdown: Any = None
+        # False until the launch gate is submitted this session; while False, /
+        # bounces to /launch so the gate is the entry point (RFC #78).
+        self.gate_passed: bool = False
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
@@ -161,12 +185,25 @@ class VisualizationServer(Service):
         self.app = FastAPI(
             title="Gently Visualization Server",
             description="Real-time microscopy visualization",
-            version="2.0.0"
+            version="2.0.0",
         )
 
         # Setup templates and static files
         self.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
         self.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+        # Static assets are served live (CLAUDE.md: "refresh the window — served
+        # live by Python, no rebuild"). Default StaticFiles sends ETag +
+        # Last-Modified but no Cache-Control, so browsers apply *heuristic*
+        # freshness and can serve a stale .js/.css after an edit — breaking that
+        # promise. Force revalidation on every load: with the ETag still present
+        # an unchanged file returns a cheap 304, a changed one returns fresh bytes.
+        @self.app.middleware("http")
+        async def _revalidate_static(request, call_next):
+            response = await call_next(request)
+            if request.url.path.startswith("/static"):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
 
         # Add CORS middleware
         self.app.add_middleware(
@@ -179,6 +216,7 @@ class VisualizationServer(Service):
 
         # Register route groups
         from .routes import register_all_routes
+
         register_all_routes(self)
 
         # Subscribe to events if event bus provided
@@ -193,7 +231,7 @@ class VisualizationServer(Service):
         """Set the FileContextStore for campaign/plan data access."""
         self.context_store = context_store
 
-    def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> Optional[str]:
+    def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> str | None:
         """Resolve volume file path from timelapse tracker or FileStore."""
         # 1. Try timelapse tracker (in-memory, fastest)
         if embryo_id in self.timelapse_tracker.volume_paths:
@@ -201,11 +239,17 @@ class VisualizationServer(Service):
             if path:
                 return path
 
-        # 2. Try FileStore (file-based, persistent)
-        if self.gently_store and self.timelapse_tracker.session_id:
+        # 2. Try FileStore (file-based, persistent). Key on the LIVE agent
+        # session, not the tracker's (which goes stale after a resume with no
+        # active timelapse) — mirrors _resolve_projection_path so an agent-driven
+        # open_volume hand-off doesn't 404 after a /resume.
+        sid = self._current_session_id()
+        if self.gently_store and sid:
             try:
                 vol_path = self.gently_store.get_volume_path(
-                    self.timelapse_tracker.session_id, embryo_id, timepoint,
+                    sid,
+                    embryo_id,
+                    timepoint,
                 )
                 if vol_path and vol_path.exists():
                     return str(vol_path)
@@ -214,18 +258,135 @@ class VisualizationServer(Service):
 
         return None
 
-    def _resolve_projection_path(self, embryo_id: str, timepoint: int) -> Optional[Path]:
-        """Resolve projection file path from FileStore."""
-        if self.gently_store and self.timelapse_tracker.session_id:
+    def _current_session_id(self) -> str | None:
+        """The live agent session (source of truth), falling back to the
+        timelapse tracker. The tracker's session_id goes stale after a resume
+        with no active timelapse, so the live agent session is preferred."""
+        bridge = getattr(self, "agent_bridge", None)
+        if bridge is not None and getattr(bridge, "agent", None) is not None:
+            sid = getattr(bridge.agent, "session_id", None)
+            if sid:
+                return sid
+        return self.timelapse_tracker.session_id
+
+    def _resolve_projection_path(self, embryo_id: str, timepoint: int) -> Path | None:
+        """Resolve projection file path from FileStore (current session)."""
+        sid = self._current_session_id()
+        if self.gently_store and sid:
             try:
                 proj_path = self.gently_store.get_projection_path(
-                    self.timelapse_tracker.session_id, embryo_id, timepoint,
+                    sid,
+                    embryo_id,
+                    timepoint,
                 )
                 if proj_path and proj_path.exists():
                     return proj_path
             except Exception as e:
                 logger.debug(f"FileStore projection path lookup failed: {e}")
         return None
+
+    def rehydrate_session(self, session_id: str) -> int:
+        """Repopulate the in-memory image store with the FileStore's persisted
+        projections for a (resumed) session, so galleries and filmstrips show
+        its historical data.
+
+        Lightweight: only metadata-bearing ImageData entries are created (uid
+        ``volume_{embryo}_t{NNNN}``); the JPEG pixels load lazily on demand via
+        /api/images/{uid}/png (which falls back to the FileStore projection).
+        Resets the store first so the previous session's images don't linger.
+        Returns the number of projection entries added.
+        """
+        if self.gently_store is None or not session_id:
+            return 0
+        self.store = ImageStore()  # drop the previous session's images
+        added = 0
+        try:
+            embryos = self.gently_store.list_embryos(session_id) or []
+        except Exception:
+            embryos = []
+        for emb in embryos:
+            eid = emb.get("embryo_id") if isinstance(emb, dict) else getattr(emb, "embryo_id", None)
+            if not eid:
+                continue
+            try:
+                tps = self.gently_store.list_projection_timepoints(session_id, eid)
+            except Exception:
+                tps = []
+            for tp in tps:
+                self.store.add_image(
+                    ImageData(
+                        uid=f"volume_{eid}_t{tp:04d}",
+                        data_type="volume_projection",
+                        timestamp=f"{tp:06d}",  # monotonic with timepoint for ordering
+                        metadata={"embryo_id": eid, "timepoint": tp},
+                    )
+                )
+                added += 1
+
+        # Rehydrate the timelapse tracker's per-embryo perception state from
+        # predictions.jsonl so the Default / Film / reasoning views populate
+        # (those are driven by detection_reasoning, not the raw image store).
+        # Thumbnails resolve via the projection uids added above.
+        tracker = self.timelapse_tracker
+        try:
+            tracker.session_id = session_id
+            tracker.detection_reasoning = {}
+            tracker.projection_uids = {}
+            for emb in embryos:
+                eid = (
+                    emb.get("embryo_id")
+                    if isinstance(emb, dict)
+                    else getattr(emb, "embryo_id", None)
+                )
+                if not eid:
+                    continue
+                try:
+                    preds = self.gently_store.get_predictions(session_id, eid) or []
+                except Exception:
+                    preds = []
+                if not preds:
+                    continue
+                items, puids, last_stage = [], {}, None
+                for p in preds:
+                    tp = p.get("timepoint")
+                    if tp is None:
+                        continue
+                    uid = f"volume_{eid}_t{tp:04d}"
+                    puids[tp] = uid
+                    stage = p.get("predicted_stage")
+                    last_stage = stage or last_stage
+                    items.append(
+                        {
+                            "timepoint": tp,
+                            "stage": stage,
+                            "detected_stage": stage,
+                            "reasoning": p.get("reasoning"),
+                            "confidence": p.get("confidence"),
+                            "projection_uid": uid,
+                            "image_uid": uid,
+                            "detector_name": "perception",
+                        }
+                    )
+                tracker.detection_reasoning[eid] = items
+                tracker.projection_uids[eid] = puids
+                entry = tracker.embryos.setdefault(
+                    eid,
+                    {
+                        "embryo_id": eid,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "detections": {},
+                        "current_stage": None,
+                    },
+                )
+                entry["timepoints"] = max((it["timepoint"] for it in items), default=0)
+                entry["current_stage"] = last_stage
+            tracker.total_timepoints = sum(len(v) for v in tracker.detection_reasoning.values())
+        except Exception:
+            logger.exception("Tracker perception rehydration failed")
+
+        logger.info("Rehydrated %d projections for session %s", added, session_id)
+        return added
 
     def _subscribe_to_events(self):
         """Subscribe to EventBus for automatic updates - broadcasts ALL events"""
@@ -236,7 +397,11 @@ class VisualizationServer(Service):
 
         async def on_event_async(event):
             """Async handler for all events - broadcasts to WebSocket clients"""
-            event_type_str = event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type)
+            event_type_str = (
+                event.event_type.name
+                if hasattr(event.event_type, "name")
+                else str(event.event_type)
+            )
 
             # Update timelapse state tracker
             self.timelapse_tracker.handle_event(event_type_str, event.data)
@@ -246,15 +411,17 @@ class VisualizationServer(Service):
                 event_type=event_type_str,
                 data=event.data,
                 source=event.source,
-                event_id=event.event_id
+                event_id=event.event_id,
             )
 
             # For session events, also broadcast updated timelapse_state so clients can sync
             if event_type_str in ("SESSION_STARTED", "SESSION_RESTORED"):
-                await self.manager.broadcast({
-                    "type": "timelapse_state",
-                    "data": self.timelapse_tracker.to_dict()
-                })
+                await self.manager.broadcast(
+                    {
+                        "type": "timelapse_state",
+                        "data": self.timelapse_tracker.to_dict(),
+                    }
+                )
 
         # Subscribe to ALL events using wildcard with async handler
         self.event_bus.subscribe_async("*", on_event_async)
@@ -272,11 +439,19 @@ class VisualizationServer(Service):
 
             # Process events in chronological order (history is newest-first)
             for event in reversed(history):
-                event_type_str = event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type)
+                event_type_str = (
+                    event.event_type.name
+                    if hasattr(event.event_type, "name")
+                    else str(event.event_type)
+                )
                 self.timelapse_tracker.handle_event(event_type_str, event.data)
 
             if self.timelapse_tracker.session_id:
-                logger.info(f"Initialized timelapse state from history: session={self.timelapse_tracker.session_id}, status={self.timelapse_tracker.status}")
+                logger.info(
+                    f"Initialized timelapse state from history:"
+                    f" session={self.timelapse_tracker.session_id},"
+                    f" status={self.timelapse_tracker.status}"
+                )
         except Exception as e:
             logger.warning(f"Failed to initialize from event history: {e}")
 
@@ -285,13 +460,13 @@ class VisualizationServer(Service):
         array: np.ndarray,
         uid: str,
         data_type: str,
-        metadata: Optional[Dict] = None
+        metadata: dict | None = None,
     ) -> ImageData:
         """Convert numpy array to ImageData with base64 PNG"""
         from gently.core.imaging import (
-            projection_three_view,
-            compute_crop_bounds,
             apply_crop_bounds,
+            compute_crop_bounds,
+            projection_three_view,
         )
 
         # Handle 4D arrays (Views, Z, Y, X) - select View A only
@@ -305,10 +480,9 @@ class VisualizationServer(Service):
                 pass
             else:
                 # It's a volume (Z, H, W) - generate three-view projection
-                z_depth, height, width = array.shape
-                # Handle dual-view format (width > 2*height)
-                if width > height * 2:
-                    array = array[:, :, :width // 2]
+                # View selection already happened via the 4D branch above; a 3D
+                # array is one view. Do not split by aspect ratio (2048x512
+                # native frames would be halved).
                 # Auto-crop to embryo region
                 bounds = compute_crop_bounds(array)
                 array = apply_crop_bounds(array, bounds)
@@ -328,8 +502,8 @@ class VisualizationServer(Service):
         if PIL_AVAILABLE:
             img = Image.fromarray(array)
             buffer = io.BytesIO()
-            img.save(buffer, format='PNG')
-            base64_png = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            img.save(buffer, format="PNG")
+            base64_png = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         return ImageData(
             uid=uid,
@@ -337,7 +511,7 @@ class VisualizationServer(Service):
             timestamp=datetime.now().isoformat(),
             metadata=metadata or {},
             base64_png=base64_png,
-            shape=array.shape
+            shape=array.shape,
         )
 
     async def push_image(
@@ -345,7 +519,7 @@ class VisualizationServer(Service):
         array: np.ndarray,
         uid: str,
         data_type: str = "image",
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ):
         """
         Push an image to connected clients
@@ -369,14 +543,16 @@ class VisualizationServer(Service):
         # Broadcast to clients
         await self.manager.send_image(image_data)
 
-        logger.debug(f"Pushed image {uid} ({data_type}) to {len(self.manager.active_connections)} clients")
+        logger.debug(
+            f"Pushed image {uid} ({data_type}) to {len(self.manager.active_connections)} clients"
+        )
 
     async def start_marking_session(
         self,
         image: np.ndarray,
         initial_stage_position: tuple = (0.0, 0.0),
         pixel_size_um: float = 0.65,
-        initial_markers: Optional[list] = None,
+        initial_markers: list | None = None,
         default_role: str = "test",
     ) -> str:
         """
@@ -412,8 +588,8 @@ class VisualizationServer(Service):
         """
         import uuid
 
-        if not hasattr(self, '_marking_sessions'):
-            self._marking_sessions = {}
+        if not hasattr(self, "_marking_sessions"):
+            self._marking_sessions: dict[str, dict[str, Any]] = {}
 
         session_id = str(uuid.uuid4())[:8]
 
@@ -424,15 +600,17 @@ class VisualizationServer(Service):
             py = m.get("pixel_y", m.get("pixelY"))
             if px is None or py is None:
                 continue
-            normalized.append({
-                "number": i + 1,
-                "pixelX": round(float(px), 1),
-                "pixelY": round(float(py), 1),
-                "role": m.get("role", default_role),
-                "source": m.get("source", "sam"),
-                "embryo_id": m.get("embryo_id"),
-                "confidence": m.get("confidence"),
-            })
+            normalized.append(
+                {
+                    "number": i + 1,
+                    "pixelX": round(float(px), 1),
+                    "pixelY": round(float(py), 1),
+                    "role": m.get("role", default_role),
+                    "source": m.get("source", "sam"),
+                    "embryo_id": m.get("embryo_id"),
+                    "confidence": m.get("confidence"),
+                }
+            )
 
         self._marking_sessions[session_id] = {
             "markers": list(normalized),
@@ -445,31 +623,34 @@ class VisualizationServer(Service):
 
         # Encode image as base64 PNG
         from PIL import Image as PILImage
+
         img = image
         if img.dtype != np.uint8:
             img = ((img - img.min()) / max(img.max() - img.min(), 1) * 255).astype(np.uint8)
         pil_img = PILImage.fromarray(img)
         buf = io.BytesIO()
-        pil_img.save(buf, format='PNG')
-        b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+        pil_img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
         h, w = image.shape[:2]
 
         # Broadcast to all clients
-        await self.manager.broadcast({
-            "type": "marking_image",
-            "data": {
-                "session_id": session_id,
-                "image_b64": b64,
-                "width": w,
-                "height": h,
-                "initial_markers": normalized,
-                "default_role": default_role,
-                "stage_x_um": float(initial_stage_position[0]),
-                "stage_y_um": float(initial_stage_position[1]),
-                "pixel_size_um": pixel_size_um,
+        await self.manager.broadcast(
+            {
+                "type": "marking_image",
+                "data": {
+                    "session_id": session_id,
+                    "image_b64": b64,
+                    "width": w,
+                    "height": h,
+                    "initial_markers": normalized,
+                    "default_role": default_role,
+                    "stage_x_um": float(initial_stage_position[0]),
+                    "stage_y_um": float(initial_stage_position[1]),
+                    "pixel_size_um": pixel_size_um,
+                },
             }
-        })
+        )
 
         logger.info(
             f"Marking session {session_id} started, image {w}x{h}, "
@@ -478,7 +659,7 @@ class VisualizationServer(Service):
         )
         return session_id
 
-    async def wait_for_marking(self, session_id: str, timeout: float = None) -> list:
+    async def wait_for_marking(self, session_id: str, timeout: float | None = None) -> list:
         """
         Wait for a marking session to complete.
 
@@ -505,9 +686,9 @@ class VisualizationServer(Service):
 
         markers = session["markers"]
         initial_pos = session["initial_stage_position"]
-        pixel_size = session["pixel_size_um"]
+        session["pixel_size_um"]
         h, w = session["image_shape"][:2]
-        center_x, center_y = w / 2, h / 2
+        _center_x, _center_y = w / 2, h / 2
 
         # Convert to embryo entries. Carries role + source so callers can
         # register each embryo with the right experimental classification.
@@ -515,18 +696,24 @@ class VisualizationServer(Service):
         embryos = []
         for m in markers:
             px, py = m["pixelX"], m["pixelY"]
-            embryos.append({
-                "embryo_number": m["number"],
-                "embryo_id": m.get("embryo_id") or f"embryo_{m['number']:03d}",
-                "pixel_position": (px, py),
-                "pixel_x": px,
-                "pixel_y": py,
-                "initial_stage_position": initial_pos,
-                "role": m.get("role", default_role),
-                "source": m.get("source", "manual"),
-                "confidence": m.get("confidence"),
-                "marking_timestamp": m.get("timestamp", datetime.now().isoformat()),
-            })
+            embryos.append(
+                {
+                    "embryo_number": m["number"],
+                    # Unpadded to match the live convention used everywhere else
+                    # (detection_tools registers embryos as f"embryo_{n}"). A
+                    # zero-padded fallback here produced ids like "embryo_002"
+                    # that never matched the stored "embryo_2".
+                    "embryo_id": m.get("embryo_id") or f"embryo_{m['number']}",
+                    "pixel_position": (px, py),
+                    "pixel_x": px,
+                    "pixel_y": py,
+                    "initial_stage_position": initial_pos,
+                    "role": m.get("role", default_role),
+                    "source": m.get("source", "manual"),
+                    "confidence": m.get("confidence"),
+                    "marking_timestamp": m.get("timestamp", datetime.now().isoformat()),
+                }
+            )
 
         # Clean up
         del self._marking_sessions[session_id]
@@ -538,7 +725,7 @@ class VisualizationServer(Service):
         volume: np.ndarray,
         masks: np.ndarray,
         uid: str,
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ):
         """
         Push a 3D segmentation volume to connected clients
@@ -562,24 +749,54 @@ class VisualizationServer(Service):
 
         volume_data = Volume3DData(
             uid=uid,
-            data_type='segmentation_3d',
+            data_type="segmentation_3d",
             timestamp=datetime.now().isoformat(),
             volume=volume,
             masks=masks,
             colors=colors,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
         # Store the 3D volume
         self.store.add_volume_3d(volume_data)
 
         # Broadcast notification to clients (without the heavy data)
-        await self.manager.broadcast({
-            'type': 'volume_3d',
-            'data': volume_data.to_info_dict()
-        })
+        await self.manager.broadcast({"type": "volume_3d", "data": volume_data.to_info_dict()})
 
-        logger.info(f"Pushed 3D volume {uid} ({volume.shape}) to {len(self.manager.active_connections)} clients")
+        logger.info(
+            f"Pushed 3D volume {uid} ({volume.shape}) to"
+            f" {len(self.manager.active_connections)} clients"
+        )
+
+    async def open_volume_in_browser(
+        self,
+        embryo_id: str,
+        timepoint: int,
+        view: str = "3d_viewer",
+    ) -> int:
+        """Ask every connected browser to open the in-browser volume viewer.
+
+        This is the web-native replacement for the old napari ``view_volume``:
+        the agent triggers the existing ProjectionViewer (WebGL raymarcher +
+        projections) instead of launching a desktop Qt window that would block
+        the shared agent/web event loop. Returns the number of clients notified.
+        """
+        await self.manager.broadcast(
+            {
+                "type": "open_volume",
+                "embryo_id": embryo_id,
+                "timepoint": timepoint,
+                "view": view,
+            }
+        )
+        n = len(self.manager.active_connections)
+        logger.info(
+            "Requested browser open_volume for %s t%s (%d client(s))",
+            embryo_id,
+            timepoint,
+            n,
+        )
+        return n
 
     async def on_start(self):
         """Start the visualization server"""
@@ -592,15 +809,25 @@ class VisualizationServer(Service):
         # off to uvicorn (whose bind error surfaces inside a background
         # task and produces an unhelpful log line).
         import socket
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Match uvicorn's own bind semantics. uvicorn sets SO_REUSEADDR before it
+        # binds, so a bare preflight bind WITHOUT it is *stricter* than the real
+        # server: when a previous instance has just exited, its browser/websocket
+        # connections linger in TIME_WAIT holding this local port, and a plain
+        # bind() fails with EADDRINUSE even though uvicorn would bind fine. That
+        # false positive was the recurring "port in use" on quick restarts. With
+        # SO_REUSEADDR the preflight now fails only on a genuine live listener
+        # (a real second instance) — exactly when uvicorn would also fail.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((self.host, self.port))
         except OSError:
             raise OSError(
-                f"Port {self.port} is already in use. "
-                "Is another instance of the agent running? "
-                "Close it first and try again."
-            )
+                f"Port {self.port} is already in use — another instance may be running. "
+                f"Free it with:  fuser -k {self.port}/tcp  "
+                f"(or: lsof -ti:{self.port} | xargs -r kill), then try again."
+            ) from None
         finally:
             sock.close()
 
@@ -662,10 +889,10 @@ class VisualizationServer(Service):
             self._server_task = None
         logger.info("Visualization server stopped")
 
-    async def health_check(self) -> Dict:
+    async def health_check(self) -> dict:
         """Return health status with connected client count."""
         base = await super().health_check()
-        base['connected_clients'] = len(self.manager.active_connections)
+        base["connected_clients"] = len(self.manager.active_connections)
         return base
 
     async def run_forever(self):
@@ -682,20 +909,20 @@ class VisualizationServer(Service):
         loop = asyncio.get_running_loop()
 
         signals_installed = False
-        if hasattr(signal, 'SIGINT'):
+        if hasattr(signal, "SIGINT"):
             try:
                 loop.add_signal_handler(signal.SIGINT, signal_handler)
                 signals_installed = True
             except NotImplementedError:
                 pass
 
-        if hasattr(signal, 'SIGTERM'):
+        if hasattr(signal, "SIGTERM"):
             try:
                 loop.add_signal_handler(signal.SIGTERM, signal_handler)
             except NotImplementedError:
                 pass
 
-        if sys.platform == 'win32' and not signals_installed:
+        if sys.platform == "win32" and not signals_installed:
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
 
@@ -704,21 +931,17 @@ class VisualizationServer(Service):
         logger.info(f"Server running at http://{self.host}:{self.port} - Press Ctrl+C to stop")
 
         try:
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 while not stop_event.is_set():
                     try:
-                        await asyncio.wait_for(
-                            asyncio.shield(self._server_task),
-                            timeout=0.5
-                        )
+                        await asyncio.wait_for(asyncio.shield(self._server_task), timeout=0.5)
                         break
                     except asyncio.TimeoutError:
                         continue
             else:
                 stop_task = asyncio.create_task(stop_event.wait())
                 done, pending = await asyncio.wait(
-                    [self._server_task, stop_task],
-                    return_when=asyncio.FIRST_COMPLETED
+                    [self._server_task, stop_task], return_when=asyncio.FIRST_COMPLETED
                 )
                 for task in pending:
                     task.cancel()

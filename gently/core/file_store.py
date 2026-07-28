@@ -56,9 +56,10 @@ import shutil
 import socket
 import tempfile
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, cast
 
 import numpy as np
 import yaml
@@ -66,7 +67,6 @@ import yaml
 from .store_types import (
     EmbryoInfo,
     GroundTruthEntry,
-    PerceptionRunInfo,
     PredictionInfo,
     ProjectionInfo,
     SessionInfo,
@@ -80,6 +80,36 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_INVALID_PATH_COMPONENT_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _validate_path_component(value: str, label: str) -> str:
+    """Validate a caller-controlled value before using it as one path part."""
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    if not value:
+        raise ValueError(f"{label} must not be empty")
+    if value.strip() != value:
+        raise ValueError(f"{label} must not start or end with whitespace: {value!r}")
+    if value in {".", ".."} or _INVALID_PATH_COMPONENT_RE.search(value):
+        raise ValueError(f"{label} contains unsafe path characters: {value!r}")
+    if value.rstrip(" .") != value:
+        raise ValueError(f"{label} must not end with a space or dot: {value!r}")
+    return value
+
+
+def _safe_child_path(parent: Path, component: str, label: str) -> Path:
+    """Return parent/component after validating it stays below parent."""
+    component = _validate_path_component(component, label)
+    base = parent.resolve()
+    child = (parent / component).resolve()
+    try:
+        child.relative_to(base)
+    except ValueError:
+        raise ValueError(f"{label} escapes storage root: {component!r}") from None
+    return child
+
 
 def _slugify(text: str, max_len: int = 30) -> str:
     """Lowercase, replace non-alphanum with hyphens, truncate."""
@@ -108,21 +138,56 @@ def _sanitize_for_yaml(obj):
     return obj
 
 
+def _coarse_from_legacy(record: dict) -> dict | None:
+    """Extract coarse XY from an embryo.yaml record, accepting either the new
+    `position_coarse` dict or the legacy flat `position_x` / `position_y` keys.
+    Returns None if neither shape carries usable values.
+    """
+    coarse = record.get("position_coarse")
+    if isinstance(coarse, dict) and coarse:
+        return coarse
+    px, py = record.get("position_x"), record.get("position_y")
+    if px is None and py is None:
+        return None
+    out = {}
+    if px is not None:
+        out["x"] = px
+    if py is not None:
+        out["y"] = py
+    return out or None
+
+
+def _normalize_embryo_record(record: dict | None) -> EmbryoInfo | None:
+    """Backfill an embryo.yaml dict so callers always see the new schema.
+
+    Adds `position_coarse` derived from legacy `position_x` / `position_y` if
+    only the legacy fields are present, and ensures `position_fine` exists
+    (as None) for forward-compat. The original record is not mutated.
+    """
+    if record is None:
+        return None
+    out = dict(record)
+    if out.get("position_coarse") is None:
+        backfill = _coarse_from_legacy(out)
+        if backfill is not None:
+            out["position_coarse"] = backfill
+    out.setdefault("position_fine", None)
+    return cast("EmbryoInfo", out)
+
+
 def _write_yaml(path: Path, data: Any) -> None:
     """Write YAML atomically: write to a temp file, then rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = _sanitize_for_yaml(data)
-    fd, tmp = tempfile.mkstemp(
-        suffix=".tmp", prefix=path.stem, dir=str(path.parent)
-    )
+    fd, tmp = tempfile.mkstemp(suffix=".tmp", prefix=path.stem, dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False,
-                           allow_unicode=True)
-        # On Windows, rename over an existing file requires removing it first.
-        if path.exists():
-            path.unlink()
-        Path(tmp).rename(path)
+            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+            f.flush()
+            os.fsync(f.fileno())
+        # os.replace is atomic and overwrites on Windows — no unlink gap that
+        # a crash/power-loss could leave the target missing.
+        os.replace(tmp, path)
     except BaseException:
         # Clean up temp file on failure
         try:
@@ -135,48 +200,77 @@ def _write_yaml(path: Path, data: Any) -> None:
 def _read_yaml(path: Path) -> Any:
     """Read a YAML file.  Returns None if missing or empty.
 
-    Tolerant of legacy session files written before _sanitize_for_yaml
-    existed — those embed numpy scalars as
-    ``!!python/object/apply:numpy.core.multiarray.scalar`` tags that
-    safe_load refuses to construct. When we hit such a file we fall
-    back to unsafe_load (the only writer of these files is our own
-    code on local disk, same trust boundary as the code itself) and
-    immediately sanitize the result so the caller always receives
-    native Python types. New writes go through _write_yaml + safe_dump
-    so legacy form does not propagate.
+    Never constructs Python objects from YAML. Legacy files containing
+    ``!!python/object`` or numpy constructor tags must be migrated by a
+    trusted offline tool before FileStore will read them — we refuse to
+    unsafe_load them, since a YAML file on disk is not a trust boundary
+    (it may be synced, imported, or attacker-supplied).
     """
     if not path.exists():
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         text = f.read()
     try:
         return yaml.safe_load(text)
     except yaml.constructor.ConstructorError as err:
         marker = str(err)
-        if 'python/object' not in marker and 'numpy' not in marker:
+        if "python/object" not in marker and "numpy" not in marker:
             raise
-        data = yaml.unsafe_load(text)
-        return _sanitize_for_yaml(data)
+        raise ValueError(
+            f"Refusing to load unsafe YAML tags from {path}. "
+            "Migrate this file to safe YAML before opening it in Gently."
+        ) from err
 
 
-def _append_jsonl(path: Path, record: dict) -> None:
+def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
     """Append a single JSON line to a JSONL file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
-def _read_jsonl(path: Path) -> List[dict]:
+def _read_jsonl(path: Path) -> list[dict]:
     """Read all lines from a JSONL file."""
     if not path.exists():
         return []
     records = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
                 records.append(json.loads(line))
     return records
+
+
+def _last_jsonl_record(path: Path) -> dict | None:
+    """Return the last parseable JSON record in a JSONL file, reading only the tail.
+
+    Keeps appends O(1): instead of loading + parsing the whole file (which made
+    per-prediction writes O(n) and quadratic over a long timelapse), we read a
+    bounded window from the end and walk backwards to the last complete line,
+    skipping a possible trailing partial line from an interrupted write.
+    """
+    if not path.exists():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size == 0:
+        return None
+    window = min(size, 65536)
+    with open(path, "rb") as f:
+        f.seek(size - window)
+        data = f.read(window)
+    for line in reversed(data.split(b"\n")):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            return json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+    return None
 
 
 def _now() -> str:
@@ -186,6 +280,7 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 # FileStore
 # ---------------------------------------------------------------------------
+
 
 class FileStore:
     """Pure file-based storage for Gently.  Drop-in replacement for GentlyStore."""
@@ -207,7 +302,7 @@ class FileStore:
 
         # Load session index (session_id -> folder_name)
         self._index_path = self._root / "sessions" / "_index.yaml"
-        self._index: Dict[str, str] = _read_yaml(self._index_path) or {}
+        self._index: dict[str, str] = _read_yaml(self._index_path) or {}
 
     # ------------------------------------------------------------------
     # Properties
@@ -229,7 +324,7 @@ class FileStore:
         """Persist the session index mapping to disk."""
         _write_yaml(self._index_path, self._index)
 
-    def _session_dir(self, session_id: str) -> Optional[Path]:
+    def _session_dir(self, session_id: str) -> Path | None:
         """Return the session folder path, or None if unknown."""
         folder = self._index.get(session_id)
         if folder is None:
@@ -245,7 +340,11 @@ class FileStore:
 
     def _embryo_dir(self, session_id: str, embryo_id: str) -> Path:
         sd = self._require_session_dir(session_id)
-        return sd / "embryos" / embryo_id
+        return self._embryo_dir_for_session(sd, embryo_id)
+
+    def _embryo_dir_for_session(self, session_dir: Path, embryo_id: str) -> Path:
+        """Resolve session_dir/embryos/<embryo_id>, rejecting traversal."""
+        return _safe_child_path(session_dir / "embryos", embryo_id, "embryo_id")
 
     def _volume_dir(self, session_id: str, embryo_id: str) -> Path:
         d = self._embryo_dir(session_id, embryo_id) / "volumes"
@@ -277,7 +376,7 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         volume: np.ndarray,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """Generate JPEG projection file from volume data."""
         from .imaging import generate_jpeg_projection
 
@@ -292,9 +391,9 @@ class FileStore:
     def create_session(
         self,
         session_id: str,
-        name: str = None,
-        description: str = None,
-        metadata: dict = None,
+        name: str | None = None,
+        description: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Create a new session.  Returns session_id."""
         # If session already exists, return silently (matches INSERT OR IGNORE)
@@ -330,7 +429,7 @@ class FileStore:
         logger.info("Created session %s -> %s", session_id, folder_name)
         return session_id
 
-    def get_session(self, session_id: str) -> Optional[SessionInfo]:
+    def get_session(self, session_id: str) -> SessionInfo | None:
         """Return session info as dict, or None."""
         sd = self._session_dir(session_id)
         if sd is None or not sd.exists():
@@ -340,7 +439,7 @@ class FileStore:
             return None
         return data
 
-    def list_sessions(self) -> List[SessionInfo]:
+    def list_sessions(self) -> list[SessionInfo]:
         """Return all sessions ordered by last_active descending."""
         sessions = []
         for sid in self._index:
@@ -349,6 +448,21 @@ class FileStore:
                 sessions.append(info)
         sessions.sort(key=lambda s: s.get("last_active", ""), reverse=True)
         return sessions
+
+    def recent_session_ids(self, limit: int = 8) -> list[str]:
+        """Most-recent session IDs by folder-name date prefix, *cheaply*.
+
+        Folder names are ``{YYYYMMDD}_{HHMM}_{slug}_{id8}`` so a reverse lexical
+        sort of the index orders them newest-first by creation time — no
+        ``session.yaml`` parse required. This is a creation-recency proxy (a
+        long-dormant session that was just resumed sorts by its original date),
+        which is fine for at-a-glance landing views; use ``list_sessions`` when
+        exact ``last_active`` ordering matters.
+        """
+        items = sorted(self._index.items(), key=lambda kv: kv[1], reverse=True)
+        if limit and limit > 0:
+            items = items[:limit]
+        return [sid for sid, _ in items]
 
     def touch_session(self, session_id: str) -> None:
         """Update last_active timestamp."""
@@ -367,15 +481,13 @@ class FileStore:
         sd = self._require_session_dir(session_id)
         path = sd / "conversation.json"
         # Write atomically via temp file
-        fd, tmp = tempfile.mkstemp(
-            suffix=".tmp", prefix="conversation", dir=str(sd)
-        )
+        fd, tmp = tempfile.mkstemp(suffix=".tmp", prefix="conversation", dir=str(sd))
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(snapshot, f, indent=2, ensure_ascii=False, default=str)
-            if path.exists():
-                path.unlink()
-            Path(tmp).rename(path)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -384,7 +496,7 @@ class FileStore:
             raise
         self.touch_session(session_id)
 
-    def load_session_snapshot(self, session_id: str) -> Optional[dict]:
+    def load_session_snapshot(self, session_id: str) -> dict | None:
         """Load conversation.json.  Returns None if missing."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -392,8 +504,40 @@ class FileStore:
         path = sd / "conversation.json"
         if not path.exists():
             return None
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
+
+    def append_temperature_sample(self, session_id: str, sample: dict) -> None:
+        """Append one temperature reading to the session's temperature.jsonl."""
+        sd = self._require_session_dir(session_id)
+        _append_jsonl(sd / "temperature.jsonl", sample)
+
+    def read_temperature_log(self, session_id: str, since: str | None = None) -> list[dict]:
+        """Return temperature samples for a session, optionally filtered to
+        t >= since (ISO-UTC string).
+
+        Reads lines tolerantly: a truncated trailing line (e.g. after a mid-append
+        crash) is silently skipped rather than raising a JSONDecodeError.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        path = sd / "temperature.jsonl"
+        if not path.exists():
+            return []
+        rows = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass  # truncated or corrupt line — skip
+        if since is not None:
+            rows = [r for r in rows if str(r.get("t", "")) >= since]
+        return rows
 
     # ------------------------------------------------------------------
     # Session lock
@@ -428,37 +572,66 @@ class FileStore:
         self,
         session_id: str,
         embryo_id: str,
-        embryo_uid: str = None,
-        nickname: str = None,
-        position_x: float = None,
-        position_y: float = None,
-        calibration: dict = None,
-        role: str = None,
+        embryo_uid: str | None = None,
+        nickname: str | None = None,
+        position_x: float | None = None,
+        position_y: float | None = None,
+        position_coarse: dict | None = None,
+        position_fine: dict | None = None,
+        calibration: dict | None = None,
+        role: str | None = None,
+        strain: str | None = None,
     ) -> None:
         """Register or update an embryo in a session.
 
         ``role`` is the experimental role key from gently.harness.roles.REGISTRY
         (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Persisted in
         embryo.yaml. None preserves the existing value on update.
+
+        ``strain`` is a free-form biological sample descriptor (e.g.
+        ``"pan-nuclear GFP"``). Orthogonal to role. None preserves the existing
+        value on update.
+
+        Position has two stages: coarse (bottom-camera / manual map placement)
+        and fine (future SPIM-objective alignment). New callers should pass
+        position_coarse / position_fine as dicts of shape {"x": float, "y":
+        float}. Legacy callers passing position_x / position_y get folded into
+        coarse automatically.
         """
         ed = self._embryo_dir(session_id, embryo_id)
         ed.mkdir(parents=True, exist_ok=True)
+
+        # Fold legacy position_x / position_y into coarse if caller used the
+        # old kwargs and didn't pass coarse explicitly.
+        if position_coarse is None and (position_x is not None or position_y is not None):
+            position_coarse = {}
+            if position_x is not None:
+                position_coarse["x"] = position_x
+            if position_y is not None:
+                position_coarse["y"] = position_y
 
         yaml_path = ed / "embryo.yaml"
         existing = _read_yaml(yaml_path)
 
         if existing is not None:
-            # Update: COALESCE behaviour -- keep existing values when new ones
-            # are None, matching the old ON CONFLICT DO UPDATE SET logic.
+            # COALESCE update — keep existing values when new ones are None.
+            existing_coarse = _coarse_from_legacy(existing)
             embryo_data = {
                 "embryo_id": embryo_id,
                 "session_id": session_id,
                 "embryo_uid": embryo_uid if embryo_uid is not None else existing.get("embryo_uid"),
                 "nickname": nickname if nickname is not None else existing.get("nickname"),
-                "position_x": position_x if position_x is not None else existing.get("position_x"),
-                "position_y": position_y if position_y is not None else existing.get("position_y"),
-                "calibration": calibration if calibration is not None else existing.get("calibration"),
+                "position_coarse": position_coarse
+                if position_coarse is not None
+                else existing_coarse,
+                "position_fine": position_fine
+                if position_fine is not None
+                else existing.get("position_fine"),
+                "calibration": calibration
+                if calibration is not None
+                else existing.get("calibration"),
                 "role": role if role is not None else existing.get("role", "test"),
+                "strain": strain if strain is not None else existing.get("strain"),
                 "created_at": existing.get("created_at", _now()),
             }
         else:
@@ -467,25 +640,30 @@ class FileStore:
                 "session_id": session_id,
                 "embryo_uid": embryo_uid,
                 "nickname": nickname,
-                "position_x": position_x,
-                "position_y": position_y,
+                "position_coarse": position_coarse,
+                "position_fine": position_fine,
                 "calibration": calibration,
                 "role": role if role is not None else "test",
+                "strain": strain,
                 "created_at": _now(),
             }
 
         _write_yaml(yaml_path, embryo_data)
 
-    def get_embryo(self, session_id: str, embryo_id: str) -> Optional[EmbryoInfo]:
-        """Read embryo.yaml.  Returns None if not found."""
+    def get_embryo(self, session_id: str, embryo_id: str) -> EmbryoInfo | None:
+        """Read embryo.yaml. Returns None if not found.
+
+        Backfills position_coarse from legacy position_x / position_y so
+        callers don't need to know about the old schema.
+        """
         sd = self._session_dir(session_id)
         if sd is None:
             return None
-        yaml_path = sd / "embryos" / embryo_id / "embryo.yaml"
+        yaml_path = self._embryo_dir_for_session(sd, embryo_id) / "embryo.yaml"
         data = _read_yaml(yaml_path)
-        return data
+        return _normalize_embryo_record(data)
 
-    def list_embryos(self, session_id: str) -> List[EmbryoInfo]:
+    def list_embryos(self, session_id: str) -> list[EmbryoInfo]:
         """List all embryos for a session, sorted by embryo_id."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -494,14 +672,52 @@ class FileStore:
         if not embryos_dir.exists():
             return []
 
-        result = []
+        result: list[EmbryoInfo] = []
         for entry in sorted(embryos_dir.iterdir()):
             if entry.is_dir():
                 yaml_path = entry / "embryo.yaml"
                 data = _read_yaml(yaml_path)
                 if data is not None:
-                    result.append(data)
+                    record = _normalize_embryo_record(data)
+                    if record is not None:
+                        result.append(record)
         return result
+
+    def list_embryo_ids(self, session_id: str) -> list[str]:
+        """Embryo IDs from directory names only — no ``embryo.yaml`` parse.
+
+        The directory name *is* the embryo_id in this layout (see
+        ``_embryo_dir`` / ``put_embryo``), so callers that only need the ids
+        (e.g. enumerating projections) can skip the per-embryo YAML read that
+        ``list_embryos`` pays.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        embryos_dir = sd / "embryos"
+        if not embryos_dir.exists():
+            return []
+        return [e.name for e in sorted(embryos_dir.iterdir()) if e.is_dir()]
+
+    def delete_embryo(self, session_id: str, embryo_id: str) -> bool:
+        """Remove an embryo's folder from a session (e.g. an operator-deleted
+        false positive), so it does not reappear when the session is reloaded
+        from disk. Returns True if a folder was removed.
+
+        Removes the whole ``embryos/{embryo_id}/`` tree — for a marked-but-never-
+        imaged embryo that is just ``embryo.yaml``, but a later-imaged one may
+        also carry volumes/projections/traces, and all of it goes with it.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return False
+        ed = self._embryo_dir_for_session(sd, embryo_id)
+        if not ed.exists():
+            return False
+        import shutil
+
+        shutil.rmtree(ed, ignore_errors=True)
+        return True
 
     # ==================================================================
     # Volumes
@@ -513,7 +729,7 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         volume: np.ndarray,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, write sidecar metadata.
@@ -554,9 +770,7 @@ class FileStore:
         # Generate projection
         self._generate_projection(session_id, embryo_id, timepoint, volume)
 
-        logger.debug(
-            "put_volume: %s/%s t=%d -> %s", session_id, embryo_id, timepoint, vol_path
-        )
+        logger.debug("put_volume: %s/%s t=%d -> %s", session_id, embryo_id, timepoint, vol_path)
         return vol_path
 
     def register_volume(
@@ -565,8 +779,8 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         incoming_path: Path,
-        metadata: dict = None,
-        volume_data: np.ndarray = None,
+        metadata: dict | None = None,
+        volume_data: np.ndarray | None = None,
     ) -> Path:
         """
         Zero-copy path: move an existing TIFF to its canonical location.
@@ -605,6 +819,7 @@ class FileStore:
             volume = volume_data
         else:
             from .imaging import load_volume
+
             volume = load_volume(canonical)
 
         # Write sidecar metadata
@@ -625,33 +840,42 @@ class FileStore:
         logger.debug("register_volume: %s -> %s", incoming_path.name, canonical)
         return canonical
 
-    def get_volume(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[np.ndarray]:
+    def get_volume(self, session_id: str, embryo_id: str, timepoint: int) -> np.ndarray | None:
         """Load a volume from disk.  Returns None if not found."""
         path = self.get_volume_path(session_id, embryo_id, timepoint)
         if path is None or not path.exists():
             return None
         import tifffile
+
         return tifffile.imread(str(path))
 
-    def get_volume_path(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[Path]:
+    def get_volume_path(self, session_id: str, embryo_id: str, timepoint: int) -> Path | None:
         """Return the absolute path to a volume TIFF, or None."""
         sd = self._session_dir(session_id)
         if sd is None:
             return None
         vol_path = (
-            sd / "embryos" / embryo_id / "volumes" / self._volume_filename(timepoint)
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "volumes"
+            / self._volume_filename(timepoint)
         )
         if vol_path.exists():
             return vol_path
         return None
 
-    def list_volumes(
-        self, session_id: str, embryo_id: str = None
-    ) -> List[VolumeInfo]:
+    def get_volume_meta(self, session_id: str, embryo_id: str, timepoint: int) -> dict | None:
+        """Read the sidecar metadata YAML for a volume.  Returns None if not found."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        meta_path = (
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "volumes"
+            / self._volume_meta_filename(timepoint)
+        )
+        return _read_yaml(meta_path)
+
+    def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:
         """List volume metadata by scanning sidecar YAML files on disk."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -663,13 +887,11 @@ class FileStore:
 
         # Determine which embryo dirs to scan
         if embryo_id:
-            dirs = [embryos_dir / embryo_id]
+            dirs = [self._embryo_dir_for_session(sd, embryo_id)]
         else:
-            dirs = sorted(
-                d for d in embryos_dir.iterdir() if d.is_dir()
-            )
+            dirs = sorted(d for d in embryos_dir.iterdir() if d.is_dir())
 
-        result: List[VolumeInfo] = []
+        result: list[VolumeInfo] = []
         for edir in dirs:
             vol_dir = edir / "volumes"
             if not vol_dir.exists():
@@ -679,9 +901,7 @@ class FileStore:
                 if data is None:
                     continue
                 # Build a VolumeInfo dict
-                tif_path = meta_file.parent / meta_file.name.replace(
-                    ".meta.yaml", ".tif"
-                )
+                tif_path = meta_file.parent / meta_file.name.replace(".meta.yaml", ".tif")
                 info: VolumeInfo = {
                     "session_id": data.get("session_id", session_id),
                     "embryo_id": data.get("embryo_id", edir.name),
@@ -698,9 +918,7 @@ class FileStore:
         result.sort(key=lambda v: (v["embryo_id"], v["timepoint"]))
         return result
 
-    def get_acquisition_params(
-        self, session_id: str, embryo_id: str = None
-    ) -> Optional[dict]:
+    def get_acquisition_params(self, session_id: str, embryo_id: str | None = None) -> dict | None:
         """
         Get acquisition parameters from the most recent volume sidecar.
 
@@ -718,24 +936,40 @@ class FileStore:
     # Projections
     # ==================================================================
 
-    def get_projection_path(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[Path]:
+    def get_projection_path(self, session_id: str, embryo_id: str, timepoint: int) -> Path | None:
         """Return absolute path to the JPEG projection, or None."""
         sd = self._session_dir(session_id)
         if sd is None:
             return None
         proj_path = (
-            sd / "embryos" / embryo_id / "projections"
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "projections"
             / self._projection_filename(timepoint)
         )
         if proj_path.exists():
             return proj_path
         return None
 
-    def get_projection_b64(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[str]:
+    def list_projection_timepoints(self, session_id: str, embryo_id: str) -> list[int]:
+        """Cheaply list projection timepoints (glob only, no PIL/meta reads).
+
+        Used to rehydrate the viz image store on resume without paying the
+        per-file cost of list_projections().
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
+        if not proj_dir.exists():
+            return []
+        tps: list[int] = []
+        for jpg in proj_dir.glob("t*.jpg"):
+            m = re.match(r"t(\d+)\.jpg$", jpg.name)
+            if m:
+                tps.append(int(m.group(1)))
+        return sorted(tps)
+
+    def get_projection_b64(self, session_id: str, embryo_id: str, timepoint: int) -> str | None:
         """Return base64-encoded JPEG projection, or None."""
         path = self.get_projection_path(session_id, embryo_id, timepoint)
         if path is None or not path.exists():
@@ -743,18 +977,16 @@ class FileStore:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    def list_projections(
-        self, session_id: str, embryo_id: str
-    ) -> List[ProjectionInfo]:
+    def list_projections(self, session_id: str, embryo_id: str) -> list[ProjectionInfo]:
         """List projection info for an embryo by scanning projection files."""
         sd = self._session_dir(session_id)
         if sd is None:
             return []
-        proj_dir = sd / "embryos" / embryo_id / "projections"
+        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
         if not proj_dir.exists():
             return []
 
-        result: List[ProjectionInfo] = []
+        result: list[ProjectionInfo] = []
         for jpg in sorted(proj_dir.glob("t*.jpg")):
             # Extract timepoint from filename  t0003.jpg -> 3
             match = re.match(r"t(\d+)\.jpg$", jpg.name)
@@ -766,6 +998,7 @@ class FileStore:
             width, height, size_kb = None, None, None
             try:
                 from PIL import Image as PILImage
+
                 img = PILImage.open(str(jpg))
                 width, height = img.size
                 size_kb = round(jpg.stat().st_size / 1024, 1)
@@ -775,7 +1008,8 @@ class FileStore:
             # Use the volume sidecar's acquired_at as the projection created_at
             # if available; otherwise use the file mtime.
             meta_path = (
-                sd / "embryos" / embryo_id / "volumes"
+                self._embryo_dir_for_session(sd, embryo_id)
+                / "volumes"
                 / self._volume_meta_filename(tp)
             )
             vol_meta = _read_yaml(meta_path)
@@ -807,7 +1041,7 @@ class FileStore:
         session_id: str,
         source: str,
         incoming_path: Path,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """Move a transient TIFF from incoming/ to ``snapshots/``."""
         incoming_path = Path(incoming_path)
@@ -828,7 +1062,7 @@ class FileStore:
             incoming_path.unlink()
 
         # Write sidecar metadata
-        sidecar = {
+        sidecar: dict[str, Any] = {
             "session_id": session_id,
             "source": source,
             "file_path": str(canonical),
@@ -838,6 +1072,7 @@ class FileStore:
         # Read shape for the sidecar
         try:
             import tifffile
+
             arr = tifffile.imread(str(canonical))
             sidecar["width"] = int(arr.shape[-1]) if arr.ndim >= 2 else None
             sidecar["height"] = int(arr.shape[-2]) if arr.ndim >= 2 else None
@@ -853,9 +1088,7 @@ class FileStore:
         logger.debug("register_snapshot: %s -> %s", incoming_path.name, canonical)
         return canonical
 
-    def list_snapshots(
-        self, session_id: str, source: str = None
-    ) -> List[Dict[str, Any]]:
+    def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -902,9 +1135,7 @@ class FileStore:
                     deleted += 1
                     logger.debug("cleanup_incoming: deleted %s", f.name)
                 except OSError as e:
-                    logger.warning(
-                        "cleanup_incoming: could not delete %s: %s", f.name, e
-                    )
+                    logger.warning("cleanup_incoming: could not delete %s: %s", f.name, e)
         if deleted:
             logger.info("cleanup_incoming: removed %d stale file(s)", deleted)
         return deleted
@@ -917,7 +1148,7 @@ class FileStore:
         sd = self._require_session_dir(session_id)
         return sd / "perception_runs.yaml"
 
-    def _load_perception_runs(self, session_id: str) -> Dict[int, dict]:
+    def _load_perception_runs(self, session_id: str) -> dict[int, dict]:
         """Load perception_runs.yaml as {run_id: run_metadata}."""
         data = _read_yaml(self._perception_runs_path(session_id))
         if data is None:
@@ -925,9 +1156,7 @@ class FileStore:
         # Ensure keys are ints
         return {int(k): v for k, v in data.items()}
 
-    def _save_perception_runs(
-        self, session_id: str, runs: Dict[int, dict]
-    ) -> None:
+    def _save_perception_runs(self, session_id: str, runs: dict[int, dict]) -> None:
         _write_yaml(self._perception_runs_path(session_id), runs)
 
     def create_perception_run(
@@ -935,10 +1164,10 @@ class FileStore:
         session_id: str,
         name: str,
         method: str,
-        model_name: str = None,
+        model_name: str | None = None,
         trace_type: str = "perception",
         source: str = "live",
-        config: dict = None,
+        config: dict | None = None,
     ) -> int:
         """Create a perception run.  Returns run_id (auto-increment)."""
         runs = self._load_perception_runs(session_id)
@@ -964,7 +1193,7 @@ class FileStore:
         return run_id
 
     def complete_perception_run(
-        self, run_id: int, status: str = "completed", error_message: str = None
+        self, run_id: int, status: str = "completed", error_message: str | None = None
     ) -> None:
         """Mark a perception run as completed or failed.
 
@@ -988,14 +1217,14 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         predicted_stage: str,
-        confidence: float = None,
-        reasoning: str = None,
+        confidence: float | None = None,
+        reasoning: str | None = None,
         is_transitional: bool = False,
-        execution_time_ms: float = None,
-        trace_data: dict = None,
-        observed_features: dict = None,
-        ground_truth_stage: str = None,
-        is_correct: int = None,
+        execution_time_ms: float | None = None,
+        trace_data: dict | None = None,
+        observed_features: dict | None = None,
+        ground_truth_stage: str | None = None,
+        is_correct: int | None = None,
     ) -> int:
         """
         Append a prediction to predictions.jsonl and optionally write trace JSON.
@@ -1016,15 +1245,14 @@ class FileStore:
                 json.dump(trace_data, f, indent=2, ensure_ascii=False, default=str)
             trace_file = str(trace_path)
 
-        # Compute prediction_id: count existing predictions in this embryo's
-        # JSONL and add 1.  This gives a session-global unique id as long as
-        # we read all embryos, but for simplicity we count per-embryo and add
-        # an offset based on embryo ordering.  A simpler and safer approach:
-        # use a session-level counter stored in perception_runs.yaml.
+        # Per-embryo prediction_id = previous max + 1. Derived from the LAST
+        # record only (bounded tail read) rather than re-parsing the whole
+        # predictions.jsonl on every append — ids stay sequential because we
+        # only ever append in order.
         sd = self._require_session_dir(session_id)
-        pred_path = sd / "embryos" / embryo_id / "predictions.jsonl"
-        existing = _read_jsonl(pred_path)
-        prediction_id = len(existing) + 1
+        pred_path = self._embryo_dir_for_session(sd, embryo_id) / "predictions.jsonl"
+        last = _last_jsonl_record(pred_path)
+        prediction_id = (last.get("prediction_id", 0) + 1) if last else 1
 
         record: PredictionInfo = {
             "prediction_id": prediction_id,
@@ -1050,9 +1278,9 @@ class FileStore:
     def get_predictions(
         self,
         session_id: str,
-        embryo_id: str = None,
-        run_id: int = None,
-    ) -> List[PredictionInfo]:
+        embryo_id: str | None = None,
+        run_id: int | None = None,
+    ) -> list[PredictionInfo]:
         """Query predictions with optional filters."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -1064,18 +1292,18 @@ class FileStore:
 
         # Determine which embryo dirs to read
         if embryo_id:
-            dirs = [embryos_dir / embryo_id]
+            dirs = [self._embryo_dir_for_session(sd, embryo_id)]
         else:
             dirs = sorted(d for d in embryos_dir.iterdir() if d.is_dir())
 
-        result: List[PredictionInfo] = []
+        result: list[PredictionInfo] = []
         for edir in dirs:
             pred_path = edir / "predictions.jsonl"
             records = _read_jsonl(pred_path)
             for rec in records:
                 if run_id is not None and rec.get("run_id") != run_id:
                     continue
-                result.append(rec)
+                result.append(cast("PredictionInfo", rec))
 
         # Sort by timepoint, then prediction_id
         result.sort(key=lambda p: (p.get("timepoint", 0), p.get("prediction_id", 0)))
@@ -1091,9 +1319,9 @@ class FileStore:
         embryo_id: str,
         stage: str,
         start_timepoint: int,
-        end_timepoint: int = None,
-        annotator: str = None,
-        notes: str = None,
+        end_timepoint: int | None = None,
+        annotator: str | None = None,
+        notes: str | None = None,
     ) -> None:
         """Insert or update a ground-truth annotation."""
         ed = self._embryo_dir(session_id, embryo_id)
@@ -1117,28 +1345,28 @@ class FileStore:
         if not found:
             # Auto-increment id
             max_id = max((e.get("id", 0) for e in entries), default=0)
-            entries.append({
-                "id": max_id + 1,
-                "session_id": session_id,
-                "embryo_id": embryo_id,
-                "stage": stage,
-                "start_timepoint": start_timepoint,
-                "end_timepoint": end_timepoint,
-                "annotator": annotator,
-                "notes": notes,
-                "created_at": now,
-            })
+            entries.append(
+                {
+                    "id": max_id + 1,
+                    "session_id": session_id,
+                    "embryo_id": embryo_id,
+                    "stage": stage,
+                    "start_timepoint": start_timepoint,
+                    "end_timepoint": end_timepoint,
+                    "annotator": annotator,
+                    "notes": notes,
+                    "created_at": now,
+                }
+            )
 
         _write_yaml(gt_path, entries)
 
-    def get_ground_truth(
-        self, session_id: str, embryo_id: str
-    ) -> List[GroundTruthEntry]:
+    def get_ground_truth(self, session_id: str, embryo_id: str) -> list[GroundTruthEntry]:
         """Get ground-truth annotations sorted by start_timepoint."""
         sd = self._session_dir(session_id)
         if sd is None:
             return []
-        gt_path = sd / "embryos" / embryo_id / "ground_truth.yaml"
+        gt_path = self._embryo_dir_for_session(sd, embryo_id) / "ground_truth.yaml"
         entries: list = _read_yaml(gt_path) or []
         entries.sort(key=lambda e: e.get("start_timepoint", 0))
         return entries

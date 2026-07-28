@@ -36,11 +36,21 @@ function loadInitialData() {
         })
         .catch(e => console.warn('Failed to load calibration:', e));
 
-    fetch('/api/embryos')
+    // Bootstrap from the CURRENT (in-memory experiment) embryos, not the disk
+    // store: embryos registered this session live in memory until a volume is
+    // acquired, so /api/embryos (disk-backed) reads 0 and every "N embryos"
+    // count shows 0 on load. Map to id strings to keep state.embryos's shape
+    // (viewer.js does .includes()/.push() on it).
+    fetch('/api/embryos/current')
         .then(r => r.json())
         .then(data => {
-            state.embryos = data.embryos || [];
+            const list = data.embryos || [];
+            state.embryos = list.map(e => (e && e.id) ? e.id : e);
             if (typeof updateStatusbar === 'function') updateStatusbar();
+            // Fan out so every count-renderer (header strip, etc.) refreshes off
+            // the bootstrap, not just the footer statusbar. Shape matches the
+            // server-pushed EMBRYOS_UPDATE ({embryos: [...]}).
+            if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('EMBRYOS_UPDATE', { embryos: list });
         })
         .catch(e => console.warn('Failed to load embryos:', e));
 }
@@ -103,7 +113,9 @@ function handleMessage(msg) {
         // per event and would lag every other handler), but still emit to the
         // client event bus so the Devices tab gets the payload.
         if (msg.event_type !== 'DEVICE_STATE_UPDATE' &&
-            msg.event_type !== 'BOTTOM_CAMERA_FRAME') {
+            msg.event_type !== 'BOTTOM_CAMERA_FRAME' &&
+            msg.event_type !== 'TEMPERATURE_UPDATE' &&
+            msg.event_type !== 'LIGHTSHEET_FRAME') {
             handleFullEvent({
                 event_type: msg.event_type,
                 data: msg.data,
@@ -127,6 +139,24 @@ function handleMessage(msg) {
             // Switch to embryos tab if not already there
             if (state.tab !== 'embryos') switchTab('embryos');
         }
+    } else if (msg.type === 'open_volume') {
+        // The agent asked us to open the in-browser volume viewer — the
+        // web-native replacement for the old desktop napari window.
+        if (typeof ProjectionViewer !== 'undefined' && msg.embryo_id != null) {
+            const view = msg.view || '3d_viewer';
+            Promise.resolve(ProjectionViewer.open(msg.embryo_id, msg.timepoint))
+                .then(() => {
+                    // Default to the 3D viewer tab when the agent opens it.
+                    if (view && typeof ProjectionViewer.selectMethod === 'function') {
+                        ProjectionViewer.selectMethod(view);
+                    }
+                })
+                .catch((e) => console.warn('open_volume failed', e));
+        }
+    } else if (msg.type === 'session_changed') {
+        // The live agent switched sessions (resume from the Sessions tab) —
+        // reload so every client picks up the new session's state + transcript.
+        window.location.href = '/';
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));
     } else if (msg.type === 'presence') {

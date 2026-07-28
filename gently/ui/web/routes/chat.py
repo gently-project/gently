@@ -14,15 +14,18 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from gently.settings import settings
+from gently.ui.web.auth import require_control
+
 logger = logging.getLogger(__name__)
 
-CHAT_MODEL = "claude-opus-4-7"
+# Per-timepoint VLM chat → perception tier (Opus 4.8); centralized, not hardcoded.
+CHAT_MODEL = settings.models.perception
 SYSTEM_PROMPT = (
     "You are helping a biologist interpret a microscopy perception "
     "assessment of a C. elegans embryo at a specific timepoint. You can "
@@ -43,21 +46,21 @@ class ChatRequest(BaseModel):
     message: str
 
 
-def _resolve_session_dir(server, sid: str) -> Optional[Path]:
+def _resolve_session_dir(server, sid: str) -> Path | None:
     store = getattr(server, "gently_store", None)
     if store is None:
         return None
     return store._session_dir(sid)
 
 
-def _trace_path(server, sid: str, eid: str, tp: int) -> Optional[Path]:
+def _trace_path(server, sid: str, eid: str, tp: int) -> Path | None:
     sd = _resolve_session_dir(server, sid)
     if sd is None:
         return None
     return sd / "embryos" / eid / "traces" / f"t{tp:04d}.json"
 
 
-def _chat_path(server, sid: str, eid: str, tp: int) -> Optional[Path]:
+def _chat_path(server, sid: str, eid: str, tp: int) -> Path | None:
     sd = _resolve_session_dir(server, sid)
     if sd is None:
         return None
@@ -68,7 +71,7 @@ def _load_history(path: Path) -> list[dict]:
     if not path.exists():
         return []
     turns: list[dict] = []
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -106,7 +109,13 @@ def create_router(server) -> APIRouter:
         return {"turns": _load_history(path)}
 
     @router.post("/api/perception/chat/{sid}/{eid}/{tp}")
-    async def post_chat(sid: str, eid: str, tp: int, body: ChatRequest):
+    async def post_chat(
+        sid: str,
+        eid: str,
+        tp: int,
+        body: ChatRequest,
+        _control=Depends(require_control),  # noqa: B008
+    ):
         """Append a user message and stream the assistant reply as SSE.
 
         Each SSE event is JSON: ``{"type": "delta", "text": "..."}`` for
@@ -126,7 +135,7 @@ def create_router(server) -> APIRouter:
                 detail=f"No perception trace for T{tp}",
             )
 
-        with open(trace_path, "r", encoding="utf-8") as f:
+        with open(trace_path, encoding="utf-8") as f:
             trace = json.load(f)
         stage = trace.get("predicted_stage", "unknown")
         reasoning = trace.get("reasoning", "")
@@ -164,9 +173,7 @@ def create_router(server) -> APIRouter:
         }
         seed_assistant = {
             "role": "assistant",
-            "content": [
-                {"type": "text", "text": f"Stage: {stage}\n\n{reasoning}"}
-            ],
+            "content": [{"type": "text", "text": f"Stage: {stage}\n\n{reasoning}"}],
         }
 
         messages: list[dict] = [seed_user, seed_assistant]
@@ -174,9 +181,7 @@ def create_router(server) -> APIRouter:
             role = turn.get("role")
             content = turn.get("content", "")
             if role in ("user", "assistant") and content:
-                messages.append(
-                    {"role": role, "content": [{"type": "text", "text": content}]}
-                )
+                messages.append({"role": role, "content": [{"type": "text", "text": content}]})
         messages.append(
             {
                 "role": "user",

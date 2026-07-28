@@ -14,9 +14,11 @@ this file changes.
 
 Watchdog
 --------
-The SSE iterator can silently stall in the agent process — most reliably
-when a Qt window (napari) freezes the asyncio loop synchronously during a
-tool call, but in principle any half-open TCP path can cause it. aiohttp's
+The SSE iterator can silently stall in the agent process whenever a
+half-open TCP path or a long synchronous tool call wedges the asyncio loop.
+(Historically the worst offender was a Qt window — napari — blocking the
+loop during a tool call; that path is gone now that all visualization is
+in-browser, but the watchdog stays for general robustness.) aiohttp's
 async iterator won't raise on a stalled socket; the ``async for`` just
 waits forever. To recover, a sibling watchdog task tracks the timestamp of
 the last received event; if no event arrives within ``stale_timeout_sec``
@@ -30,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from gently.core.event_bus import EventType, get_event_bus
 from gently.core.service import Service
@@ -67,7 +69,7 @@ class DeviceStateMonitor(Service):
 
     def __init__(
         self,
-        microscope: "DiSPIMMicroscope",
+        microscope: DiSPIMMicroscope,
         reconnect_delay_sec: float = 3.0,
         stale_timeout_sec: float = DEFAULT_STALE_TIMEOUT_SEC,
         watchdog_interval_sec: float = DEFAULT_WATCHDOG_INTERVAL_SEC,
@@ -77,14 +79,14 @@ class DeviceStateMonitor(Service):
         self.reconnect_delay_sec = reconnect_delay_sec
         self.stale_timeout_sec = stale_timeout_sec
         self.watchdog_interval_sec = watchdog_interval_sec
-        self._task: Optional[asyncio.Task] = None
-        self._watchdog_task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
+        self._watchdog_task: asyncio.Task | None = None
         self._stop_requested = False
         # Monotonic timestamp of the last successfully-received event. The
         # watchdog reads this; the reader writes it under no lock because
         # asyncio is single-threaded (datetime/float assignment is atomic
         # at the bytecode level on CPython).
-        self._last_event_at: Optional[float] = None
+        self._last_event_at: float | None = None
         # Counts of staleness-triggered reconnects, useful for diagnostics.
         self._watchdog_kicks: int = 0
         # Set by the watchdog right before it cancels the reader task, so
@@ -100,7 +102,8 @@ class DeviceStateMonitor(Service):
         self._last_event_at = time.monotonic()
         self._task = asyncio.create_task(self._run(), name="device-state-monitor")
         self._watchdog_task = asyncio.create_task(
-            self._watchdog(), name="device-state-watchdog",
+            self._watchdog(),
+            name="device-state-watchdog",
         )
 
     async def on_stop(self):
@@ -159,7 +162,8 @@ class DeviceStateMonitor(Service):
             except Exception as exc:
                 logger.debug(
                     "DeviceStateMonitor: stream ended (%s) — reconnecting in %.1fs",
-                    exc, self.reconnect_delay_sec,
+                    exc,
+                    self.reconnect_delay_sec,
                 )
             if self._stop_requested:
                 break
@@ -196,7 +200,9 @@ class DeviceStateMonitor(Service):
             logger.warning(
                 "DeviceStateMonitor: stale stream (%.1fs since last event > "
                 "%.1fs threshold) — forcing reconnect (kick #%d)",
-                age, self.stale_timeout_sec, self._watchdog_kicks,
+                age,
+                self.stale_timeout_sec,
+                self._watchdog_kicks,
             )
             # Reset the timer FIRST so we don't trigger again before the
             # reader has a chance to reconnect and publish.

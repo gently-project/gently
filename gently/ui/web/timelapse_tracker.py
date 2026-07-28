@@ -6,7 +6,6 @@ Tracks timelapse state from events for client synchronization.
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
 
 
 class TimelapseStateTracker:
@@ -21,15 +20,17 @@ class TimelapseStateTracker:
     """
 
     def __init__(self):
-        self.session_id: Optional[str] = None  # Unique ID per experiment
+        self.session_id: str | None = None  # Unique ID per experiment
         self.status = "IDLE"  # IDLE, RUNNING, PAUSED, COMPLETED
-        self.started_at: Optional[str] = None
-        self.embryos: Dict[str, dict] = {}  # embryo_id -> state
+        self.started_at: str | None = None
+        self.embryos: dict[str, dict] = {}  # embryo_id -> state
         self.total_timepoints = 0
         self.base_interval = 120
-        self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
-        self.projection_uids: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> projection_uid}
-        self.volume_paths: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> volume_path}
+        self.detection_reasoning: dict[str, list[dict]] = {}  # embryo_id -> list of detections
+        self.projection_uids: dict[
+            str, dict[int, str]
+        ] = {}  # embryo_id -> {timepoint -> projection_uid}
+        self.volume_paths: dict[str, dict[int, str]] = {}  # embryo_id -> {timepoint -> volume_path}
 
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
@@ -128,6 +129,16 @@ class TimelapseStateTracker:
             self.status = "STOPPED"
             # Don't mark embryos as complete - they were stopped, not finished
 
+        elif event_type == "EMBRYO_TERMINATED":
+            # A single embryo's imaging was halted by the orchestrator
+            # (no_object terminal, configured stop condition, errors, etc).
+            # Carry the completion_reason through so the UI can show why.
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                self.embryos[eid]["is_complete"] = True
+                self.embryos[eid]["completion_reason"] = data.get("completion_reason")
+                self.embryos[eid].setdefault("completed_at", datetime.now().isoformat())
+
         elif event_type == "DETECTOR_EVALUATED":
             # All detector/perception evaluations (with reasoning) - populates reasoning panel
             eid = data.get("embryo_id")
@@ -148,7 +159,8 @@ class TimelapseStateTracker:
                     "description": data.get("description"),
                     "timepoint": timepoint,
                     "volume_uid": data.get("volume_uid"),
-                    "projection_uid": data.get("projection_uid") or projection_uid,  # Use stored UID as fallback
+                    "projection_uid": data.get("projection_uid")
+                    or projection_uid,  # Use stored UID as fallback
                     "timestamp": datetime.now().isoformat(),
                     # Perception-specific fields
                     "stage": data.get("stage"),
@@ -186,21 +198,26 @@ class TimelapseStateTracker:
             # before any acquisition has happened.
             eid = data.get("embryo_id")
             if eid:
-                emb = self.embryos.setdefault(eid, {
-                    "embryo_id": eid,
-                    "timepoints": 0,
-                    "is_complete": False,
-                    "first_acquired": None,
-                    "last_acquired": None,
-                    "detections": {},
-                    "current_stage": None,
-                })
+                emb = self.embryos.setdefault(
+                    eid,
+                    {
+                        "embryo_id": eid,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "first_acquired": None,
+                        "last_acquired": None,
+                        "detections": {},
+                        "current_stage": None,
+                    },
+                )
                 if data.get("x") is not None:
                     emb["stage_x_um"] = data["x"]
                 if data.get("y") is not None:
                     emb["stage_y_um"] = data["y"]
                 if data.get("role"):
                     emb["role"] = data["role"]
+                if "strain" in data:
+                    emb["strain"] = data.get("strain")
                 if data.get("uid"):
                     emb["uid"] = data["uid"]
                 if data.get("user_label"):
@@ -215,13 +232,11 @@ class TimelapseStateTracker:
                 detector_name = data.get("detector_name", "unknown")
                 self.embryos[eid]["detections"][detector_name] = {
                     "detected": True,
-                    "confidence": data.get("confidence")
+                    "confidence": data.get("confidence"),
                 }
                 if detector_name == "hatching":
                     self.embryos[eid]["is_complete"] = True
-                    self.embryos[eid].setdefault(
-                        "completed_at", datetime.now().isoformat()
-                    )
+                    self.embryos[eid].setdefault("completed_at", datetime.now().isoformat())
 
         elif event_type == "VERIFICATION_STARTED":
             # Verification round started for embryo
@@ -250,8 +265,12 @@ class TimelapseStateTracker:
             # Progress update
             eid = data.get("embryo_id")
             if eid and eid in self.embryos and "verification" in self.embryos[eid]:
-                self.embryos[eid]["verification"]["strategies_complete"] = data.get("strategies_complete", 0)
-                self.embryos[eid]["verification"]["total_strategies"] = data.get("total_strategies", 5)
+                self.embryos[eid]["verification"]["strategies_complete"] = data.get(
+                    "strategies_complete", 0
+                )
+                self.embryos[eid]["verification"]["total_strategies"] = data.get(
+                    "total_strategies", 5
+                )
 
         elif event_type == "VERIFICATION_COMPLETED":
             # Final verification result
@@ -292,10 +311,16 @@ class TimelapseStateTracker:
             if data.get("change") == "role_assigned":
                 eid = data.get("embryo_id")
                 if eid:
-                    emb = self.embryos.setdefault(eid, {
-                        "embryo_id": eid, "timepoints": 0, "is_complete": False,
-                        "detections": {}, "current_stage": None,
-                    })
+                    emb = self.embryos.setdefault(
+                        eid,
+                        {
+                            "embryo_id": eid,
+                            "timepoints": 0,
+                            "is_complete": False,
+                            "detections": {},
+                            "current_stage": None,
+                        },
+                    )
                     if data.get("new_role"):
                         emb["role"] = data["new_role"]
 
@@ -304,10 +329,16 @@ class TimelapseStateTracker:
         elif event_type == "EMBRYO_CADENCE_CHANGED":
             eid = data.get("embryo_id")
             if eid:
-                emb = self.embryos.setdefault(eid, {
-                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
-                    "detections": {}, "current_stage": None,
-                })
+                emb = self.embryos.setdefault(
+                    eid,
+                    {
+                        "embryo_id": eid,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "detections": {},
+                        "current_stage": None,
+                    },
+                )
                 if data.get("new_phase") is not None:
                     emb["cadence_phase"] = data["new_phase"]
                 if data.get("new_interval_s") is not None:
@@ -319,22 +350,30 @@ class TimelapseStateTracker:
         elif event_type == "POWER_RAMP_STEP":
             eid = data.get("embryo_id")
             if eid:
-                emb = self.embryos.setdefault(eid, {
-                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
-                    "detections": {}, "current_stage": None,
-                })
+                emb = self.embryos.setdefault(
+                    eid,
+                    {
+                        "embryo_id": eid,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "detections": {},
+                        "current_stage": None,
+                    },
+                )
                 wavelength = data.get("wavelength", 488)
                 if wavelength == 488:
                     emb["laser_power_488_pct"] = data.get("new_pct")
-                emb.setdefault("power_history", []).append({
-                    "wavelength": wavelength,
-                    "old_pct": data.get("old_pct"),
-                    "new_pct": data.get("new_pct"),
-                    "direction": data.get("direction"),
-                    "rule": data.get("rule"),
-                    "intensity_level": data.get("intensity_level"),
-                    "timestamp": datetime.now().isoformat(),
-                })
+                emb.setdefault("power_history", []).append(
+                    {
+                        "wavelength": wavelength,
+                        "old_pct": data.get("old_pct"),
+                        "new_pct": data.get("new_pct"),
+                        "direction": data.get("direction"),
+                        "rule": data.get("rule"),
+                        "intensity_level": data.get("intensity_level"),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
                 # cap history per embryo
                 if len(emb["power_history"]) > 200:
                     emb["power_history"] = emb["power_history"][-200:]
@@ -342,10 +381,16 @@ class TimelapseStateTracker:
         elif event_type == "CLAUDE_DETECTOR_RESULT":
             eid = data.get("embryo_id")
             if eid:
-                emb = self.embryos.setdefault(eid, {
-                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
-                    "detections": {}, "current_stage": None,
-                })
+                emb = self.embryos.setdefault(
+                    eid,
+                    {
+                        "embryo_id": eid,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "detections": {},
+                        "current_stage": None,
+                    },
+                )
                 findings = data.get("findings") or {}
                 emb["last_intensity_level"] = findings.get("intensity_level")
                 emb["last_structure_quality"] = findings.get("structure_quality")
@@ -353,13 +398,24 @@ class TimelapseStateTracker:
                 if findings.get("has_hatched"):
                     emb["hatched"] = True
 
-        elif event_type in ("BURST_QUEUED", "BURST_START", "BURST_FRAME", "BURST_COMPLETE"):
+        elif event_type in (
+            "BURST_QUEUED",
+            "BURST_START",
+            "BURST_FRAME",
+            "BURST_COMPLETE",
+        ):
             eid = data.get("embryo_id")
             if eid:
-                emb = self.embryos.setdefault(eid, {
-                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
-                    "detections": {}, "current_stage": None,
-                })
+                emb = self.embryos.setdefault(
+                    eid,
+                    {
+                        "embryo_id": eid,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "detections": {},
+                        "current_stage": None,
+                    },
+                )
                 emb.setdefault("burst", {})
                 burst_state = emb["burst"]
                 if event_type == "BURST_QUEUED":
@@ -397,7 +453,7 @@ class TimelapseStateTracker:
             "embryos": self.embryos,
             "total_timepoints": self.total_timepoints,
             "base_interval": self.base_interval,
-            "detection_reasoning": self.detection_reasoning
+            "detection_reasoning": self.detection_reasoning,
         }
 
     def reset(self):
@@ -424,14 +480,18 @@ class TimelapseStateTracker:
             y = pos.get("y") if isinstance(pos, dict) else None
             if x is None or y is None:
                 continue
-            self.handle_event("EMBRYO_DETECTED", {
-                "embryo_id": eid,
-                "uid": getattr(emb, "uid", None),
-                "x": x,
-                "y": y,
-                "role": getattr(emb, "role", "test"),
-                "user_label": getattr(emb, "user_label", None),
-                "confidence": getattr(emb, "detection_confidence", None),
-            })
+            self.handle_event(
+                "EMBRYO_DETECTED",
+                {
+                    "embryo_id": eid,
+                    "uid": getattr(emb, "uid", None),
+                    "x": x,
+                    "y": y,
+                    "role": getattr(emb, "role", "test"),
+                    "strain": getattr(emb, "strain", None),
+                    "user_label": getattr(emb, "user_label", None),
+                    "confidence": getattr(emb, "detection_confidence", None),
+                },
+            )
             seeded += 1
         return seeded

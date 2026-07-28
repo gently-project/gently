@@ -2,22 +2,21 @@
 DiSPIM compound acquisition devices (volume scanner and light sheet snap).
 """
 
-import time
 import logging
+import time
 from collections import OrderedDict
-from typing import Dict
 
 import numpy as np
-
-from ophyd.status import Status
 import pymmcore
+from ophyd.status import Status
 
 from gently.settings import settings
+
 from ._common import _safe_obtain
-from .scanner import DiSPIMScanner
 from .camera import DiSPIMCamera
-from .piezo import DiSPIMPiezo
 from .optical import DiSPIMLaserControl
+from .piezo import DiSPIMPiezo
+from .scanner import DiSPIMScanner
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +55,15 @@ class DiSPIMVolumeScanner:
         Device name (default: "volume_scanner")
     """
 
-    def __init__(self,
-                 scanner: DiSPIMScanner,
-                 camera: DiSPIMCamera,
-                 piezo: DiSPIMPiezo,
-                 laser_control: 'DiSPIMLaserControl',
-                 core: pymmcore.CMMCore,
-                 name: str = "volume_scanner"):
+    def __init__(
+        self,
+        scanner: DiSPIMScanner,
+        camera: DiSPIMCamera,
+        piezo: DiSPIMPiezo,
+        laser_control: "DiSPIMLaserControl",
+        core: pymmcore.CMMCore,
+        name: str = "volume_scanner",
+    ):
         """
         Initialize volume scanner with all required devices.
 
@@ -83,23 +84,25 @@ class DiSPIMVolumeScanner:
         self._configured = False
 
         # Configuration cache
-        self._num_slices = None
-        self._exposure_ms = None
-        self._laser_config = None
+        self._num_slices: int | None = None
+        self._exposure_ms: float | None = None
+        self._laser_config: str | None = None
 
-    def configure(self,
-                  num_slices: int,
-                  exposure_ms: float,
-                  galvo_amplitude: float,
-                  galvo_center: float,
-                  piezo_amplitude: float,
-                  piezo_center: float,
-                  laser_config: str = "488 and 561",
-                  laser_power_488_pct: float = None,
-                  laser_power_561_pct: float = None,
-                  laser_power_405_pct: float = None,
-                  laser_power_637_pct: float = None,
-                  timing_params: Dict = None):
+    def configure(
+        self,
+        num_slices: int,
+        exposure_ms: float,
+        galvo_amplitude: float,
+        galvo_center: float,
+        piezo_amplitude: float,
+        piezo_center: float,
+        laser_config: str = "488 and 561",
+        laser_power_488_pct: float | None = None,
+        laser_power_561_pct: float | None = None,
+        laser_power_405_pct: float | None = None,
+        laser_power_637_pct: float | None = None,
+        timing_params: dict | None = None,
+    ):
         """
         Configure all devices for hardware-triggered volume acquisition.
 
@@ -120,7 +123,8 @@ class DiSPIMVolumeScanner:
         laser_config : str
             Laser channel selection preset (default: "488 and 561").
             Common options: "488 and 561", "488 only", "561 only"
-        laser_power_488_pct, laser_power_561_pct, laser_power_405_pct, laser_power_637_pct : float, optional
+        laser_power_488_pct, laser_power_561_pct, laser_power_405_pct,
+        laser_power_637_pct : float, optional
             Per-line laser power %. ``None`` leaves the current setpoint
             unchanged. Out-of-range values are rejected at the device-layer
             setter (see DiSPIMLightSource.POWER_LIMITS_PCT).
@@ -135,14 +139,12 @@ class DiSPIMVolumeScanner:
             galvo_amplitude=galvo_amplitude,
             galvo_center=galvo_center,
             num_slices=num_slices,
-            timing_params=timing_params
+            timing_params=timing_params,
         )
 
         # Configure piezo for volume acquisition
         self.piezo.configure_for_volume_acquisition(
-            amplitude_um=piezo_amplitude,
-            offset_um=piezo_center,
-            num_slices=num_slices
+            amplitude_um=piezo_amplitude, offset_um=piezo_center, num_slices=num_slices
         )
 
         # Apply per-line laser power if specified. Each setter raises if the
@@ -185,6 +187,14 @@ class DiSPIMVolumeScanner:
                 # Enable lasers
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
+
+                # Defensive stop: the lightsheet live streamer may have left the
+                # camera in continuous acquisition.  Starting a new sequence on
+                # an already-running camera triggers an MMCore error (and is
+                # thread-unsafe).  Stop cleanly before reconfiguring.
+                if self.core.isSequenceRunning():
+                    self.core.stopSequenceAcquisition()
+                    self.core.waitForDevice(self.camera.name)
 
                 # Prepare circular buffer
                 self.core.clearCircularBuffer()
@@ -258,6 +268,7 @@ class DiSPIMVolumeScanner:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -267,8 +278,8 @@ class DiSPIMVolumeScanner:
         if self._last_volume is not None:
             data = OrderedDict()
             data[self.name] = {
-                'value': self._last_volume,
-                'timestamp': self._last_volume_time or time.time()
+                "value": self._last_volume,
+                "timestamp": self._last_volume_time or time.time(),
             }
             return data
         else:
@@ -278,10 +289,10 @@ class DiSPIMVolumeScanner:
         """Describe volume data format."""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'array',
-            'shape': getattr(self._last_volume, 'shape', []),
-            'units': 'counts'
+            "source": self.name,
+            "dtype": "array",
+            "shape": getattr(self._last_volume, "shape", []),
+            "units": "counts",
         }
         return data
 
@@ -302,10 +313,12 @@ class DiSPIMLightSheetSnap:
     Used during focus sweeps and piezo-galvo calibration.
     """
 
-    def __init__(self,
-                 scanner: DiSPIMScanner,
-                 camera: DiSPIMCamera,
-                 name: str = "lightsheet_snap"):
+    def __init__(
+        self,
+        scanner: DiSPIMScanner,
+        camera: DiSPIMCamera,
+        name: str = "lightsheet_snap",
+    ):
         self.name = name
         self.parent = None  # Required for Bluesky
         self.scanner = scanner
@@ -314,10 +327,12 @@ class DiSPIMLightSheetSnap:
         self._last_image = None
         self._last_image_time = None
 
-    def configure(self,
-                  sheet_width_deg: float = 8.0,
-                  y_position_deg: float = 0.0,
-                  exposure_ms: float = 50.0):
+    def configure(
+        self,
+        sheet_width_deg: float = 8.0,
+        y_position_deg: float = 0.0,
+        exposure_ms: float = 50.0,
+    ):
         """
         Configure light sheet parameters for single snapshot.
 

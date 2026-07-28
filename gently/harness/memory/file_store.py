@@ -28,6 +28,7 @@ under a single *agent_dir* directory as YAML files, organised by domain:
         assessments/{id}.yaml
 """
 
+import copy
 import dataclasses
 import json
 import logging
@@ -35,10 +36,9 @@ import os
 import re
 import shutil
 import uuid
-from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import yaml
 
@@ -56,11 +56,11 @@ from .model import (
     Intentions,
     Learning,
     Observation,
-    PlannedSession,
-    PlannedSessionStatus,
     PlanItem,
     PlanItemStatus,
     PlanItemType,
+    PlannedSession,
+    PlannedSessionStatus,
     Project,
     Question,
     QuestionStatus,
@@ -79,8 +79,10 @@ logger = logging.getLogger(__name__)
 # YAML helpers -- keep datetimes as ISO strings in files
 # ---------------------------------------------------------------------------
 
+
 class _ISODumper(yaml.SafeDumper):
     """Custom dumper that serialises datetime objects as ISO strings."""
+
     pass
 
 
@@ -95,6 +97,7 @@ _ISODumper.add_representer(datetime, _datetime_representer)
 # FileContextStore
 # ---------------------------------------------------------------------------
 
+
 class FileContextStore:
     """
     File-based storage for the agent's context.
@@ -106,8 +109,13 @@ class FileContextStore:
     def __init__(self, agent_dir: Path):
         self.agent_dir = Path(agent_dir)
         self._ensure_dirs()
+        # YAML parse cache: str(path) -> ((mtime, size), parsed). Collapses the
+        # O(N^2) re-parsing in campaign-tree builds; auto-invalidated by file
+        # mtime/size changes and explicitly on _write_yaml. Set BEFORE the index
+        # rebuild below, which reads YAML through the cache.
+        self._yaml_cache: dict[str, tuple] = {}
         # In-memory index: campaign_id -> folder Path
-        self._campaign_index: Dict[str, Path] = {}
+        self._campaign_index: dict[str, Path] = {}
         self._rebuild_campaign_index()
 
     # ------------------------------------------------------------------
@@ -149,7 +157,7 @@ class FileContextStore:
                     if data and "id" in data:
                         self._campaign_index[data["id"]] = entry
 
-    def _campaign_folder(self, campaign_id: str) -> Optional[Path]:
+    def _campaign_folder(self, campaign_id: str) -> Path | None:
         """Return the folder for a campaign, or None."""
         return self._campaign_index.get(campaign_id)
 
@@ -174,25 +182,41 @@ class FileContextStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as fh:
-            yaml.dump(data, fh, Dumper=_ISODumper, default_flow_style=False,
-                       allow_unicode=True, sort_keys=False)
+            yaml.dump(
+                data,
+                fh,
+                Dumper=_ISODumper,
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            )
         # Atomic rename (on Windows this replaces the target).
-        if os.name == "nt":
-            # os.replace is atomic on Windows when on same volume.
-            os.replace(str(tmp), str(path))
-        else:
-            os.replace(str(tmp), str(path))
+        os.replace(str(tmp), str(path))
+        # Invalidate the parse cache so the next read reloads (new mtime anyway).
+        self._yaml_cache.pop(str(path), None)
 
     def _read_yaml(self, path: Path):
-        """Read a YAML file; return None if missing or empty."""
-        if not path.exists():
-            return None
+        """Read a YAML file, parse-cached by (mtime, size). Returns None if
+        missing or empty. The cached object is never handed out directly — every
+        return is a deepcopy — so callers may freely mutate the result without
+        corrupting the cache."""
         try:
-            with open(path, "r", encoding="utf-8") as fh:
-                return yaml.safe_load(fh)
+            st = path.stat()
+        except OSError:
+            return None
+        key = str(path)
+        sig = (st.st_mtime, st.st_size)
+        cached = self._yaml_cache.get(key)
+        if cached is not None and cached[0] == sig:
+            return copy.deepcopy(cached[1])
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = yaml.safe_load(fh)
         except Exception:
             logger.warning(f"Failed to read {path}", exc_info=True)
             return None
+        self._yaml_cache[key] = (sig, data)
+        return copy.deepcopy(data)
 
     def _append_jsonl(self, path: Path, record: dict):
         """Append one JSON line to a file."""
@@ -223,7 +247,7 @@ class FileContextStore:
 
     def reset(self) -> dict:
         """Delete all data files; return counts of deleted items by category."""
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
 
         def _count_and_remove(subdir: str, label: str):
             d = self.agent_dir / subdir
@@ -270,7 +294,9 @@ class FileContextStore:
 
         self._campaign_index.clear()
         total = sum(counts.values())
-        logger.info(f"File context store reset -- {total} items cleared from {len(counts)} categories")
+        logger.info(
+            f"File context store reset -- {total} items cleared from {len(counts)} categories"
+        )
         return counts
 
     # ==================================================================
@@ -301,8 +327,8 @@ class FileContextStore:
             learnings=self.get_learnings(),
         )
 
-    def _load_embryo_states(self) -> Dict[str, EmbryoUnderstanding]:
-        result: Dict[str, EmbryoUnderstanding] = {}
+    def _load_embryo_states(self) -> dict[str, EmbryoUnderstanding]:
+        result: dict[str, EmbryoUnderstanding] = {}
         eu_dir = self.agent_dir / "embryo_understanding"
         if not eu_dir.exists():
             return result
@@ -330,11 +356,11 @@ class FileContextStore:
     def create_campaign(
         self,
         description: str,
-        shorthand: Optional[str] = None,
-        summary: Optional[str] = None,
-        target: Optional[str] = None,
-        parent_id: Optional[str] = None,
-        campaign_id: Optional[str] = None,
+        shorthand: str | None = None,
+        summary: str | None = None,
+        target: str | None = None,
+        parent_id: str | None = None,
+        campaign_id: str | None = None,
     ) -> str:
         cid = campaign_id or self._gen_id()
         now = self._now()
@@ -345,7 +371,7 @@ class FileContextStore:
         (folder / "plan" / "history").mkdir(exist_ok=True)
         (folder / "templates").mkdir(exist_ok=True)
 
-        data = {
+        data: dict[str, Any] = {
             "id": cid,
             "description": description,
             "shorthand": shorthand,
@@ -368,7 +394,7 @@ class FileContextStore:
         logger.info(f"Created campaign {cid} [{label}]")
         return cid
 
-    def get_campaign(self, campaign_id: str) -> Optional[Campaign]:
+    def get_campaign(self, campaign_id: str) -> Campaign | None:
         folder = self._campaign_folder(campaign_id)
         if not folder:
             return None
@@ -377,9 +403,9 @@ class FileContextStore:
             return None
         return self._dict_to_campaign(data)
 
-    def get_active_campaigns(self) -> List[Campaign]:
+    def get_active_campaigns(self) -> list[Campaign]:
         campaigns = []
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
             if data and data.get("status") == "active":
                 campaigns.append(self._dict_to_campaign(data))
@@ -389,7 +415,7 @@ class FileContextStore:
     def count_non_active_campaigns(self) -> int:
         """Count campaigns whose status is not 'active'."""
         count = 0
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
             if data and data.get("status") != "active":
                 count += 1
@@ -402,17 +428,17 @@ class FileContextStore:
             return 0
         return sum(1 for f in si_dir.iterdir() if f.suffix in (".yaml", ".yml"))
 
-    def get_all_campaigns(self, limit: int = 50) -> List[Campaign]:
+    def get_all_campaigns(self, limit: int = 50) -> list[Campaign]:
         """Get all campaigns regardless of status, ordered by created_at descending."""
         campaigns = []
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
             if data:
                 campaigns.append(self._dict_to_campaign(data))
         campaigns.sort(key=lambda c: c.created_at, reverse=True)
         return campaigns[:limit]
 
-    def get_recent_session_intents(self, limit: int = 50) -> List[SessionIntent]:
+    def get_recent_session_intents(self, limit: int = 50) -> list[SessionIntent]:
         """Get recent session intents, ordered by created_at descending."""
         si_dir = self.agent_dir / "session_intents"
         if not si_dir.exists():
@@ -426,7 +452,7 @@ class FileContextStore:
         intents.sort(key=lambda i: i.created_at, reverse=True)
         return intents[:limit]
 
-    def resolve_campaign(self, ref: str) -> Optional[Campaign]:
+    def resolve_campaign(self, ref: str) -> Campaign | None:
         campaign = self.get_campaign(ref)
         if campaign:
             return campaign
@@ -435,7 +461,7 @@ class FileContextStore:
             return self.get_campaign(resolved_id)
         return None
 
-    def _resolve_campaign_label(self, label: str) -> Optional[str]:
+    def _resolve_campaign_label(self, label: str) -> str | None:
         label_lower = label.lower()
 
         # Shorthand match (case-insensitive), root campaigns only
@@ -477,6 +503,7 @@ class FileContextStore:
         data["progress"] = progress
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
+        self._notify_plan_change(campaign_id)
 
     def update_campaign_status(self, campaign_id: str, status: Status):
         folder = self._campaign_folder(campaign_id)
@@ -492,11 +519,11 @@ class FileContextStore:
     def update_campaign(
         self,
         campaign_id: str,
-        description: Optional[str] = None,
-        shorthand: Optional[str] = None,
-        summary: Optional[str] = None,
-        target: Optional[str] = None,
-        parent_id: Optional[str] = None,
+        description: str | None = None,
+        shorthand: str | None = None,
+        summary: str | None = None,
+        target: str | None = None,
+        parent_id: str | None = None,
     ):
         folder = self._campaign_folder(campaign_id)
         if not folder:
@@ -520,8 +547,8 @@ class FileContextStore:
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
 
-    def delete_campaign(self, campaign_id: str, cascade: bool = True) -> Dict[str, int]:
-        counts: Dict[str, int] = {"campaigns": 0, "plan_items": 0, "dependencies": 0}
+    def delete_campaign(self, campaign_id: str, cascade: bool = True) -> dict[str, int]:
+        counts: dict[str, int] = {"campaigns": 0, "plan_items": 0, "dependencies": 0}
 
         def _delete_recursive(cid: str):
             if cascade:
@@ -546,22 +573,27 @@ class FileContextStore:
         _delete_recursive(campaign_id)
         return counts
 
-    def get_subcampaigns(self, campaign_id: str) -> List[Campaign]:
+    def get_subcampaigns(self, campaign_id: str) -> list[Campaign]:
         children = []
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
             if data and data.get("parent_id") == campaign_id:
                 children.append(self._dict_to_campaign(data))
         children.sort(key=lambda c: c.created_at)
         return children
 
-    def get_nth_subcampaign(self, parent_id: str, n: int) -> Optional[Campaign]:
+    def get_nth_subcampaign(self, parent_id: str, n: int) -> Campaign | None:
+        # Tolerate n arriving as a numeric string (tool args are often stringified).
+        try:
+            n = int(n)
+        except (ValueError, TypeError):
+            return None
         phases = self.get_subcampaigns(parent_id)
         if 1 <= n <= len(phases):
             return phases[n - 1]
         return None
 
-    def get_campaign_tree(self, campaign_id: str) -> Dict[str, Any]:
+    def get_campaign_tree(self, campaign_id: str) -> dict[str, Any]:
         campaign = self.get_campaign(campaign_id)
         if not campaign:
             return {}
@@ -571,10 +603,10 @@ class FileContextStore:
             "children": [self.get_campaign_tree(c.id) for c in children],
         }
 
-    def get_root_campaigns(self, status: Optional[str] = "active") -> List[Campaign]:
+    def get_root_campaigns(self, status: str | None = "active") -> list[Campaign]:
         """Get root campaigns (no parent). If status is None, returns all."""
         roots = []
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
             if data and data.get("parent_id") is None:
                 if status is None or data.get("status") == status:
@@ -608,9 +640,9 @@ class FileContextStore:
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
 
-    def get_shared_campaigns(self) -> List[Campaign]:
+    def get_shared_campaigns(self) -> list[Campaign]:
         shared = []
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
             if data and data.get("is_shared"):
                 shared.append(self._dict_to_campaign(data))
@@ -627,16 +659,18 @@ class FileContextStore:
         participants = data.get("participants", [])
         # Replace existing entry for this instance_id
         participants = [p for p in participants if p.get("instance_id") != instance_id]
-        participants.append({
-            "campaign_id": campaign_id,
-            "instance_id": instance_id,
-            "hostname": hostname,
-            "joined_at": self._now(),
-        })
+        participants.append(
+            {
+                "campaign_id": campaign_id,
+                "instance_id": instance_id,
+                "hostname": hostname,
+                "joined_at": self._now(),
+            }
+        )
         data["participants"] = participants
         self._write_yaml(folder / "campaign.yaml", data)
 
-    def get_campaign_participants(self, campaign_id: str) -> List[Dict]:
+    def get_campaign_participants(self, campaign_id: str) -> list[dict]:
         folder = self._campaign_folder(campaign_id)
         if not folder:
             return []
@@ -683,8 +717,8 @@ class FileContextStore:
     def create_project(
         self,
         description: str,
-        campaign_id: Optional[str] = None,
-        project_id: Optional[str] = None,
+        campaign_id: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         pid = project_id or self._gen_id()
         now = self._now()
@@ -698,13 +732,14 @@ class FileContextStore:
             "updated_at": now,
         }
         self._write_yaml(
-            self.agent_dir / "projects" / f"{pid}_{slug}.yaml", data,
+            self.agent_dir / "projects" / f"{pid}_{slug}.yaml",
+            data,
         )
         logger.info(f"Created project {pid}: {description}")
         return pid
 
-    def get_active_projects(self) -> List[Project]:
-        projects: List[Project] = []
+    def get_active_projects(self) -> list[Project]:
+        projects: list[Project] = []
         proj_dir = self.agent_dir / "projects"
         if not proj_dir.exists():
             return projects
@@ -723,19 +758,23 @@ class FileContextStore:
     def create_session_intent(
         self,
         session_id: str,
-        planned_intent: Optional[str] = None,
-        campaign_ids: Optional[List[str]] = None,
+        planned_intent: str | None = None,
+        campaign_ids: list[str] | None = None,
     ):
         now = self._now()
         path = self.agent_dir / "session_intents" / f"{session_id}.yaml"
         existing = self._read_yaml(path)
         data = existing or {}
-        data.update({
-            "session_id": session_id,
-            "planned_intent": planned_intent if planned_intent is not None else data.get("planned_intent"),
-            "created_at": data.get("created_at", now),
-            "campaign_ids": data.get("campaign_ids", []),
-        })
+        data.update(
+            {
+                "session_id": session_id,
+                "planned_intent": planned_intent
+                if planned_intent is not None
+                else data.get("planned_intent"),
+                "created_at": data.get("created_at", now),
+                "campaign_ids": data.get("campaign_ids", []),
+            }
+        )
         if "actual_summary" not in data:
             data["actual_summary"] = None
         if "completed_at" not in data:
@@ -746,7 +785,7 @@ class FileContextStore:
             for cid in campaign_ids:
                 self.link_session_campaign(session_id, cid)
 
-    def get_current_session_intent(self) -> Optional[SessionIntent]:
+    def get_current_session_intent(self) -> SessionIntent | None:
         si_dir = self.agent_dir / "session_intents"
         if not si_dir.exists():
             return None
@@ -773,6 +812,64 @@ class FileContextStore:
         self._write_yaml(path, data)
 
     # ==================================================================
+    # Operation Plans
+    # ==================================================================
+
+    def set_operation_plan(self, session_id: str, plan: dict) -> None:
+        """Persist the agent-authored Operation Plan for a session.
+
+        The plan dict is stored verbatim (agent is the source of truth).
+        Fires CONTEXT_UPDATED so the Operations UI refreshes live.
+        """
+        path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
+        self._write_yaml(path, plan)
+        self._notify_context_change("operation_plan")
+
+    def get_operation_plan(self, session_id: str) -> dict | None:
+        """Return the stored Operation Plan for a session, or None if absent."""
+        path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
+        return self._read_yaml(path)
+
+    def transition_tactic(
+        self, session_id: str, tactic_id: str, state: str | None = None, **bind
+    ) -> bool:
+        """Atomically update a tactic's state and/or bind live values onto it.
+
+        Reads the plan via get_operation_plan, locates the tactic by id,
+        sets its state (if provided), merges bind kwargs into its live dict
+        (creating it if absent), stamps updated_at/updated_reason, and writes
+        back via set_operation_plan so CONTEXT_UPDATED fires exactly once.
+
+        Returns True on success, False if the plan is absent or the tactic id
+        is not found (no-op, no crash).
+
+        Note: read-modify-write with no lock; safe because all subscribed event
+        emissions run on the single asyncio loop thread — revisit if a
+        worker-thread emitter is ever added.
+        """
+        plan = self.get_operation_plan(session_id)
+        if plan is None:
+            return False
+
+        tactics = plan.get("tactics", [])
+        tactic = next((t for t in tactics if t.get("id") == tactic_id), None)
+        if tactic is None:
+            return False
+
+        if state is not None:
+            tactic["state"] = state
+
+        if bind:
+            live = tactic.setdefault("live", {})
+            live.update(bind)
+
+        plan["updated_at"] = self._now()
+        plan["updated_reason"] = f"tactic {tactic_id} transitioned"
+
+        self.set_operation_plan(session_id, plan)
+        return True
+
+    # ==================================================================
     # Session <-> Campaign (many-to-many)
     # ==================================================================
 
@@ -794,6 +891,7 @@ class FileContextStore:
             cids.append(campaign_id)
         data["campaign_ids"] = cids
         self._write_yaml(path, data)
+        self._notify_plan_change(campaign_id)
 
     def unlink_session_campaign(self, session_id: str, campaign_id: str):
         path = self.agent_dir / "session_intents" / f"{session_id}.yaml"
@@ -806,14 +904,14 @@ class FileContextStore:
         data["campaign_ids"] = cids
         self._write_yaml(path, data)
 
-    def get_campaign_ids_for_session(self, session_id: str) -> List[str]:
+    def get_campaign_ids_for_session(self, session_id: str) -> list[str]:
         path = self.agent_dir / "session_intents" / f"{session_id}.yaml"
         data = self._read_yaml(path)
         if not data:
             return []
         return data.get("campaign_ids", [])
 
-    def get_campaigns_for_session(self, session_id: str) -> List[Campaign]:
+    def get_campaigns_for_session(self, session_id: str) -> list[Campaign]:
         cids = self.get_campaign_ids_for_session(session_id)
         result = []
         for cid in cids:
@@ -822,8 +920,8 @@ class FileContextStore:
                 result.append(c)
         return result
 
-    def get_sessions_for_campaign(self, campaign_id: str) -> List[SessionIntent]:
-        results: List[SessionIntent] = []
+    def get_sessions_for_campaign(self, campaign_id: str) -> list[SessionIntent]:
+        results: list[SessionIntent] = []
         si_dir = self.agent_dir / "session_intents"
         if not si_dir.exists():
             return results
@@ -842,14 +940,14 @@ class FileContextStore:
     def create_planned_session(
         self,
         scheduled_date: str,
-        title: Optional[str] = None,
-        notes: Optional[str] = None,
-        scheduled_time: Optional[str] = None,
-        estimated_duration_minutes: Optional[int] = None,
-        acquisition_params: Optional[Dict] = None,
-        source_session_id: Optional[str] = None,
-        campaign_ids: Optional[List[str]] = None,
-        planned_session_id: Optional[str] = None,
+        title: str | None = None,
+        notes: str | None = None,
+        scheduled_time: str | None = None,
+        estimated_duration_minutes: int | None = None,
+        acquisition_params: dict | None = None,
+        source_session_id: str | None = None,
+        campaign_ids: list[str] | None = None,
+        planned_session_id: str | None = None,
     ) -> str:
         psid = planned_session_id or self._gen_id()
         now = self._now()
@@ -869,15 +967,15 @@ class FileContextStore:
             "updated_at": now,
         }
         self._write_yaml(
-            self.agent_dir / "planned_sessions" / f"{psid}.yaml", data,
+            self.agent_dir / "planned_sessions" / f"{psid}.yaml",
+            data,
         )
         logger.info(
-            f"Created planned session {psid} for {scheduled_date}: "
-            f"{title or notes or '(untitled)'}"
+            f"Created planned session {psid} for {scheduled_date}: {title or notes or '(untitled)'}"
         )
         return psid
 
-    def get_planned_session(self, planned_session_id: str) -> Optional[PlannedSession]:
+    def get_planned_session(self, planned_session_id: str) -> PlannedSession | None:
         path = self.agent_dir / "planned_sessions" / f"{planned_session_id}.yaml"
         data = self._read_yaml(path)
         if not data:
@@ -886,12 +984,12 @@ class FileContextStore:
 
     def get_planned_sessions(
         self,
-        status: Optional[str] = None,
-        campaign_id: Optional[str] = None,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-    ) -> List[PlannedSession]:
-        results: List[PlannedSession] = []
+        status: str | None = None,
+        campaign_id: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> list[PlannedSession]:
+        results: list[PlannedSession] = []
         ps_dir = self.agent_dir / "planned_sessions"
         if not ps_dir.exists():
             return results
@@ -914,9 +1012,9 @@ class FileContextStore:
         results.sort(key=lambda ps: (ps.scheduled_date or "", ps.scheduled_time or ""))
         return results
 
-    def get_upcoming_sessions(self, limit: int = 10) -> List[PlannedSession]:
+    def get_upcoming_sessions(self, limit: int = 10) -> list[PlannedSession]:
         today = datetime.now().strftime("%Y-%m-%d")
-        results: List[PlannedSession] = []
+        results: list[PlannedSession] = []
         ps_dir = self.agent_dir / "planned_sessions"
         if not ps_dir.exists():
             return results
@@ -935,9 +1033,9 @@ class FileContextStore:
         results.sort(key=lambda ps: (ps.scheduled_date or "", ps.scheduled_time or ""))
         return results[:limit]
 
-    def get_todays_sessions(self) -> List[PlannedSession]:
+    def get_todays_sessions(self) -> list[PlannedSession]:
         today = datetime.now().strftime("%Y-%m-%d")
-        results: List[PlannedSession] = []
+        results: list[PlannedSession] = []
         ps_dir = self.agent_dir / "planned_sessions"
         if not ps_dir.exists():
             return results
@@ -958,15 +1056,15 @@ class FileContextStore:
     def update_planned_session(
         self,
         planned_session_id: str,
-        title: Optional[str] = None,
-        notes: Optional[str] = None,
-        scheduled_date: Optional[str] = None,
-        scheduled_time: Optional[str] = None,
-        estimated_duration_minutes: Optional[int] = None,
-        acquisition_params: Optional[Dict] = None,
-        source_session_id: Optional[str] = None,
-        status: Optional[PlannedSessionStatus] = None,
-        session_id: Optional[str] = None,
+        title: str | None = None,
+        notes: str | None = None,
+        scheduled_date: str | None = None,
+        scheduled_time: str | None = None,
+        estimated_duration_minutes: int | None = None,
+        acquisition_params: dict | None = None,
+        source_session_id: str | None = None,
+        status: PlannedSessionStatus | None = None,
+        session_id: str | None = None,
     ):
         path = self.agent_dir / "planned_sessions" / f"{planned_session_id}.yaml"
         data = self._read_yaml(path)
@@ -1025,7 +1123,7 @@ class FileContextStore:
         data["campaign_ids"] = cids
         self._write_yaml(path, data)
 
-    def get_campaign_ids_for_planned_session(self, planned_session_id: str) -> List[str]:
+    def get_campaign_ids_for_planned_session(self, planned_session_id: str) -> list[str]:
         path = self.agent_dir / "planned_sessions" / f"{planned_session_id}.yaml"
         data = self._read_yaml(path)
         if not data:
@@ -1036,7 +1134,7 @@ class FileContextStore:
     # Plan Items
     # ==================================================================
 
-    def _read_plan_items_raw(self, campaign_id: str) -> List[Dict]:
+    def _read_plan_items_raw(self, campaign_id: str) -> list[dict]:
         """Read the raw plan items list for a campaign."""
         folder = self._campaign_folder(campaign_id)
         if not folder:
@@ -1046,7 +1144,7 @@ class FileContextStore:
             return []
         return data
 
-    def _write_plan_items(self, campaign_id: str, items: List[Dict]):
+    def _write_plan_items(self, campaign_id: str, items: list[dict]):
         """Write the plan items list for a campaign."""
         folder = self._campaign_folder(campaign_id)
         if not folder:
@@ -1054,8 +1152,9 @@ class FileContextStore:
         self._write_yaml(folder / "plan" / "current.yaml", items)
 
     def _find_plan_item_location(
-        self, item_id: str,
-    ) -> Optional[tuple]:
+        self,
+        item_id: str,
+    ) -> tuple | None:
         """Find a plan item across all campaigns.
 
         Returns (campaign_id, items_list, index) or None.
@@ -1072,15 +1171,15 @@ class FileContextStore:
         campaign_id: str,
         type: str,
         title: str,
-        description: Optional[str] = None,
-        spec: Optional[Dict] = None,
-        inherit_from: Optional[str] = None,
-        planned_session_id: Optional[str] = None,
+        description: str | None = None,
+        spec: dict | None = None,
+        inherit_from: str | None = None,
+        planned_session_id: str | None = None,
         phase_order: int = -1,
-        depends_on: Optional[List[str]] = None,
-        item_id: Optional[str] = None,
-        references: Optional[List[Dict]] = None,
-        estimated_days: Optional[int] = None,
+        depends_on: list[str] | None = None,
+        item_id: str | None = None,
+        references: list[dict] | None = None,
+        estimated_days: int | None = None,
     ) -> str:
         pid = item_id or self._gen_id()
         now = self._now()
@@ -1106,6 +1205,7 @@ class FileContextStore:
             "inherit_from": inherit_from,
             "planned_session_id": planned_session_id,
             "session_id": None,
+            "session_ids": [],
             "estimated_days": estimated_days,
             "phase_order": phase_order,
             "references": references,
@@ -1117,10 +1217,11 @@ class FileContextStore:
         }
         items.append(item_data)
         self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
         logger.info(f"Created plan item {pid} [{type}] #{phase_order}: {title}")
         return pid
 
-    def get_plan_item(self, item_id: str) -> Optional[PlanItem]:
+    def get_plan_item(self, item_id: str) -> PlanItem | None:
         loc = self._find_plan_item_location(item_id)
         if not loc:
             return None
@@ -1128,8 +1229,10 @@ class FileContextStore:
         return self._dict_to_plan_item(items[idx])
 
     def resolve_plan_item(
-        self, ref: str, campaign_id: Optional[str] = None,
-    ) -> Optional[PlanItem]:
+        self,
+        ref: str,
+        campaign_id: str | None = None,
+    ) -> PlanItem | None:
         ref = ref.strip().lower()
 
         # Direct ID match
@@ -1138,7 +1241,7 @@ class FileContextStore:
             return item
 
         # UUID prefix match
-        if len(ref) >= 4 and re.match(r'^[0-9a-f]+$', ref):
+        if len(ref) >= 4 and re.match(r"^[0-9a-f]+$", ref):
             for cid in self._campaign_index:
                 for raw in self._read_plan_items_raw(cid):
                     if raw.get("id", "").startswith(ref):
@@ -1149,7 +1252,7 @@ class FileContextStore:
         task_num = None
 
         # "campaign.phase.task"
-        m = re.match(r'^([^.\s]+)\.(\d+)\.(\d+)$', ref)
+        m = re.match(r"^([^.\s]+)\.(\d+)\.(\d+)$", ref)
         if m:
             campaign_label = m.group(1)
             phase_num, task_num = int(m.group(2)), int(m.group(3))
@@ -1159,25 +1262,25 @@ class FileContextStore:
 
         # "1.3" or "2.1"
         if not task_num:
-            m = re.match(r'^(\d+)\.(\d+)$', ref)
+            m = re.match(r"^(\d+)\.(\d+)$", ref)
             if m:
                 phase_num, task_num = int(m.group(1)), int(m.group(2))
 
         # "task 3 of phase 1"
         if not task_num:
-            m = re.search(r'task\s+(\d+)\s+(?:of\s+)?phase\s+(\d+)', ref)
+            m = re.search(r"task\s+(\d+)\s+(?:of\s+)?phase\s+(\d+)", ref)
             if m:
                 task_num, phase_num = int(m.group(1)), int(m.group(2))
 
         # "phase 1 task 3"
         if not task_num:
-            m = re.search(r'phase\s+(\d+)\s+task\s+(\d+)', ref)
+            m = re.search(r"phase\s+(\d+)\s+task\s+(\d+)", ref)
             if m:
                 phase_num, task_num = int(m.group(1)), int(m.group(2))
 
         # "task 3" / "#3" / just "3"
         if not task_num:
-            m = re.match(r'^(?:task\s+|#)?(\d+)$', ref)
+            m = re.match(r"^(?:task\s+|#)?(\d+)$", ref)
             if m:
                 task_num = int(m.group(1))
 
@@ -1204,7 +1307,7 @@ class FileContextStore:
         else:
             phases = self.get_subcampaigns(root_id)
             if phases:
-                all_items: List[PlanItem] = []
+                all_items: list[PlanItem] = []
                 for phase in phases:
                     p_items = self.get_plan_items(campaign_id=phase.id)
                     p_items.sort(key=lambda x: x.phase_order)
@@ -1224,11 +1327,11 @@ class FileContextStore:
 
     def get_plan_items(
         self,
-        campaign_id: Optional[str] = None,
-        status: Optional[str] = None,
-        type: Optional[str] = None,
+        campaign_id: str | None = None,
+        status: str | None = None,
+        type: str | None = None,
         include_children: bool = False,
-    ) -> List[PlanItem]:
+    ) -> list[PlanItem]:
         if campaign_id and include_children:
             cids = self._get_campaign_tree_ids(campaign_id)
         elif campaign_id:
@@ -1236,7 +1339,7 @@ class FileContextStore:
         else:
             cids = list(self._campaign_index.keys())
 
-        result: List[PlanItem] = []
+        result: list[PlanItem] = []
         for cid in cids:
             for raw in self._read_plan_items_raw(cid):
                 if status and raw.get("status") != status:
@@ -1250,17 +1353,17 @@ class FileContextStore:
     def update_plan_item(
         self,
         item_id: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
-        status: Optional[PlanItemStatus] = None,
-        outcome: Optional[str] = None,
-        spec: Optional[Dict] = None,
-        planned_session_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        phase_order: Optional[int] = None,
-        campaign_id: Optional[str] = None,
-        references: Optional[List[Dict]] = None,
-        estimated_days: Optional[int] = None,
+        title: str | None = None,
+        description: str | None = None,
+        status: PlanItemStatus | None = None,
+        outcome: str | None = None,
+        spec: dict | None = None,
+        planned_session_id: str | None = None,
+        session_id: str | None = None,
+        phase_order: int | None = None,
+        campaign_id: str | None = None,
+        references: list[dict] | None = None,
+        estimated_days: int | None = None,
     ):
         loc = self._find_plan_item_location(item_id)
         if not loc:
@@ -1295,17 +1398,91 @@ class FileContextStore:
             new_items = self._read_plan_items_raw(campaign_id)
             new_items.append(item)
             self._write_plan_items(campaign_id, new_items)
+            self._notify_plan_change(campaign_id)
             return
 
         item["updated_at"] = self._now()
         self._write_plan_items(old_campaign_id, items)
+        self._notify_plan_change(old_campaign_id)
 
     def complete_plan_item(self, item_id: str, outcome: str):
         self.update_plan_item(
-            item_id, status=PlanItemStatus.COMPLETED, outcome=outcome,
+            item_id,
+            status=PlanItemStatus.COMPLETED,
+            outcome=outcome,
         )
 
-    def skip_plan_item(self, item_id: str, reason: Optional[str] = None):
+    def link_plan_item_session(
+        self, item_id: str, session_id: str, set_in_progress: bool = True
+    ) -> bool:
+        """Attach a session to a plan item — APPENDS (an item may run several times:
+        re-runs, multi-sitting, more embryos later). Records the session as the latest
+        `session_id` (back-compat), flips a PLANNED item to IN_PROGRESS, emits PLAN_UPDATED.
+        Returns False if the item isn't found."""
+        loc = self._find_plan_item_location(item_id)
+        if not loc:
+            return False
+        campaign_id, items, idx = loc
+        item = items[idx]
+        sids = item.get("session_ids") or ([item["session_id"]] if item.get("session_id") else [])
+        if session_id and session_id not in sids:
+            sids.append(session_id)
+        item["session_ids"] = sids
+        if sids:
+            item["session_id"] = sids[-1]  # most recent run; back-compat for older readers
+        if set_in_progress and item.get("status") == "planned":
+            item["status"] = PlanItemStatus.IN_PROGRESS.value
+        item["updated_at"] = self._now()
+        self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
+        return True
+
+    def unlink_plan_item_session(self, item_id: str, session_id: str) -> bool:
+        """Remove a session from a plan item's session_ids list.
+
+        Mirrors the load/persist/notify pattern of link_plan_item_session.
+        Clears the back-compat scalar session_id when it matched the removed
+        session (sets it to the most-recent remaining session_id, or None).
+        Idempotent: returns False without writing if the session isn't linked.
+        Returns True on successful removal.
+        """
+        loc = self._find_plan_item_location(item_id)
+        if not loc:
+            return False
+        campaign_id, items, idx = loc
+        item = items[idx]
+        sids = item.get("session_ids") or ([item["session_id"]] if item.get("session_id") else [])
+        if session_id not in sids:
+            return False
+        sids = [s for s in sids if s != session_id]
+        item["session_ids"] = sids
+        item["session_id"] = sids[-1] if sids else None  # back-compat: most recent remaining
+        item["updated_at"] = self._now()
+        self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
+        return True
+
+    def get_plan_items_for_session(self, session_id: str) -> list["PlanItem"]:
+        """Return all plan items linked to a session.
+
+        Iterates active campaigns only (mirrors the normal read path).
+        Back-compat: matches items whose scalar session_id equals the query even
+        when session_ids is empty (old items written before the list field existed).
+        Deduplicates by item id.
+        """
+        seen: set[str] = set()
+        result: list[PlanItem] = []
+        for campaign in self.get_active_campaigns():
+            for item in self.get_plan_items(campaign.id):
+                if item.id in seen:
+                    continue
+                # session_ids is already populated from back-compat in _dict_to_plan_item
+                if session_id in (item.session_ids or []) or item.session_id == session_id:
+                    seen.add(item.id)
+                    result.append(item)
+        return result
+
+    def skip_plan_item(self, item_id: str, reason: str | None = None):
         self.update_plan_item(
             item_id,
             status=PlanItemStatus.SKIPPED,
@@ -1362,27 +1539,29 @@ class FileContextStore:
         items[idx]["depends_on"] = deps
         self._write_plan_items(campaign_id, items)
 
-    def get_plan_item_dependencies(self, item_id: str) -> List[str]:
+    def get_plan_item_dependencies(self, item_id: str) -> list[str]:
         loc = self._find_plan_item_location(item_id)
         if not loc:
             return []
         _, items, idx = loc
         return list(items[idx].get("depends_on", []))
 
-    def get_plan_item_dependents(self, item_id: str) -> List[str]:
+    def get_plan_item_dependents(self, item_id: str) -> list[str]:
         """Get IDs of items that depend on this item."""
-        dependents: List[str] = []
+        dependents: list[str] = []
         for cid in self._campaign_index:
             for raw in self._read_plan_items_raw(cid):
                 if item_id in raw.get("depends_on", []):
                     dependents.append(raw["id"])
         return dependents
 
-    def get_unblocked_plan_items(self, campaign_id: str) -> List[PlanItem]:
+    def get_unblocked_plan_items(self, campaign_id: str) -> list[PlanItem]:
         items = self.get_plan_items(
-            campaign_id=campaign_id, status="planned", include_children=True,
+            campaign_id=campaign_id,
+            status="planned",
+            include_children=True,
         )
-        unblocked: List[PlanItem] = []
+        unblocked: list[PlanItem] = []
         for item in items:
             if not item.depends_on:
                 unblocked.append(item)
@@ -1391,7 +1570,8 @@ class FileContextStore:
             for dep_id in item.depends_on:
                 dep = self.get_plan_item(dep_id)
                 if dep and dep.status not in (
-                    PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED,
+                    PlanItemStatus.COMPLETED,
+                    PlanItemStatus.SKIPPED,
                 ):
                     all_resolved = False
                     break
@@ -1399,11 +1579,12 @@ class FileContextStore:
                 unblocked.append(item)
         return unblocked
 
-    def get_plan_status(self, campaign_id: str) -> Dict[str, Any]:
+    def get_plan_status(self, campaign_id: str) -> dict[str, Any]:
         items = self.get_plan_items(
-            campaign_id=campaign_id, include_children=True,
+            campaign_id=campaign_id,
+            include_children=True,
         )
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "total": len(items),
             "completed": 0,
             "in_progress": 0,
@@ -1426,16 +1607,13 @@ class FileContextStore:
             if item.status == PlanItemStatus.COMPLETED:
                 result["by_type"][type_key]["completed"] += 1
 
-            if (
-                item.type == PlanItemType.DECISION_POINT
-                and item.status == PlanItemStatus.PLANNED
-            ):
+            if item.type == PlanItemType.DECISION_POINT and item.status == PlanItemStatus.PLANNED:
                 result["pending_decisions"].append(item)
 
         result["next_actions"] = self.get_unblocked_plan_items(campaign_id)
         return result
 
-    def resolve_imaging_spec(self, item: PlanItem) -> Optional[ImagingSpec]:
+    def resolve_imaging_spec(self, item: PlanItem) -> ImagingSpec | None:
         if item.type != PlanItemType.IMAGING:
             return None
         if not item.inherit_from:
@@ -1462,7 +1640,7 @@ class FileContextStore:
     def save_plan_template(
         self,
         name: str,
-        description: Optional[str],
+        description: str | None,
         campaign_id: str,
     ) -> str:
         campaign = self.get_campaign(campaign_id)
@@ -1488,7 +1666,7 @@ class FileContextStore:
         logger.info(f"Saved plan template '{name}' ({tid})")
         return tid
 
-    def _serialize_campaign_tree(self, campaign_id: str) -> Dict:
+    def _serialize_campaign_tree(self, campaign_id: str) -> dict:
         campaign = self.get_campaign(campaign_id)
         if not campaign:
             return {}
@@ -1496,9 +1674,9 @@ class FileContextStore:
         items.sort(key=lambda x: x.phase_order)
 
         all_item_ids = [it.id for it in items]
-        serialized_items: List[Dict] = []
+        serialized_items: list[dict] = []
         for item in items:
-            item_data: Dict[str, Any] = {
+            item_data: dict[str, Any] = {
                 "type": item.type.value,
                 "title": item.title,
                 "description": item.description,
@@ -1533,9 +1711,7 @@ class FileContextStore:
             serialized_items.append(item_data)
 
         children = self.get_subcampaigns(campaign_id)
-        serialized_children = [
-            self._serialize_campaign_tree(child.id) for child in children
-        ]
+        serialized_children = [self._serialize_campaign_tree(child.id) for child in children]
 
         return {
             "description": campaign.description,
@@ -1545,9 +1721,9 @@ class FileContextStore:
             "children": serialized_children,
         }
 
-    def list_plan_templates(self) -> List[Dict]:
-        templates: List[Dict] = []
-        for cid, folder in self._campaign_index.items():
+    def list_plan_templates(self) -> list[dict]:
+        templates: list[dict] = []
+        for _cid, folder in self._campaign_index.items():
             tpl_dir = folder / "templates"
             if not tpl_dir.exists():
                 continue
@@ -1555,35 +1731,34 @@ class FileContextStore:
                 if f.suffix in (".yaml", ".yml"):
                     data = self._read_yaml(f)
                     if data:
-                        templates.append({
-                            "id": data.get("id", ""),
-                            "name": data.get("name", ""),
-                            "description": data.get("description"),
-                            "created_at": data.get("created_at", ""),
-                            "updated_at": data.get("updated_at", ""),
-                        })
+                        templates.append(
+                            {
+                                "id": data.get("id", ""),
+                                "name": data.get("name", ""),
+                                "description": data.get("description"),
+                                "created_at": data.get("created_at", ""),
+                                "updated_at": data.get("updated_at", ""),
+                            }
+                        )
         templates.sort(key=lambda t: t.get("created_at", ""), reverse=True)
         return templates
 
-    def get_plan_template(self, id_or_name: str) -> Optional[Dict]:
-        for cid, folder in self._campaign_index.items():
+    def get_plan_template(self, id_or_name: str) -> dict | None:
+        for _cid, folder in self._campaign_index.items():
             tpl_dir = folder / "templates"
             if not tpl_dir.exists():
                 continue
             for f in tpl_dir.iterdir():
                 if f.suffix in (".yaml", ".yml"):
                     data = self._read_yaml(f)
-                    if data and (
-                        data.get("id") == id_or_name
-                        or data.get("name") == id_or_name
-                    ):
+                    if data and (data.get("id") == id_or_name or data.get("name") == id_or_name):
                         return data
         return None
 
     def apply_plan_template(
         self,
         template_id: str,
-        overrides: Optional[Dict] = None,
+        overrides: dict | None = None,
     ) -> str:
         tmpl = self.get_plan_template(template_id)
         if not tmpl:
@@ -1594,9 +1769,9 @@ class FileContextStore:
 
     def _instantiate_template_tree(
         self,
-        data: Dict,
-        parent_id: Optional[str],
-        overrides: Dict,
+        data: dict,
+        parent_id: str | None,
+        overrides: dict,
     ) -> str:
         cid = self.create_campaign(
             description=data.get("description", "Untitled"),
@@ -1605,7 +1780,7 @@ class FileContextStore:
             parent_id=parent_id,
         )
         items_data = data.get("items", [])
-        new_item_ids: List[str] = []
+        new_item_ids: list[str] = []
 
         for item_data in items_data:
             spec = item_data.get("spec")
@@ -1613,9 +1788,15 @@ class FileContextStore:
                 spec = dict(spec)
                 for k, v in overrides.items():
                     if k in spec or k in (
-                        "strain", "genotype", "reporter", "temperature_c",
-                        "num_slices", "exposure_ms", "interval_s",
-                        "num_embryos", "stop_condition",
+                        "strain",
+                        "genotype",
+                        "reporter",
+                        "temperature_c",
+                        "num_slices",
+                        "exposure_ms",
+                        "interval_s",
+                        "num_embryos",
+                        "stop_condition",
                     ):
                         spec[k] = v
 
@@ -1635,7 +1816,8 @@ class FileContextStore:
             for dep_idx in dep_indices:
                 if 0 <= dep_idx < len(new_item_ids):
                     self.add_plan_item_dependency(
-                        new_item_ids[idx_item], new_item_ids[dep_idx],
+                        new_item_ids[idx_item],
+                        new_item_ids[dep_idx],
                     )
 
         for child_data in data.get("children", []):
@@ -1644,20 +1826,109 @@ class FileContextStore:
         return cid
 
     def delete_plan_template(self, template_id: str) -> bool:
-        for cid, folder in self._campaign_index.items():
+        for _cid, folder in self._campaign_index.items():
             tpl_dir = folder / "templates"
             if not tpl_dir.exists():
                 continue
             for f in tpl_dir.iterdir():
                 if f.suffix in (".yaml", ".yml"):
                     data = self._read_yaml(f)
-                    if data and (
-                        data.get("id") == template_id
-                        or data.get("name") == template_id
-                    ):
+                    if data and (data.get("id") == template_id or data.get("name") == template_id):
                         f.unlink()
                         return True
         return False
+
+    # ==================================================================
+    # Tactic Library
+    # ==================================================================
+
+    def save_tactic(self, tactic: dict, name: str | None = None) -> str:
+        """Persist a tactic as a reusable template in agent/tactic_library/.
+
+        Strips runtime state (live, state, original id) and assigns a new
+        template id + slug. Fires CONTEXT_UPDATED. Returns the template id.
+        """
+        name = name or tactic.get("name") or "unnamed"
+        slug = self._slugify(name)
+        tid = self._gen_id()
+        now = self._now()
+
+        template = {
+            "id": tid,
+            "name": name,
+            "slug": slug,
+            "kind": tactic.get("kind", "unknown"),
+            "structure": copy.deepcopy(tactic.get("structure") or {}),
+            "scope_hint": copy.deepcopy(tactic.get("scope")),
+            "description": tactic.get("description") or tactic.get("rationale"),
+            "rationale": tactic.get("rationale"),
+            "params": copy.deepcopy(tactic.get("params")),
+            "relations": copy.deepcopy(tactic.get("relations") or {}),
+            "live_bind": list(tactic.get("live_bind") or []),
+            "created_at": now,
+            "created_by": tactic.get("created_by", "agent"),
+        }
+
+        path = self.agent_dir / "tactic_library" / f"{tid}_{slug}.yaml"
+        self._write_yaml(path, template)
+        self._notify_context_change("tactic_library")
+        logger.info(f"Saved tactic template '{name}' ({tid})")
+        return tid
+
+    def list_tactics(self) -> list[dict]:
+        """List all saved tactic templates, ordered by created_at descending."""
+        tl_dir = self.agent_dir / "tactic_library"
+        if not tl_dir.exists():
+            return []
+        tactics: list[dict] = []
+        for f in tl_dir.iterdir():
+            if f.suffix in (".yaml", ".yml"):
+                data = self._read_yaml(f)
+                if data:
+                    tactics.append(data)
+        tactics.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+        return tactics
+
+    def get_tactic(self, id_or_name: str) -> dict | None:
+        """Return a tactic template by id or name, or None if not found.
+
+        Uses list_tactics() (sorted newest-first by created_at) so that name
+        lookups are deterministic: on a name collision, the newest entry wins.
+        id lookups are unique by construction so order does not matter.
+        """
+        tl_dir = self.agent_dir / "tactic_library"
+        if not tl_dir.exists():
+            return None
+        for tactic in self.list_tactics():
+            if tactic.get("id") == id_or_name or tactic.get("name") == id_or_name:
+                return tactic
+        return None
+
+    def apply_tactic(self, id_or_name: str) -> dict | None:
+        """Return a fresh planned tactic from a saved template.
+
+        The returned dict has a new run id (distinct from the template id),
+        state="planned", and no live/runtime state. Returns None if the
+        template is not found.
+        """
+        tmpl = self.get_tactic(id_or_name)
+        if tmpl is None:
+            return None
+        tactic = copy.deepcopy(tmpl)
+        # Assign a new run id — must differ from the template id
+        tactic["id"] = self._gen_id()
+        tactic["state"] = "planned"
+        # Promote scope_hint back to scope for the tactic
+        scope_hint = tactic.pop("scope_hint", None)
+        if scope_hint is not None:
+            tactic["scope"] = scope_hint
+        # Strip template-internal metadata
+        tactic.pop("slug", None)
+        tactic.pop("created_at", None)
+        tactic.pop("created_by", None)
+        # Strip runtime state (should not exist in a template, but guard anyway)
+        tactic.pop("live", None)
+        return tactic
 
     # ==================================================================
     # Plan Snapshots
@@ -1666,8 +1937,8 @@ class FileContextStore:
     def create_plan_snapshot(
         self,
         campaign_id: str,
-        label: Optional[str] = None,
-        summary: Optional[str] = None,
+        label: str | None = None,
+        summary: str | None = None,
     ) -> str:
         snapshot_data = self._serialize_campaign_tree(campaign_id)
         if not summary:
@@ -1703,7 +1974,9 @@ class FileContextStore:
             "created_at": now,
         }
         self._write_yaml(history_dir / f"{timestamp_slug}.yaml", snapshot)
-        logger.info(f"Created plan snapshot v{version_number} ({version_id}) for campaign {campaign_id}")
+        logger.info(
+            f"Created plan snapshot v{version_number} ({version_id}) for campaign {campaign_id}"
+        )
         return version_id
 
     def _generate_snapshot_summary(self, campaign_id: str) -> str:
@@ -1712,7 +1985,7 @@ class FileContextStore:
             return "Unknown campaign"
         phases = self.get_subcampaigns(campaign_id)
         items = self.get_plan_items(campaign_id=campaign_id, include_children=True)
-        status_counts: Dict[str, int] = {}
+        status_counts: dict[str, int] = {}
         for item in items:
             key = item.status.value
             status_counts[key] = status_counts.get(key, 0) + 1
@@ -1725,7 +1998,7 @@ class FileContextStore:
             parts.append(f"  {status_name}: {count}")
         return "\n".join(parts)
 
-    def _read_all_snapshots(self, campaign_id: str) -> List[Dict]:
+    def _read_all_snapshots(self, campaign_id: str) -> list[dict]:
         """Read all snapshot files for a campaign."""
         folder = self._campaign_folder(campaign_id)
         if not folder:
@@ -1733,7 +2006,7 @@ class FileContextStore:
         history_dir = folder / "plan" / "history"
         if not history_dir.exists():
             return []
-        snapshots: List[Dict] = []
+        snapshots: list[dict] = []
         for f in history_dir.iterdir():
             if f.suffix in (".yaml", ".yml"):
                 data = self._read_yaml(f)
@@ -1742,25 +2015,29 @@ class FileContextStore:
         return snapshots
 
     def list_plan_snapshots(
-        self, campaign_id: str, limit: int = 50,
-    ) -> List[Dict]:
+        self,
+        campaign_id: str,
+        limit: int = 50,
+    ) -> list[dict]:
         snapshots = self._read_all_snapshots(campaign_id)
         # Return metadata only (no blob)
         result = []
         for s in snapshots:
-            result.append({
-                "version_id": s.get("version_id"),
-                "campaign_id": s.get("campaign_id"),
-                "version_number": s.get("version_number"),
-                "summary": s.get("summary"),
-                "label": s.get("label"),
-                "parent_version_id": s.get("parent_version_id"),
-                "created_at": s.get("created_at"),
-            })
-        result.sort(key=lambda s: s.get("version_number", 0), reverse=True)
+            result.append(
+                {
+                    "version_id": s.get("version_id"),
+                    "campaign_id": s.get("campaign_id"),
+                    "version_number": s.get("version_number"),
+                    "summary": s.get("summary"),
+                    "label": s.get("label"),
+                    "parent_version_id": s.get("parent_version_id"),
+                    "created_at": s.get("created_at"),
+                }
+            )
+        result.sort(key=lambda s: s.get("version_number", 0) or 0, reverse=True)
         return result[:limit]
 
-    def get_plan_snapshot(self, version_id: str) -> Optional[Dict]:
+    def get_plan_snapshot(self, version_id: str) -> dict | None:
         for cid in self._campaign_index:
             for snap in self._read_all_snapshots(cid):
                 if snap.get("version_id") == version_id:
@@ -1801,7 +2078,7 @@ class FileContextStore:
         )
         return new_campaign_id
 
-    def _get_campaign_tree_ids(self, campaign_id: str) -> List[str]:
+    def _get_campaign_tree_ids(self, campaign_id: str) -> list[str]:
         ids = [campaign_id]
         for cid, folder in self._campaign_index.items():
             data = self._read_yaml(folder / "campaign.yaml")
@@ -1827,14 +2104,15 @@ class FileContextStore:
             "relates_to": obs.relates_to,
         }
         self._write_yaml(
-            self.agent_dir / "observations" / f"{obs.id}_{slug}.yaml", data,
+            self.agent_dir / "observations" / f"{obs.id}_{slug}.yaml",
+            data,
         )
 
-    def get_recent_observations(self, limit: int = 50) -> List[Observation]:
+    def get_recent_observations(self, limit: int = 50) -> list[Observation]:
         obs_dir = self.agent_dir / "observations"
         if not obs_dir.exists():
             return []
-        all_obs: List[Observation] = []
+        all_obs: list[Observation] = []
         for f in obs_dir.iterdir():
             if f.suffix in (".yaml", ".yml"):
                 data = self._read_yaml(f)
@@ -1844,11 +2122,11 @@ class FileContextStore:
         # Return in chronological order (oldest first in the window)
         return list(reversed(all_obs[:limit]))
 
-    def get_observations_for_embryo(self, embryo_id: str, limit: int = 20) -> List[Observation]:
+    def get_observations_for_embryo(self, embryo_id: str, limit: int = 20) -> list[Observation]:
         obs_dir = self.agent_dir / "observations"
         if not obs_dir.exists():
             return []
-        matches: List[Observation] = []
+        matches: list[Observation] = []
         for f in obs_dir.iterdir():
             if f.suffix in (".yaml", ".yml"):
                 data = self._read_yaml(f)
@@ -1861,37 +2139,58 @@ class FileContextStore:
     # Expectations
     # ==================================================================
 
+    def _notify_context_change(self, kind: str = "context") -> None:
+        """Emit CONTEXT_UPDATED on the global bus so the shared-visibility
+        surface refreshes live. Best-effort — a bus failure never breaks a write."""
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.CONTEXT_UPDATED, {"kind": kind}, source="context_store")
+        except Exception:
+            pass
+
+    def _notify_plan_change(self, campaign_id: str | None = None) -> None:
+        """Emit PLAN_UPDATED so the Plans UI refreshes live when a plan item or
+        campaign changes (status, session link, new item, progress). Best-effort."""
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.PLAN_UPDATED, {"campaign_id": campaign_id}, source="context_store")
+        except Exception:
+            pass
+
     def add_expectation(self, exp: Expectation):
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
-        items.append({
-            "id": exp.id,
-            "target": exp.target,
-            "prediction": exp.prediction,
-            "expected_time": exp.expected_time.isoformat(),
-            "uncertainty": exp.uncertainty,
-            "basis": exp.basis,
-            "status": exp.status.value,
-            "created_at": exp.created_at.isoformat(),
-            "resolved_at": None,
-        })
+        items.append(
+            {
+                "id": exp.id,
+                "target": exp.target,
+                "prediction": exp.prediction,
+                "expected_time": exp.expected_time.isoformat(),
+                "uncertainty": exp.uncertainty,
+                "basis": exp.basis,
+                "status": exp.status.value,
+                "created_at": exp.created_at.isoformat(),
+                "resolved_at": None,
+            }
+        )
         self._write_yaml(path, items)
+        self._notify_context_change("expectation")
 
-    def get_pending_expectations(self) -> List[Expectation]:
+    def get_pending_expectations(self) -> list[Expectation]:
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
-        pending = [
-            self._dict_to_expectation(d) for d in items
-            if d.get("status") == "pending"
-        ]
+        pending = [self._dict_to_expectation(d) for d in items if d.get("status") == "pending"]
         pending.sort(key=lambda e: e.expected_time)
         return pending
 
-    def get_expectation_for(self, target: str) -> Optional[Expectation]:
+    def get_expectation_for(self, target: str) -> Expectation | None:
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
         candidates = [
-            self._dict_to_expectation(d) for d in items
+            self._dict_to_expectation(d)
+            for d in items
             if d.get("target") == target and d.get("status") == "pending"
         ]
         if not candidates:
@@ -1909,6 +2208,7 @@ class FileContextStore:
                 item["resolved_at"] = now
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("expectation")
 
     # ==================================================================
     # Watchpoints
@@ -1917,23 +2217,23 @@ class FileContextStore:
     def add_watchpoint(self, wp: Watchpoint):
         path = self.agent_dir / "active" / "watchpoints.yaml"
         items = self._read_yaml(path) or []
-        items.append({
-            "id": wp.id,
-            "target": wp.target,
-            "condition": wp.condition,
-            "priority": wp.priority.value if wp.priority else "medium",
-            "status": wp.status.value,
-            "created_at": wp.created_at.isoformat(),
-        })
+        items.append(
+            {
+                "id": wp.id,
+                "target": wp.target,
+                "condition": wp.condition,
+                "priority": wp.priority.value if wp.priority else "medium",
+                "status": wp.status.value,
+                "created_at": wp.created_at.isoformat(),
+            }
+        )
         self._write_yaml(path, items)
+        self._notify_context_change("watchpoint")
 
-    def get_active_watchpoints(self) -> List[Watchpoint]:
+    def get_active_watchpoints(self) -> list[Watchpoint]:
         path = self.agent_dir / "active" / "watchpoints.yaml"
         items = self._read_yaml(path) or []
-        active = [
-            self._dict_to_watchpoint(d) for d in items
-            if d.get("status") == "active"
-        ]
+        active = [self._dict_to_watchpoint(d) for d in items if d.get("status") == "active"]
         # Sort: high > medium > low, then by created_at
         priority_order = {"high": 0, "medium": 1, "low": 2}
         active.sort(key=lambda w: (priority_order.get(w.priority.value, 1), w.created_at))
@@ -1956,6 +2256,7 @@ class FileContextStore:
                 item["status"] = "resolved"
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("watchpoint")
 
     # ==================================================================
     # Questions
@@ -1964,22 +2265,24 @@ class FileContextStore:
     def add_question(self, q: Question):
         path = self.agent_dir / "active" / "questions.yaml"
         items = self._read_yaml(path) or []
-        items.append({
-            "id": q.id,
-            "content": q.content,
-            "status": q.status.value,
-            "resolution": None,
-            "created_at": q.created_at.isoformat(),
-            "resolved_at": None,
-        })
+        items.append(
+            {
+                "id": q.id,
+                "content": q.content,
+                "status": q.status.value,
+                "resolution": None,
+                "created_at": q.created_at.isoformat(),
+                "resolved_at": None,
+            }
+        )
         self._write_yaml(path, items)
+        self._notify_context_change("question")
 
-    def get_open_questions(self) -> List[Question]:
+    def get_open_questions(self) -> list[Question]:
         path = self.agent_dir / "active" / "questions.yaml"
         items = self._read_yaml(path) or []
         open_qs = [
-            self._dict_to_question(d) for d in items
-            if d.get("status") in ("open", "investigating")
+            self._dict_to_question(d) for d in items if d.get("status") in ("open", "investigating")
         ]
         open_qs.sort(key=lambda q: q.created_at)
         return open_qs
@@ -1995,6 +2298,7 @@ class FileContextStore:
                 item["resolved_at"] = now
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("question")
 
     # ==================================================================
     # Learnings
@@ -2010,20 +2314,21 @@ class FileContextStore:
             "created_at": learning.created_at.isoformat(),
         }
         self._write_yaml(
-            self.agent_dir / "learnings" / f"{learning.id}_{slug}.yaml", data,
+            self.agent_dir / "learnings" / f"{learning.id}_{slug}.yaml",
+            data,
         )
 
-    def get_learnings(self, limit: int = 50) -> List[Learning]:
+    def get_learnings(self, limit: int = 50) -> list[Learning]:
         learn_dir = self.agent_dir / "learnings"
         if not learn_dir.exists():
             return []
-        all_learnings: List[Learning] = []
+        all_learnings: list[Learning] = []
         for f in learn_dir.iterdir():
             if f.suffix in (".yaml", ".yml"):
                 data = self._read_yaml(f)
                 if data:
                     all_learnings.append(self._dict_to_learning(data))
-        all_learnings.sort(key=lambda l: l.created_at, reverse=True)
+        all_learnings.sort(key=lambda learning: learning.created_at, reverse=True)
         return all_learnings[:limit]
 
     # ==================================================================
@@ -2033,13 +2338,13 @@ class FileContextStore:
     def update_embryo_understanding(
         self,
         embryo_id: str,
-        current_stage: Optional[str] = None,
-        stage_confidence: Optional[Confidence] = None,
-        health_assessment: Optional[str] = None,
-        note: Optional[str] = None,
-        is_hatched: Optional[bool] = None,
-        needs_attention: Optional[bool] = None,
-        attention_reason: Optional[str] = None,
+        current_stage: str | None = None,
+        stage_confidence: Confidence | None = None,
+        health_assessment: str | None = None,
+        note: str | None = None,
+        is_hatched: bool | None = None,
+        needs_attention: bool | None = None,
+        attention_reason: str | None = None,
     ):
         now = self._now()
         path = self.agent_dir / "embryo_understanding" / f"{embryo_id}.yaml"
@@ -2085,7 +2390,7 @@ class FileContextStore:
     # Agent State
     # ==================================================================
 
-    def get_state(self, key: str) -> Optional[str]:
+    def get_state(self, key: str) -> str | None:
         path = self.agent_dir / "state.yaml"
         data = self._read_yaml(path)
         if not data or not isinstance(data, dict):
@@ -2105,6 +2410,17 @@ class FileContextStore:
     # ==================================================================
     # Batch Updates
     # ==================================================================
+
+    @property
+    def notebook(self):
+        """The shared lab notebook, rooted at agent_dir/notebook (lazy)."""
+        nb = getattr(self, "_notebook", None)
+        if nb is None:
+            from .notebook import NotebookStore
+
+            nb = NotebookStore(self.agent_dir / "notebook")
+            self._notebook = nb
+        return nb
 
     def apply_updates(self, updates: ContextUpdates):
         for obs in updates.new_observations:
@@ -2133,6 +2449,18 @@ class FileContextStore:
         if updates.new_focus is not None:
             self.set_state("current_focus", updates.new_focus)
 
+        # Mirror new observations & learnings into the shared notebook
+        # (best-effort — a notebook failure never breaks the legacy write).
+        from .notebook import learning_to_note, observation_to_note
+
+        try:
+            for obs in updates.new_observations:
+                self.notebook.write_note(observation_to_note(obs))
+            for learning in updates.new_learnings:
+                self.notebook.write_note(learning_to_note(learning))
+        except Exception:
+            logger.warning("notebook mirror failed", exc_info=True)
+
     # ==================================================================
     # ML Pipelines
     # ==================================================================
@@ -2142,10 +2470,10 @@ class FileContextStore:
         campaign_id: str,
         name: str,
         task: str = "embryo_stage_classification",
-        model_config: Optional[Dict] = None,
-        data_split: Optional[Dict] = None,
-        training_config: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
+        model_config: dict | None = None,
+        data_split: dict | None = None,
+        training_config: dict | None = None,
+    ) -> dict[str, Any]:
         pipeline_id = self._gen_id()
         now = self._now()
         data = {
@@ -2163,11 +2491,14 @@ class FileContextStore:
             "updated_at": now,
         }
         self._write_yaml(
-            self.agent_dir / "ml" / "pipelines" / f"{pipeline_id}.yaml", data,
+            self.agent_dir / "ml" / "pipelines" / f"{pipeline_id}.yaml",
+            data,
         )
-        return self.get_ml_pipeline(pipeline_id)
+        created = self.get_ml_pipeline(pipeline_id)
+        assert created is not None  # just written above
+        return created
 
-    def get_ml_pipeline(self, pipeline_id: str) -> Optional[Dict[str, Any]]:
+    def get_ml_pipeline(self, pipeline_id: str) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "pipelines" / f"{pipeline_id}.yaml"
         data = self._read_yaml(path)
         if not data:
@@ -2187,11 +2518,11 @@ class FileContextStore:
             "updated_at": data.get("updated_at"),
         }
 
-    def list_ml_pipelines(self, campaign_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_ml_pipelines(self, campaign_id: str | None = None) -> list[dict[str, Any]]:
         pipe_dir = self.agent_dir / "ml" / "pipelines"
         if not pipe_dir.exists():
             return []
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for f in pipe_dir.iterdir():
             if f.suffix in (".yaml", ".yml"):
                 data = self._read_yaml(f)
@@ -2205,13 +2536,20 @@ class FileContextStore:
         results.sort(key=lambda p: p.get("created_at", ""), reverse=True)
         return results
 
-    def update_ml_pipeline(self, pipeline_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    def update_ml_pipeline(self, pipeline_id: str, **kwargs) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "pipelines" / f"{pipeline_id}.yaml"
         data = self._read_yaml(path)
         if not data:
             return self.get_ml_pipeline(pipeline_id)
-        allowed = {"status", "model_config", "data_split", "training_config",
-                    "best_run_id", "best_accuracy", "name"}
+        allowed = {
+            "status",
+            "model_config",
+            "data_split",
+            "training_config",
+            "best_run_id",
+            "best_accuracy",
+            "name",
+        }
         changed = False
         for k, v in kwargs.items():
             if k in allowed:
@@ -2229,11 +2567,11 @@ class FileContextStore:
     def create_training_run(
         self,
         pipeline_id: str,
-        model_config: Optional[Dict] = None,
-        training_config: Optional[Dict] = None,
-        data_split: Optional[Dict] = None,
+        model_config: dict | None = None,
+        training_config: dict | None = None,
+        data_split: dict | None = None,
         peer_instance_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         run_id = self._gen_id()
         data = {
             "id": run_id,
@@ -2256,11 +2594,14 @@ class FileContextStore:
             "error_message": "",
         }
         self._write_yaml(
-            self.agent_dir / "ml" / "runs" / f"{run_id}.yaml", data,
+            self.agent_dir / "ml" / "runs" / f"{run_id}.yaml",
+            data,
         )
-        return self.get_training_run(run_id)
+        created = self.get_training_run(run_id)
+        assert created is not None  # just written above
+        return created
 
-    def get_training_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get_training_run(self, run_id: str) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "runs" / f"{run_id}.yaml"
         data = self._read_yaml(path)
         if not data:
@@ -2286,11 +2627,11 @@ class FileContextStore:
             "error_message": data.get("error_message", ""),
         }
 
-    def list_training_runs(self, pipeline_id: str) -> List[Dict[str, Any]]:
+    def list_training_runs(self, pipeline_id: str) -> list[dict[str, Any]]:
         runs_dir = self.agent_dir / "ml" / "runs"
         if not runs_dir.exists():
             return []
-        results: List[Dict[str, Any]] = []
+        results: list[dict[str, Any]] = []
         for f in runs_dir.iterdir():
             if f.suffix in (".yaml", ".yml"):
                 data = self._read_yaml(f)
@@ -2300,15 +2641,24 @@ class FileContextStore:
                         results.append(run)
         return results
 
-    def update_training_run(self, run_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    def update_training_run(self, run_id: str, **kwargs) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "runs" / f"{run_id}.yaml"
         data = self._read_yaml(path)
         if not data:
             return self.get_training_run(run_id)
         allowed = {
-            "status", "current_epoch", "total_epochs", "train_loss", "val_loss",
-            "val_accuracy", "best_val_accuracy", "model_weights_path", "metrics_path",
-            "started_at", "completed_at", "error_message",
+            "status",
+            "current_epoch",
+            "total_epochs",
+            "train_loss",
+            "val_loss",
+            "val_accuracy",
+            "best_val_accuracy",
+            "model_weights_path",
+            "metrics_path",
+            "started_at",
+            "completed_at",
+            "error_message",
         }
         changed = False
         for k, v in kwargs.items():
@@ -2325,15 +2675,15 @@ class FileContextStore:
 
     def save_data_assessment(
         self,
-        pipeline_id: Optional[str] = None,
+        pipeline_id: str | None = None,
         total_sessions: int = 0,
         total_embryos: int = 0,
         total_volumes: int = 0,
         annotated_embryos: int = 0,
-        stage_distribution: Optional[Dict] = None,
-        coverage_gaps: Optional[List] = None,
+        stage_distribution: dict | None = None,
+        coverage_gaps: list | None = None,
         quality_notes: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         assessment_id = self._gen_id()
         now = self._now()
         data = {
@@ -2349,11 +2699,14 @@ class FileContextStore:
             "created_at": now,
         }
         self._write_yaml(
-            self.agent_dir / "ml" / "assessments" / f"{assessment_id}.yaml", data,
+            self.agent_dir / "ml" / "assessments" / f"{assessment_id}.yaml",
+            data,
         )
-        return self.get_data_assessment(assessment_id)
+        created = self.get_data_assessment(assessment_id)
+        assert created is not None  # just written above
+        return created
 
-    def get_data_assessment(self, assessment_id: str) -> Optional[Dict[str, Any]]:
+    def get_data_assessment(self, assessment_id: str) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "assessments" / f"{assessment_id}.yaml"
         data = self._read_yaml(path)
         if not data:
@@ -2376,7 +2729,7 @@ class FileContextStore:
     # ==================================================================
 
     @staticmethod
-    def _dict_to_campaign(d: Dict) -> Campaign:
+    def _dict_to_campaign(d: dict) -> Campaign:
         return Campaign(
             id=d["id"],
             description=d["description"],
@@ -2387,22 +2740,30 @@ class FileContextStore:
             parent_id=d.get("parent_id"),
             status=Status(d.get("status", "active")),
             is_shared=bool(d.get("is_shared", False)),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d["created_at"], str) else d["created_at"],
-            updated_at=datetime.fromisoformat(d["updated_at"]) if isinstance(d["updated_at"], str) else d["updated_at"],
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d["created_at"], str)
+            else d["created_at"],
+            updated_at=datetime.fromisoformat(d["updated_at"])
+            if isinstance(d["updated_at"], str)
+            else d["updated_at"],
         )
 
     @staticmethod
-    def _dict_to_project(d: Dict) -> Project:
+    def _dict_to_project(d: dict) -> Project:
         return Project(
             id=d["id"],
             description=d["description"],
             campaign_id=d.get("campaign_id"),
             status=Status(d.get("status", "active")),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d["created_at"], str) else d["created_at"],
-            updated_at=datetime.fromisoformat(d["updated_at"]) if isinstance(d["updated_at"], str) else d["updated_at"],
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d["created_at"], str)
+            else d["created_at"],
+            updated_at=datetime.fromisoformat(d["updated_at"])
+            if isinstance(d["updated_at"], str)
+            else d["updated_at"],
         )
 
-    def _dict_to_session_intent(self, d: Dict) -> SessionIntent:
+    def _dict_to_session_intent(self, d: dict) -> SessionIntent:
         session_id = d["session_id"]
         campaign_ids = d.get("campaign_ids", [])
         return SessionIntent(
@@ -2410,12 +2771,16 @@ class FileContextStore:
             planned_intent=d.get("planned_intent"),
             actual_summary=d.get("actual_summary"),
             campaign_ids=campaign_ids,
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
-            completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") and isinstance(d["completed_at"], str) else None,
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
+            completed_at=datetime.fromisoformat(d["completed_at"])
+            if d.get("completed_at") and isinstance(d["completed_at"], str)
+            else None,
         )
 
     @staticmethod
-    def _dict_to_planned_session(d: Dict) -> PlannedSession:
+    def _dict_to_planned_session(d: dict) -> PlannedSession:
         return PlannedSession(
             id=d["id"],
             title=d.get("title"),
@@ -2428,30 +2793,43 @@ class FileContextStore:
             status=PlannedSessionStatus(d.get("status", "planned")),
             session_id=d.get("session_id"),
             campaign_ids=d.get("campaign_ids", []),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
-            updated_at=datetime.fromisoformat(d["updated_at"]) if isinstance(d.get("updated_at"), str) else d.get("updated_at", datetime.now()),
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
+            updated_at=datetime.fromisoformat(d["updated_at"])
+            if isinstance(d.get("updated_at"), str)
+            else d.get("updated_at", datetime.now()),
         )
 
     @staticmethod
-    def _dict_to_plan_item(d: Dict) -> PlanItem:
+    def _dict_to_plan_item(d: dict) -> PlanItem:
         item_type = PlanItemType(d["type"])
         spec_data = d.get("spec")
         imaging_spec = None
         bench_spec = None
 
+        # Tolerate specs persisted as JSON strings (older tool calls that passed
+        # spec as a string instead of an object) so read-back never crashes.
+        if isinstance(spec_data, str):
+            try:
+                spec_data = json.loads(spec_data)
+            except (json.JSONDecodeError, TypeError):
+                spec_data = None
+
         if spec_data:
             if item_type == PlanItemType.IMAGING:
                 valid = {f.name for f in dataclasses.fields(ImagingSpec)}
-                imaging_spec = ImagingSpec(**{
-                    k: v for k, v in spec_data.items() if k in valid
-                })
+                imaging_spec = ImagingSpec(**{k: v for k, v in spec_data.items() if k in valid})
             else:
                 valid = {f.name for f in dataclasses.fields(BenchSpec)}
-                bench_spec = BenchSpec(**{
-                    k: v for k, v in spec_data.items() if k in valid
-                })
+                bench_spec = BenchSpec(**{k: v for k, v in spec_data.items() if k in valid})
 
         references = d.get("references") or []
+        if isinstance(references, str):
+            try:
+                references = json.loads(references) or []
+            except (json.JSONDecodeError, TypeError):
+                references = []
 
         return PlanItem(
             id=d["id"],
@@ -2469,18 +2847,25 @@ class FileContextStore:
             bench_spec=bench_spec,
             planned_session_id=d.get("planned_session_id"),
             session_id=d.get("session_id"),
+            session_ids=d.get("session_ids") or ([d["session_id"]] if d.get("session_id") else []),
             inherit_from=d.get("inherit_from"),
             estimated_days=d.get("estimated_days"),
             phase_order=d.get("phase_order", 0),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
-            updated_at=datetime.fromisoformat(d["updated_at"]) if isinstance(d.get("updated_at"), str) else d.get("updated_at", datetime.now()),
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
+            updated_at=datetime.fromisoformat(d["updated_at"])
+            if isinstance(d.get("updated_at"), str)
+            else d.get("updated_at", datetime.now()),
         )
 
     @staticmethod
-    def _dict_to_observation(d: Dict) -> Observation:
+    def _dict_to_observation(d: dict) -> Observation:
         return Observation(
             id=d["id"],
-            timestamp=datetime.fromisoformat(d["timestamp"]) if isinstance(d.get("timestamp"), str) else d.get("timestamp", datetime.now()),
+            timestamp=datetime.fromisoformat(d["timestamp"])
+            if isinstance(d.get("timestamp"), str)
+            else d.get("timestamp", datetime.now()),
             type=d["type"],
             content=d["content"],
             embryo_id=d.get("embryo_id"),
@@ -2491,60 +2876,78 @@ class FileContextStore:
         )
 
     @staticmethod
-    def _dict_to_expectation(d: Dict) -> Expectation:
+    def _dict_to_expectation(d: dict) -> Expectation:
         return Expectation(
             id=d["id"],
             target=d["target"],
             prediction=d["prediction"],
-            expected_time=datetime.fromisoformat(d["expected_time"]) if isinstance(d.get("expected_time"), str) else d.get("expected_time", datetime.now()),
+            expected_time=datetime.fromisoformat(d["expected_time"])
+            if isinstance(d.get("expected_time"), str)
+            else d.get("expected_time", datetime.now()),
             uncertainty=d.get("uncertainty"),
             basis=d.get("basis"),
             status=ExpectationStatus(d.get("status", "pending")),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
-            resolved_at=datetime.fromisoformat(d["resolved_at"]) if d.get("resolved_at") and isinstance(d["resolved_at"], str) else None,
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
+            resolved_at=datetime.fromisoformat(d["resolved_at"])
+            if d.get("resolved_at") and isinstance(d["resolved_at"], str)
+            else None,
         )
 
     @staticmethod
-    def _dict_to_watchpoint(d: Dict) -> Watchpoint:
+    def _dict_to_watchpoint(d: dict) -> Watchpoint:
         return Watchpoint(
             id=d["id"],
             target=d["target"],
             condition=d["condition"],
             priority=Significance(d.get("priority", "medium")),
             status=WatchpointStatus(d.get("status", "active")),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
         )
 
     @staticmethod
-    def _dict_to_question(d: Dict) -> Question:
+    def _dict_to_question(d: dict) -> Question:
         return Question(
             id=d["id"],
             content=d["content"],
             status=QuestionStatus(d.get("status", "open")),
             resolution=d.get("resolution"),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
-            resolved_at=datetime.fromisoformat(d["resolved_at"]) if d.get("resolved_at") and isinstance(d["resolved_at"], str) else None,
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
+            resolved_at=datetime.fromisoformat(d["resolved_at"])
+            if d.get("resolved_at") and isinstance(d["resolved_at"], str)
+            else None,
         )
 
     @staticmethod
-    def _dict_to_learning(d: Dict) -> Learning:
+    def _dict_to_learning(d: dict) -> Learning:
         return Learning(
             id=d["id"],
             content=d["content"],
             confidence=Confidence(d.get("confidence", "medium")),
             basis=d.get("basis"),
-            created_at=datetime.fromisoformat(d["created_at"]) if isinstance(d.get("created_at"), str) else d.get("created_at", datetime.now()),
+            created_at=datetime.fromisoformat(d["created_at"])
+            if isinstance(d.get("created_at"), str)
+            else d.get("created_at", datetime.now()),
         )
 
     @staticmethod
-    def _dict_to_embryo_understanding(d: Dict) -> EmbryoUnderstanding:
+    def _dict_to_embryo_understanding(d: dict) -> EmbryoUnderstanding:
         return EmbryoUnderstanding(
             embryo_id=d["embryo_id"],
             current_stage=d.get("current_stage"),
-            stage_confidence=Confidence(d["stage_confidence"]) if d.get("stage_confidence") else None,
+            stage_confidence=Confidence(d["stage_confidence"])
+            if d.get("stage_confidence")
+            else None,
             health_assessment=d.get("health_assessment"),
             notes=d.get("notes") or [],
-            last_observed=datetime.fromisoformat(d["last_observed"]) if d.get("last_observed") and isinstance(d["last_observed"], str) else None,
+            last_observed=datetime.fromisoformat(d["last_observed"])
+            if d.get("last_observed") and isinstance(d["last_observed"], str)
+            else None,
             is_tracked=d.get("is_tracked", True),
             is_hatched=bool(d.get("is_hatched", False)),
             needs_attention=bool(d.get("needs_attention", False)),

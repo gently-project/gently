@@ -7,13 +7,11 @@ start timelapses, and track completion.
 """
 
 import logging
-from typing import Dict, List, Optional
 
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import (
     require_agent,
-    require_timelapse_orchestrator,
 )
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +19,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # execute_plan_item
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="execute_plan_item",
@@ -41,8 +40,8 @@ logger = logging.getLogger(__name__)
 )
 async def execute_plan_item(
     item_ref: str,
-    embryo_ids: List[str] = None,
-    context: Dict = None,
+    embryo_ids: list[str] | None = None,
+    context: dict | None = None,
 ) -> str:
     """Execute a planned imaging item."""
     agent, err = require_agent(context)
@@ -58,7 +57,7 @@ async def execute_plan_item(
     if not item:
         return f"Plan item '{item_ref}' not found"
 
-    from gently.harness.memory.model import PlanItemType, PlanItemStatus
+    from gently.harness.memory.model import PlanItemStatus, PlanItemType
 
     # 2. Verify type and status
     if item.type != PlanItemType.IMAGING:
@@ -77,7 +76,7 @@ async def execute_plan_item(
     if not spec:
         return f"Plan item '{item.title}' has no imaging spec"
 
-    actions: List[str] = []
+    actions: list[str] = []
 
     # 4. Configure acquisition params on the experiment state
     experiment = getattr(agent, "experiment", None)
@@ -108,30 +107,15 @@ async def execute_plan_item(
                 except Exception as e:
                     actions.append(f"detector '{det_name}' failed: {e}")
 
-    # 6. Link session to campaign
-    session_id = getattr(agent, "session_id", None)
-    if session_id:
-        try:
-            cs.link_session_campaign(session_id, item.campaign_id)
-            actions.append(f"session linked to campaign")
-        except Exception:
-            pass
-
-    # 7. Update plan item status
-    cs.update_plan_item(
-        item_id=item.id,
-        status=PlanItemStatus.IN_PROGRESS,
-        session_id=session_id,
-    )
-    actions.append(f"plan item status → in_progress")
-
-    # 8. Start timelapse via orchestrator
+    # 6. Start timelapse via orchestrator — this is what activates the session, so the
+    #    plan↔session link must happen AFTER it (step 7), not before (the old bug:
+    #    agent.session_id was still None here, so the link silently dropped).
     orchestrator = getattr(agent, "timelapse_orchestrator", None)
     if orchestrator:
         try:
             stop_cond = spec.stop_condition or "manual"
             interval = spec.interval_s or 120
-            result = await orchestrator.start(
+            await orchestrator.start(
                 embryo_ids=embryo_ids,
                 stop_condition=stop_cond,
                 base_interval_seconds=interval,
@@ -151,15 +135,30 @@ async def execute_plan_item(
                         logger.error(
                             "Failed to install adaptive interval rule "
                             "(stage=%s, new_interval=%s): %s",
-                            stage_key, new_interval, e,
+                            stage_key,
+                            new_interval,
+                            e,
                         )
-                        actions.append(
-                            f"interval rule FAILED: {stage_key} → {new_interval}s ({e})"
-                        )
+                        actions.append(f"interval rule FAILED: {stage_key} → {new_interval}s ({e})")
         except Exception as e:
             actions.append(f"timelapse start error: {e}")
 
-    # 10. Summary
+    # 7. Link this run to the plan item + campaign — AFTER start, so the session exists.
+    #    Appends (an item may run several sessions). Surface failures, don't swallow.
+    session_id = getattr(agent, "session_id", None)
+    if session_id:
+        try:
+            cs.link_session_campaign(session_id, item.campaign_id)
+            cs.link_plan_item_session(item.id, session_id)
+            actions.append(
+                f"linked session {session_id[:8]} → plan item + campaign (status → in_progress)"
+            )
+        except Exception as e:
+            actions.append(f"⚠ link failed: {e}")
+    else:
+        actions.append("⚠ no active session — could not link this run to the plan item")
+
+    # Summary
     lines = [f"Executing plan item: {item.title}"]
     if spec.strain:
         lines.append(f"  Strain: {spec.strain}")
@@ -178,6 +177,7 @@ async def execute_plan_item(
 # ---------------------------------------------------------------------------
 # complete_current_plan_item
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="complete_current_plan_item",
@@ -198,8 +198,8 @@ async def execute_plan_item(
 )
 async def complete_current_plan_item(
     item_ref: str,
-    outcome: str = None,
-    context: Dict = None,
+    outcome: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Complete a plan item and report newly unblocked items."""
     agent, err = require_agent(context)
@@ -253,12 +253,13 @@ async def complete_current_plan_item(
 # Auto-link helper (used by timelapse_tools.py, Feature 3)
 # ---------------------------------------------------------------------------
 
+
 def try_auto_link_plan_item(
     cs,
     session_id: str,
     stop_condition: str,
     interval_seconds: float,
-) -> Optional[str]:
+) -> str | None:
     """
     Best-effort auto-link: find a planned imaging item that matches the
     current timelapse parameters and link the session.

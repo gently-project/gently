@@ -9,7 +9,7 @@
 </head>
 <body>
     <script>
-        const savedTheme = localStorage.getItem('gently-theme') || 'dark';
+        const savedTheme = localStorage.getItem('gently-theme') || 'light';
         document.body.setAttribute('data-theme', savedTheme);
     </script>
 
@@ -52,6 +52,13 @@
                 <a class="settings-nav-item" data-section="vitals" href="#vitals">Vitals View</a>
                 <a class="settings-nav-item" data-section="detail" href="#detail">Default View</a>
             </div>
+            <div class="settings-nav-group">
+                <div class="settings-nav-title">Hardware</div>
+                <a class="settings-nav-item" data-section="devicelayer" href="#devicelayer">Device layer</a>
+                <a class="settings-nav-item" data-section="thermalizer" href="#thermalizer">Thermalizer</a>
+                <a class="settings-nav-item" data-section="effective" href="#effective">Effective config</a>
+                <a class="settings-nav-item" data-section="advanced" href="#advanced">Advanced</a>
+            </div>
         </nav>
 
         <main class="settings-content" id="settings-content">
@@ -86,6 +93,31 @@
                         <span class="settings-unit">x</span>
                     </div>
                 </div>
+            </section>
+
+            <!-- Device layer Section (install-time; rarely changed) -->
+            <section class="settings-section" id="section-devicelayer">
+                <h2 class="settings-section-title">Device layer</h2>
+                <p class="settings-label" style="opacity:.75;margin-bottom:1rem">
+                    Install-time settings for the microscope control process. Most rigs never
+                    change these — they're kept off the launch screen on purpose.
+                </p>
+                <div class="settings-field">
+                    <label class="settings-label">Device layer port</label>
+                    <div class="settings-input-row">
+                        <input type="number" class="settings-input" id="dl-port" min="1" max="65535">
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Image analysis (SAM) runs on</label>
+                    <div class="settings-radio-group" id="dl-sam">
+                        <label class="settings-radio"><input type="radio" name="dlsam" value="auto"> Auto-detect</label>
+                        <label class="settings-radio"><input type="radio" name="dlsam" value="cuda"> GPU (CUDA)</label>
+                        <label class="settings-radio"><input type="radio" name="dlsam" value="cpu"> CPU</label>
+                    </div>
+                    <p class="settings-label" style="opacity:.7;margin-top:.5rem" id="dl-sam-detected"></p>
+                </div>
+                <p class="settings-label" style="opacity:.8" id="dl-status"></p>
             </section>
 
             <!-- Ambient Section -->
@@ -172,11 +204,12 @@
             <section class="settings-section" id="section-vitals">
                 <h2 class="settings-section-title">Vitals View</h2>
                 <div class="settings-field">
-                    <label class="settings-label">Temperature model</label>
+                    <label class="settings-label">Developmental-timing reference</label>
                     <div class="settings-radio-group" id="cfg-temperatureModel">
                         <label class="settings-radio"><input type="radio" name="temperatureModel" value="20C"> 20°C</label>
                         <label class="settings-radio"><input type="radio" name="temperatureModel" value="25C"> 25°C</label>
                     </div>
+                    <div class="settings-hint">C. elegans staging reference curve for the vitals chart — not the hardware controller (see Hardware → Thermalizer).</div>
                 </div>
                 <div class="settings-field">
                     <label class="settings-checkbox">
@@ -217,8 +250,70 @@
                 </div>
             </section>
 
+            <section class="settings-section" id="section-thermalizer">
+                <h2 class="settings-section-title">Thermalizer (ACUITYnano)</h2>
+                <div class="settings-hint th-note">Machine-wide hardware setting, saved on the server (not this browser). Requires control.</div>
+
+                <div class="settings-field">
+                    <label class="settings-label">Live status</label>
+                    <div class="th-status" id="th-status">Loading…</div>
+                </div>
+
+                <div class="settings-field">
+                    <label class="settings-label">Connection</label>
+                    <div class="settings-radio-group" id="th-backend">
+                        <label class="settings-radio"><input type="radio" name="th-backend" value="serial"> Serial (COM)</label>
+                        <label class="settings-radio"><input type="radio" name="th-backend" value="mqtt"> MQTT (HiveMQ)</label>
+                        <label class="settings-radio th-mock-opt" style="display:none"><input type="radio" name="th-backend" value="mock"> Mock (dev)</label>
+                    </div>
+                </div>
+
+                <div id="th-serial">
+                    <div class="settings-field"><label class="settings-label" for="th-com">COM port</label><input class="settings-input" id="th-com" type="text" placeholder="COM8"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-baud">Baud rate</label><input class="settings-input" id="th-baud" type="number" value="115200"></div>
+                </div>
+                <div id="th-mqtt" style="display:none">
+                    <div class="settings-field"><label class="settings-label" for="th-broker">Broker</label><input class="settings-input" id="th-broker" type="text" placeholder="blank = embedded HiveMQ default"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-port">Port</label><input class="settings-input" id="th-port" type="number" placeholder="8883"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-user">Username</label><input class="settings-input" id="th-user" type="text"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-pass">Password</label><input class="settings-input" id="th-pass" type="password" placeholder="•••• (blank keeps stored)" autocomplete="new-password"><div class="settings-hint">Write-only — never shown; blank keeps the stored password.</div></div>
+                </div>
+
+                <div class="settings-field"><label class="settings-label" for="th-stabilize">Stabilize timeout (s)</label><input class="settings-input" id="th-stabilize" type="number" value="600"></div>
+                <div class="settings-field"><label class="settings-checkbox"><input type="checkbox" id="th-peltier"> Control off the Peltier sensor (else water)</label></div>
+
+                <div class="settings-field th-actions">
+                    <button class="settings-btn" id="th-test" type="button">Test connection</button>
+                    <button class="settings-btn settings-btn-primary" id="th-apply" type="button">Apply</button>
+                </div>
+                <div class="settings-result" id="th-result"></div>
+            </section>
+
+            <section class="settings-section" id="section-effective">
+                <h2 class="settings-section-title">Effective config <span class="th-ro">(read-only)</span></h2>
+                <div class="settings-hint th-note">The server's live configuration, secrets redacted. Editing these needs a restart / env override.</div>
+                <pre class="settings-pre" id="effective-config">Loading…</pre>
+            </section>
+
+            <section class="settings-section" id="section-advanced">
+                <h2 class="settings-section-title">Advanced <span class="th-ro">(restart required)</span></h2>
+                <div class="settings-hint th-note">System tunables persisted to <code>config/settings.local.yml</code>. Saved values take effect on the next server restart. Requires control.</div>
+                <div id="adv-fields">Loading…</div>
+                <div class="settings-field th-actions">
+                    <button class="settings-btn settings-btn-primary" id="adv-save" type="button">Save (restart required)</button>
+                </div>
+                <div class="settings-result" id="adv-result"></div>
+            </section>
+
             <div class="settings-save-bar">
                 <span class="settings-save-status" id="settings-save-status"></span>
+                <span class="settings-defaults-bar">
+                    <button class="settings-btn" id="pref-save-defaults" type="button" title="Save current dashboard prefs as the rig-wide defaults">Save as rig defaults</button>
+                    <button class="settings-btn" id="pref-reset" type="button" title="Clear this browser's overrides and use the rig defaults">Reset to defaults</button>
+                    <button class="settings-btn" id="pref-export" type="button">Export</button>
+                    <button class="settings-btn" id="pref-import" type="button">Import</button>
+                    <input type="file" id="pref-import-file" accept="application/json" style="display:none">
+                </span>
             </div>
         </main>
     </div>
@@ -235,6 +330,53 @@
                 localStorage.setItem('gently-theme', next);
             });
         }
+
+        // Device-layer settings (port + SAM device) — persisted via /api/launch/prefs.
+        // Applies to the next device-layer start (a running one isn't reconfigured).
+        (function () {
+            const port = document.getElementById('dl-port');
+            const detected = document.getElementById('dl-sam-detected');
+            const status = document.getElementById('dl-status');
+            if (!port) return;
+            let loaded = false;
+            fetch('/api/launch/prefs').then(r => (r.ok ? r.json() : null)).then(p => {
+                if (!p) return;
+                port.value = (p.port != null ? p.port : '');
+                const sam = p.sam_device_raw || 'auto';
+                const radio = document.querySelector('#dl-sam input[value="' + sam + '"]')
+                    || document.querySelector('#dl-sam input[value="auto"]');
+                if (radio) radio.checked = true;
+                if (detected) {
+                    detected.textContent = 'Detected: ' + (p.sam_detected === 'cuda'
+                        ? 'GPU (CUDA)'
+                        : 'CPU — no GPU found, so image analysis will be slower');
+                }
+                loaded = true;
+            });
+            async function save() {
+                if (!loaded) return;
+                const sam = (document.querySelector('#dl-sam input:checked') || {}).value || 'auto';
+                const body = { sam_device: sam };
+                const pv = parseInt(port.value, 10);
+                if (pv) body.port = pv;
+                try {
+                    const r = await fetch('/api/launch/prefs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    if (status) status.textContent = r.ok
+                        ? 'Saved — applies next time the device layer starts'
+                        : (r.status === 403 ? 'Sign in to change device settings' : 'Failed to save');
+                } catch (e) { if (status) status.textContent = 'Failed to save'; }
+            }
+            port.addEventListener('change', save);
+            document.querySelectorAll('#dl-sam input').forEach(r => r.addEventListener('change', save));
+        })();
     </script>
+    {% if replay_enabled %}
+    <script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
+    <script src="/static/js/replay-recorder.js" defer data-gently-replay-fidelity="{{ replay_fidelity }}"></script>
+    {% endif %}
 </body>
 </html>

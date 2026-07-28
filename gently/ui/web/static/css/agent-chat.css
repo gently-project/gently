@@ -1,0 +1,507 @@
+/* Floating agent-chat window — the web-side control surface.
+   Restrained, professional styling for a lab instrument. */
+
+/* ── Collapsed rail (always-present agent affordance) ──────────
+   When the docked panel is collapsed it shrinks to this thin vertical rail:
+   a spark glyph (click to open), a vertical "Agent" label, plus the connection
+   dot + unseen-activity badge so a tucked-away agent can still signal it woke
+   or has something pending. Shown only via the body.chat-docked rules below. */
+.agent-rail {
+    display: none;  /* shown only when collapsed (see :not(.open) rule) */
+    flex-direction: column; align-items: center;
+    width: 100%; height: 100%; padding: 8px 0 0;
+    border: none; background: transparent;
+    cursor: pointer;
+}
+/* Icon-only activity-bar button: contained rounded hover target (VS Code/Google
+   style), with the connection state + activity count attached to the icon. */
+.agent-rail-icon {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius: 10px;
+    color: var(--text-muted);
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.agent-rail:hover .agent-rail-icon { background: var(--bg-hover); color: var(--text); }
+.agent-rail-spark { display: flex; }
+/* Presence dot in the icon's corner (avatar-with-status pattern). */
+.agent-rail-dot {
+    position: absolute; right: 5px; bottom: 5px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-muted);
+    border: 2px solid var(--bg-card); box-sizing: content-box;
+}
+.agent-rail-dot.ok { background: var(--accent-green); }
+/* Unseen-activity count badge in the icon's top-right corner. */
+.agent-rail-badge {
+    position: absolute; top: -4px; right: -4px;
+    min-width: 16px; height: 16px; padding: 0 4px;
+    border-radius: 999px; background: var(--accent-purple); color: #fff;
+    font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+    border: 2px solid var(--bg-card); box-sizing: content-box;
+}
+.agent-rail-badge.hidden { display: none; }
+
+/* ── Docked agent panel ────────────────────────────────────
+   The panel is always docked (body.chat-docked, set on load): a real column
+   that pushes .app-main, never a float over content. Collapsing it (header
+   Agent toggle / Ctrl+J / ×) drops it to width 0 to reclaim space.
+
+   The base .agent-chat rules below (absolute, translateX slide) are the
+   pre-JS / no-chat-docked fallback so the panel stays parked off-screen until
+   restorePrefs() docks it; body.chat-docked overrides them into the column. */
+.agent-chat {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: var(--chat-w, 460px);
+    max-width: 92vw;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border-left: 1px solid var(--border);
+    box-shadow: -16px 0 40px -16px var(--panel-edge-shadow);
+    z-index: 50;
+    overflow: hidden;
+    transform: translateX(100%);
+    transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+    font-family: 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.agent-chat.open { transform: translateX(0); }
+
+/* Docked: a real pushing column — no float shadow, just a seam. */
+body.chat-docked .agent-chat {
+    position: relative;
+    transform: none;
+    box-shadow: none;
+    border-left: 1px solid var(--border-strong);
+    flex: 0 0 auto;
+    transition: none;
+    z-index: auto;
+}
+/* Collapsed: shrink to the rail. Hide every child, then re-show only the rail. */
+body.chat-docked .agent-chat:not(.open) {
+    width: 48px; flex: 0 0 48px; overflow: hidden;
+}
+body.chat-docked .agent-chat:not(.open) > * { display: none; }
+body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+    .agent-chat { transition: opacity 0.12s ease; }
+}
+
+/* Left-edge resize handle (thin seam, generous hit area). */
+.agent-chat-resize {
+    position: absolute; left: -2px; top: 0; bottom: 0; width: 6px;
+    cursor: ew-resize; z-index: 3;
+}
+.agent-chat-resize::after {
+    content: ''; position: absolute; left: 2px; top: 0; bottom: 0; width: 1px;
+    background: transparent; transition: background 0.12s ease;
+}
+.agent-chat-resize:hover::after, .agent-chat-resize.dragging::after { background: var(--accent); }
+
+.agent-control-banner.hidden { display: none; }
+
+/* ── Header ─────────────────────────────────────────────── */
+.agent-chat-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+}
+.agent-chat-id { display: flex; align-items: center; gap: 9px; }
+.agent-chat-mark { display: block; }
+.agent-chat-title { font-weight: 600; font-size: 14px; color: var(--text); letter-spacing: 0.01em; }
+.agent-chat-user {
+    font-size: 11px; color: var(--text-muted);
+    padding-left: 7px; margin-left: 1px;
+    border-left: 1px solid var(--border);
+}
+.agent-chat-user:empty { display: none; }
+.agent-chat-signout {
+    background: none; border: none;
+    color: var(--text-muted); font-size: 11px; cursor: pointer;
+    padding: 0 4px; font-family: inherit;
+}
+.agent-chat-signout:hover { color: var(--text); text-decoration: underline; }
+
+.agent-chat-conn {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 9px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.agent-chat-conn.ac-conn-ok { color: var(--accent-green); border-color: rgba(74, 222, 128, 0.35); }
+.agent-chat-conn.ac-conn-bad { color: var(--accent-orange, #fb923c); border-color: rgba(251, 146, 60, 0.35); }
+.agent-chat-close {
+    background: none; border: none;
+    color: var(--text-muted); line-height: 1;
+    cursor: pointer; padding: 2px; border-radius: 5px;
+    display: inline-flex; align-items: center;
+}
+.agent-chat-close svg { display: block; }
+.agent-chat-close:hover { color: var(--text); background: var(--bg-hover); }
+
+/* ── Control banner ─────────────────────────────────────── */
+.agent-control-banner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px;
+    background: rgba(251, 146, 60, 0.10);
+    border-bottom: 1px solid var(--border);
+    color: var(--accent-orange, #fb923c);
+    font-size: 12.5px;
+}
+.ac-take-control {
+    margin-left: auto;
+    padding: 4px 12px; border-radius: 7px;
+    border: 1px solid var(--accent);
+    background: var(--accent); color: #fff;
+    cursor: pointer; font-size: 12px; font-weight: 600;
+}
+.ac-take-control:hover { background: var(--accent-hover); }
+
+/* ── Transcript ─────────────────────────────────────────── */
+.agent-chat-log {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+    font-size: 13.5px; line-height: 1.6;
+    color: var(--text);
+}
+
+.ac-turn { display: flex; flex-direction: column; }
+.ac-role {
+    font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--accent-purple);
+    margin-bottom: 4px;
+}
+/* Sender name on user bubbles: muted so it doesn't compete with the message. */
+.ac-role-user { color: var(--text-muted); }
+.ac-turn-agent .ac-content { color: var(--text); }
+.ac-turn-agent .ac-content code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12px;
+    background: rgba(127, 127, 127, 0.14);
+    padding: 1px 5px; border-radius: 4px;
+}
+
+/* User: right-aligned, subtle accent block (not a loud bubble). Your own
+   messages use the blue accent; other participants get a neutral bubble so a
+   shared chat is easy to read at a glance. */
+.ac-turn-user { align-items: flex-end; }
+.ac-turn-user .ac-content {
+    background: rgba(96, 165, 250, 0.12);
+    border: 1px solid rgba(96, 165, 250, 0.22);
+    color: var(--text);
+    padding: 7px 11px;
+    border-radius: 10px 10px 2px 10px;
+    max-width: 88%;
+    white-space: pre-wrap; word-wrap: break-word;
+}
+.ac-turn-user.ac-from-other .ac-content {
+    background: rgba(127, 127, 127, 0.12);
+    border-color: rgba(127, 127, 127, 0.24);
+}
+
+/* ── Autonomous (wake) turns ────────────────────────────── */
+.ac-autonomous-banner {
+    display: flex; align-items: center; gap: 8px;
+    align-self: stretch;
+    margin: 2px 0;
+    padding: 6px 10px;
+    font-size: 11.5px; font-weight: 500;
+    color: var(--accent-purple);
+    background: rgba(167, 139, 250, 0.10);
+    border: 1px solid rgba(167, 139, 250, 0.28);
+    border-radius: 8px;
+}
+.ac-autonomous-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent-purple);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.20);
+    flex: 0 0 auto;
+}
+/* Autonomous agent bubbles get an accent rail + a distinct role label. */
+.ac-turn-autonomous { border-left: 2px solid rgba(167, 139, 250, 0.45); padding-left: 8px; }
+.ac-turn-autonomous .ac-role { color: var(--accent-purple); }
+
+/* ── Activity indicator ─────────────────────────────────── */
+.ac-activity {
+    display: flex; align-items: center; gap: 9px;
+    color: var(--text-muted); font-size: 12.5px;
+}
+.ac-dots { display: inline-flex; gap: 4px; }
+.ac-dots i {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent);
+    display: inline-block;
+    animation: ac-blink 1.2s infinite both;
+}
+.ac-dots i:nth-child(2) { animation-delay: 0.18s; }
+.ac-dots i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes ac-blink { 0%, 80%, 100% { opacity: 0.22; } 40% { opacity: 1; } }
+
+/* ── Tool calls ─────────────────────────────────────────── */
+.ac-tool {
+    display: flex; align-items: center; gap: 8px;
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: rgba(127, 127, 127, 0.05);
+}
+.ac-tool-name { color: var(--text); }
+.ac-tool-meta { color: var(--text-muted); }
+.ac-tool-check { color: var(--accent-green); }
+
+/* Multi-line tool rows: head (icon + name + meta) over args / summary. */
+.ac-tool { flex-direction: column; align-items: stretch; gap: 4px; }
+.ac-tool-head { display: flex; align-items: center; gap: 8px; }
+.ac-tool-args { color: var(--text-muted); padding-left: 19px; word-break: break-word; }
+.ac-tool-summary { color: var(--text-muted); padding-left: 19px; word-break: break-word; }
+.ac-tool-summary-err, .ac-tool-warn { color: var(--accent-orange, #fb923c); }
+.ac-tool-err { border-color: rgba(251, 146, 60, 0.35); }
+.ac-tool-spin {
+    width: 11px; height: 11px; border-radius: 50%;
+    border: 1.6px solid var(--border);
+    border-top-color: var(--accent);
+    display: inline-block;
+    animation: ac-spin 0.7s linear infinite;
+}
+@keyframes ac-spin { to { transform: rotate(360deg); } }
+
+/* ── System lines / notifications ───────────────────────── */
+.ac-system {
+    align-self: center;
+    font-size: 11.5px; color: var(--text-muted);
+    text-align: center; max-width: 95%;
+}
+.ac-level-error { color: var(--color-danger, #f87171); }
+.ac-level-warning { color: var(--accent-orange, #fb923c); }
+.ac-level-success { color: var(--accent-green); }
+
+/* ── Ask pointer (ux_v2) ─────────────────────────────────── */
+/* Compact transcript reference shown instead of full ask cards when the main
+   stage (AskStage / #ask-stage) owns the answer surface. */
+.ac-ask-pointer {
+    align-self: center;
+    font-size: 11.5px; color: var(--text-muted);
+    text-align: center; font-style: italic;
+    opacity: 0.75;
+}
+.ac-ask-pointer-answered { opacity: 0.35; }
+
+/* ── Choice picker ──────────────────────────────────────── */
+.ac-choice {
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(127, 127, 127, 0.04);
+}
+.ac-choice-q { color: var(--text); font-weight: 500; }
+.ac-choice-opt {
+    text-align: left;
+    padding: 9px 12px; border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-card); color: var(--text);
+    cursor: pointer;
+    display: flex; flex-direction: column; gap: 2px;
+    transition: border-color 0.12s ease, background 0.12s ease;
+}
+.ac-choice-opt:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-hover); }
+.ac-choice-opt:disabled { opacity: 0.5; cursor: default; }
+.ac-choice-label { font-weight: 600; font-size: 13px; }
+.ac-choice-desc { font-size: 12px; color: var(--text-muted); }
+.ac-choice-picked { border-color: var(--accent-green); background: rgba(74, 222, 128, 0.08); }
+.ac-choice-wake {
+    border-color: rgba(167, 139, 250, 0.45);
+    border-left: 3px solid var(--accent-purple);
+    background: rgba(167, 139, 250, 0.06);
+}
+.ac-choice-origin {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent-purple); margin-bottom: 2px;
+}
+
+/* Sticky ASK-approval slot: pinned above the composer so it never scrolls away. */
+.ac-pending {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--border);
+    background: var(--bg-card);
+    padding: 8px 12px 0;
+}
+.ac-pending.hidden { display: none; }
+.ac-pending .ac-choice { margin-bottom: 8px; }
+
+/* "↓ N new" jump-to-bottom pill (shown when scrolled up during streaming). */
+.ac-jump {
+    position: absolute;
+    left: 50%; transform: translateX(-50%);
+    bottom: 74px;
+    padding: 4px 12px; border-radius: 999px;
+    border: 1px solid var(--accent);
+    background: var(--bg-card); color: var(--accent);
+    font: 600 11.5px/1.4 'Inter Tight', -apple-system, sans-serif;
+    cursor: pointer; z-index: 4;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.ac-jump.hidden { display: none; }
+
+/* ── Applied-spec card ──────────────────────────────────── */
+.ac-spec {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 11px 13px;
+    background: rgba(127, 127, 127, 0.04);
+    font-size: 12.5px;
+}
+.ac-spec-title {
+    font-weight: 600; color: var(--accent-purple);
+    font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+    margin-bottom: 6px;
+}
+.ac-spec-row { display: flex; justify-content: space-between; gap: 16px; padding: 1px 0; color: var(--text-muted); }
+.ac-spec-row span:last-child { color: var(--text); font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+/* ── Composer ───────────────────────────────────────────── */
+.agent-chat-input {
+    display: flex; gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--border);
+    position: relative;   /* anchor for the autocomplete dropdown */
+}
+
+/* ── Autocomplete dropdown ──────────────────────────────── */
+.ac-complete {
+    position: absolute;
+    left: 12px; right: 12px; bottom: calc(100% + 4px);
+    max-height: 240px; overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+    z-index: 5;
+}
+.ac-complete.hidden { display: none; }
+.ac-complete-item {
+    display: flex; flex-direction: column; gap: 1px;
+    padding: 6px 9px; border-radius: 6px;
+    cursor: pointer;
+}
+.ac-complete-item.active,
+.ac-complete-item:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+.ac-complete-name {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12.5px; color: var(--accent);
+}
+.ac-complete-desc {
+    font-size: 11.5px; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-chat-input textarea {
+    flex: 1 1 auto; resize: none;
+    border: 1px solid var(--border); border-radius: 9px;
+    background: var(--bg-dark); color: var(--text);
+    padding: 9px 11px;
+    font-family: inherit; font-size: 13.5px; line-height: 1.45;
+    max-height: 140px;
+}
+.agent-chat-input textarea::placeholder { color: var(--text-muted); }
+.agent-chat-input textarea:focus { outline: none; border-color: var(--accent); }
+.agent-chat-input textarea:disabled { opacity: 0.55; }
+/* Circular icon button (ChatGPT/Claude style): an up-arrow to send, which
+   morphs into a stop square (.is-stop) while a cancellable turn is running. */
+.agent-chat-send {
+    flex: 0 0 auto; align-self: flex-end;
+    width: 36px; height: 36px; padding: 0; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; background: var(--accent); color: #fff;
+    cursor: pointer; transition: background 0.12s ease, opacity 0.12s ease;
+}
+.agent-chat-send:hover:not(:disabled) { background: var(--accent-hover); }
+.agent-chat-send:disabled { opacity: 0.4; cursor: default; }
+.agent-chat-send svg { display: block; }
+/* Toggle which glyph shows; same filled circle in both states (the icon is the
+   signal), matching how Claude/ChatGPT morph the composer button. */
+.agent-chat-send .ac-icon-stop { display: none; }
+.agent-chat-send.is-stop .ac-icon-send { display: none; }
+.agent-chat-send.is-stop .ac-icon-stop { display: block; }
+
+/* ── Queued-message panel (type-while-busy) ─────────────── */
+.ac-queue {
+    margin: 0 12px 6px;
+    border: 1px solid var(--border); border-radius: 9px;
+    background: rgba(127, 127, 127, 0.06);
+    padding: 6px; font-size: 12px;
+}
+.ac-queue.hidden { display: none; }
+.ac-queue-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 4px 6px; color: var(--text-muted);
+}
+.ac-queue-clear {
+    background: none; border: none; color: var(--accent);
+    cursor: pointer; font-size: 11.5px; font-family: inherit;
+}
+.ac-queue-clear:hover { text-decoration: underline; }
+.ac-queue-item { display: flex; align-items: center; gap: 8px; padding: 4px; }
+.ac-queue-text {
+    flex: 1 1 auto; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ac-queue-remove {
+    flex: 0 0 auto; background: none; border: none;
+    color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.ac-queue-remove:hover { color: var(--color-danger, #f87171); }
+
+/* ── Rendered markdown (mdToHtml output, ac-md-* classes) ──────────────────
+   Shared by the chat transcript and the ux_v2 plan-wizard activity feed — the
+   same renderer feeds both, so these styles cover headings, lists, tables,
+   code blocks, quotes and links the agent emits. */
+.ac-md { line-height: 1.55; }
+.ac-md > :first-child { margin-top: 0; }
+.ac-md > :last-child { margin-bottom: 0; }
+.ac-md-h1, .ac-md-h2, .ac-md-h3, .ac-md-h4, .ac-md-h5, .ac-md-h6 {
+    margin: 14px 0 6px; font-weight: 650; line-height: 1.3; letter-spacing: -.01em; color: var(--text);
+}
+.ac-md-h1 { font-size: 1.25em; }
+.ac-md-h2 { font-size: 1.15em; }
+.ac-md-h3 { font-size: 1.05em; }
+.ac-md-h4, .ac-md-h5, .ac-md-h6 { font-size: 1em; }
+.ac-md-p { margin: 7px 0; }
+.ac-md-ul, .ac-md-ol { margin: 7px 0; padding-left: 22px; }
+.ac-md-li { margin: 3px 0; }
+.ac-md-quote {
+    margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--border, #e4e9f0);
+    color: var(--text-muted); font-style: italic;
+}
+.ac-md-hr { border: 0; border-top: 1px solid var(--border, #e4e9f0); margin: 12px 0; }
+.ac-md-link { color: var(--accent, #2f6df6); text-decoration: underline; text-underline-offset: 2px; }
+.ac-md-pre {
+    margin: 8px 0; padding: 10px 12px; border-radius: 8px; overflow-x: auto;
+    background: var(--bg, #f6f8fb); border: 1px solid var(--border, #e4e9f0);
+}
+.ac-md-pre .ac-md-code-block, .ac-md-pre code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;
+    color: var(--text); background: none; padding: 0; white-space: pre;
+}
+/* GFM tables — wrapped so a wide table scrolls instead of blowing out the column */
+.ac-md-table-wrap { margin: 9px 0; overflow-x: auto; border: 1px solid var(--border, #e4e9f0); border-radius: 8px; }
+.ac-md-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.ac-md-table th, .ac-md-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border, #e4e9f0); border-right: 1px solid var(--border, #e4e9f0); }
+.ac-md-table th:last-child, .ac-md-table td:last-child { border-right: 0; }
+.ac-md-table tr:last-child td { border-bottom: 0; }
+.ac-md-table thead th { background: var(--bg, #f6f8fb); font-weight: 650; color: var(--text); }

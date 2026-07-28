@@ -15,12 +15,19 @@ Built-in roles:
 - ``test``: the biological subject (precious sample). Custom ad-hoc detector.
 - ``calibration``: reference embryo used for staging/calibration. Absorbs
   more photodose. Standard perception pipeline.
+- ``lineaging``: lineage-tracing reference — tracks nuclei/divisions. Often
+  a pan-nuclear strain, but the strain is separate from this use.
 - ``unassigned``: explicit "not yet classified" state. Treated like ``test``
   for safety until the user resolves the assignment.
+
+Role classes
+------------
+``role_class`` distinguishes how Operations foregrounds embryos:
+- ``"subject"`` — the primary biological subjects of the experiment.
+- ``"reference"`` — reference embryos (staging, calibration, lineaging).
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -29,10 +36,11 @@ class EmbryoRole:
 
     Frozen so role definitions are immutable references after registry build.
     """
+
     name: str
     description: str
     default_cadence_seconds: float = 300.0
-    detector_name: Optional[str] = None
+    detector_name: str | None = None
     photodose_budget_multiplier: float = 1.0
     ui_color: str = "#888888"
     ui_icon: str = "circle"
@@ -43,10 +51,13 @@ class EmbryoRole:
     # drift back; once they're out of view they stay out, so they get
     # a short threshold. Test embryos can occasionally pop out and
     # back, so they get a longer one.
-    no_object_consecutive_terminal: Optional[int] = None
+    no_object_consecutive_terminal: int | None = None
+    # 'subject' | 'reference' — used by Operations to foreground subjects
+    # vs references in multi-embryo layouts and scheduling decisions.
+    role_class: str = "subject"
 
 
-REGISTRY: Dict[str, EmbryoRole] = {
+REGISTRY: dict[str, EmbryoRole] = {
     "unassigned": EmbryoRole(
         name="unassigned",
         description="No role assigned yet — treated like 'test' for safety.",
@@ -56,6 +67,7 @@ REGISTRY: Dict[str, EmbryoRole] = {
         ui_color="#888888",
         ui_icon="circle",
         no_object_consecutive_terminal=None,
+        role_class="subject",  # safe default: protect like a subject
     ),
     "test": EmbryoRole(
         name="test",
@@ -71,6 +83,7 @@ REGISTRY: Dict[str, EmbryoRole] = {
         ui_color="#ff66cc",  # magenta
         ui_icon="star",
         no_object_consecutive_terminal=5,  # forgiving — they might drift back
+        role_class="subject",
     ),
     "calibration": EmbryoRole(
         name="calibration",
@@ -85,6 +98,21 @@ REGISTRY: Dict[str, EmbryoRole] = {
         ui_color="#00cccc",  # cyan
         ui_icon="diamond",
         no_object_consecutive_terminal=2,  # they don't drift back; gone == gone
+        role_class="reference",
+    ),
+    "lineaging": EmbryoRole(
+        name="lineaging",
+        description=(
+            "Lineage-tracing reference — tracks nuclei/divisions; often a "
+            "pan-nuclear strain but the strain is separate from this use."
+        ),
+        default_cadence_seconds=300.0,
+        detector_name="perception",  # nuclear pipeline, same as calibration
+        photodose_budget_multiplier=5.0,
+        ui_color="#33cc88",  # teal-green — distinct from cyan (calibration) and magenta (test)
+        ui_icon="triangle",
+        no_object_consecutive_terminal=2,  # reference embryos don't drift back
+        role_class="reference",
     ),
 }
 
@@ -94,10 +122,7 @@ DEFAULT_ROLE: str = "test"
 def get_role(name: str) -> EmbryoRole:
     """Look up a role by name. Raises KeyError with helpful message."""
     if name not in REGISTRY:
-        raise KeyError(
-            f"Unknown embryo role: {name!r}. "
-            f"Available: {sorted(REGISTRY.keys())}"
-        )
+        raise KeyError(f"Unknown embryo role: {name!r}. Available: {sorted(REGISTRY.keys())}")
     return REGISTRY[name]
 
 
@@ -105,6 +130,6 @@ def is_valid_role(name: str) -> bool:
     return name in REGISTRY
 
 
-def list_roles() -> List[str]:
+def list_roles() -> list[str]:
     """All registered role names, sorted."""
     return sorted(REGISTRY.keys())

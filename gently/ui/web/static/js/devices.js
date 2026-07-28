@@ -14,7 +14,7 @@
  */
 const DevicesManager = (function () {
     const STALE_AFTER_MS = 4000;
-    const VIEWS = ['map', 'details'];
+    const VIEWS = ['operate', 'map', 'details', 'optical3d', 'manual'];
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
     // Status / details DOM
@@ -32,11 +32,14 @@ const DevicesManager = (function () {
     let _mapWrap;
     let _scalebarLabel;
 
-    // Embryos overlay state: list of {embryo_id, x, y, role, ...}.
-    // Populated by /api/embryos/positions on init + EMBRYO_DETECTED /
-    // STATUS_CHANGED WS pushes thereafter. Roles drive the marker color
+    // Embryo waypoints — driven by EMBRYOS_UPDATE events (the canonical bulk
+    // mutation broadcast added by the embryos-broadcast commit) and the
+    // initial /api/embryos/current snapshot. Each entry mirrors
+    // EmbryoState.to_dict() (id, position_coarse, position_fine,
+    // has_fine_position, nickname, role, ...). Role drives marker color
     // (mirrors the marking-window legend: magenta=test, cyan=calibration,
-    // grey=unassigned).
+    // grey=unassigned). EMBRYO_DETECTED / STATUS_CHANGED listeners stay
+    // hooked as a belt-and-braces refresh path.
     let _embryos = [];
     const _ROLE_COLOR = {
         test: '#ff66cc',
@@ -44,14 +47,97 @@ const DevicesManager = (function () {
         unassigned: '#888888',
     };
 
+    // Map-side edit state. _selectedEmbryoId means "picked up": the next
+    // click on empty map space drops it there (with a confirm), Delete /
+    // Backspace removes it (with a confirm), Escape clears the selection.
+    let _selectedEmbryoId = null;
+
     // Bottom-camera panel DOM + state
-    let _camPanel, _camToggle, _camImg, _camPlaceholder, _camLed, _camMeta;
+    let _camPanel, _camToggle, _camExpand, _camImg, _camPlaceholder, _camLed, _camMeta;
+    let _camStage, _camCrosshair, _camCrosshairGroup;
     let _camStreaming = false;
     let _camLastFrameTs = 0;
     let _camHasFrame = false;
     let _camStaleTimer = null;
     const _CAM_FPS_WINDOW = 12;
     let _camFrameTimes = [];
+
+    // Camera zoom / pan. Identity transform = (zoom 1, tx 0, ty 0); pan only
+    // engages once zoom > 1. Reset on double-click and on stream-off.
+    let _camZoom = 1;
+    let _camTx = 0;
+    let _camTy = 0;
+    let _camPanLast = null;  // {x, y} clientX/Y of last pointermove during pan
+    const _CAM_ZOOM_MIN = 1;
+    const _CAM_ZOOM_MAX = 8;
+    const _CAM_ZOOM_STEP = 1.15;  // multiplicative per wheel notch
+
+    // Lightsheet live panel DOM + state (Manual view)
+    let _lsToggle, _lsImg, _lsPlaceholder, _lsLed, _lsMeta, _lsStage;
+    let _lsStreaming = false;
+    let _lsLastFrameTs = 0;
+    let _lsHasFrame = false;
+    let _lsStaleTimer = null;
+    const _LS_FPS_WINDOW = 12;
+    let _lsFrameTimes = [];
+    // Render throttle: decouple paint rate from frame-arrival rate. We keep
+    // only the latest frame, coalesce paints to one per animation frame, and
+    // hold a single decode in flight at a time. This stops a fast stream from
+    // swapping <img>.src 100+ times/sec, which churns GPU texture uploads and
+    // can hang an older display driver (Video TDR). See handleLightsheetFrame.
+    let _lsPendingPayload = null;
+    let _lsRenderScheduled = false;
+    let _lsDecoding = false;
+
+    // Lightsheet zoom / pan (mirrors camera zoom/pan)
+    let _lsZoom = 1;
+    let _lsTx = 0;
+    let _lsTy = 0;
+    let _lsPanLast = null;
+
+    // Lightsheet live params — debounced POST to /api/devices/lightsheet/live/params
+    let _lsGalvo = 0;
+    let _lsPiezo = 0;
+    let _lsExposure = 20;  // matches device-layer _ls_params default (20 ms)
+    let _lsSide = 'A';     // SPIM side — 'A' (HamCam1) or 'B' (HamCam2 if present)
+    let _lsParamTimer = null;
+
+    // Lightsheet control inputs (rail)
+    let _lsGalvoSlider, _lsGalvoNum, _lsPiezoSlider, _lsPiezoNum, _lsExposureNum;
+    let _lsLedToggle, _lsRoomLightBtn;
+    let _lsLedIsOpen = false;  // LED toggle state: false = Closed (safe default)
+    let _lsLaserToggle;
+    let _lsLaserOn = false;    // Laser toggle state: false = OFF (entry-safe default)
+    let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
+    let _lsLaserStatus;   // span inside .ls-laser-indicator — driven by actual laser/off calls
+    let _lsLaserPreset;   // <select id="devices-laser-preset"> — populated on manual-view entry
+    let _lsSideSelect;    // <select id="devices-ls-side"> — shown only when camera_b present
+    let _lsTempInput, _lsTempSet;
+
+    // Timelapse form DOM refs (Manual view — #devices-tl-group)
+    let _tlToggle, _tlBody;
+    let _tlInterval, _tlStop, _tlCondRow, _tlCondLabel, _tlCondVal;
+    let _tlEmbryos, _tlMode;
+    let _tlSlices, _tlExposure, _tlGalvoAmp, _tlGalvoCtr, _tlPiezoAmp, _tlPiezoCtr, _tlLaser;
+    let _tlStart, _tlStatus, _tlStatusText;
+    // Accordion active-state per section: { sched, targets, geom }
+    let _tlTouched = { sched: false, targets: false, geom: false };
+
+    // Room-light toggle (header). Drives the SwitchBot Bot that switches the
+    // diSPIM room light. State is the bot's cached on/off; hidden until the
+    // device layer reports the accessory is configured.
+    let _roomLightToggle, _roomLightLabel;
+    let _roomLightState = 'unknown';
+    let _roomLightAvailable = false;
+    let _roomLightBusy = false;
+    let _roomLightTimer = null;
+
+    // Temperature-controller panel DOM + state
+    let _tempEl, _tempReadout, _tempInput, _tempSet;
+    let _tempState = 'unknown';
+    let _tempAvailable = false;
+    let _tempBusy = false;
+    let _tempTimer = null;
 
     let _lastTs = 0;
     let _previousTs = 0;
@@ -60,7 +146,7 @@ const DevicesManager = (function () {
     let _filterText = '';
     let _lastPropertyMap = {};
     let _lastXY = null;             // {X, Y} in stage µm, last seen
-    let _currentView = 'map';
+    let _currentView = 'operate';
 
     // Map geometry
     //   _optimalBox: { x: [min, max], y: [min, max] } in stage µm, derived
@@ -108,10 +194,68 @@ const DevicesManager = (function () {
 
         _camPanel        = document.getElementById('devices-camera-panel');
         _camToggle       = document.getElementById('devices-camera-toggle');
+        _camExpand       = document.getElementById('devices-camera-expand');
         _camImg          = document.getElementById('devices-camera-img');
         _camPlaceholder  = document.getElementById('devices-camera-placeholder');
+        _camStage        = _camPanel ? _camPanel.querySelector('.devices-camera-stage') : null;
+        _camCrosshair    = document.getElementById('devices-camera-crosshair');
+        _camCrosshairGroup = document.getElementById('devices-camera-crosshair-group');
         _camLed          = document.getElementById('devices-camera-led');
         _camMeta         = document.getElementById('devices-camera-meta');
+
+        // Manual / lightsheet panel
+        _lsToggle        = document.getElementById('devices-ls-toggle');
+        _lsImg           = document.getElementById('devices-ls-img');
+        _lsPlaceholder   = document.getElementById('devices-ls-placeholder');
+        _lsStage         = document.getElementById('devices-ls-stage');
+        _lsLed           = document.getElementById('devices-ls-led');
+        _lsMeta          = document.getElementById('devices-ls-meta');
+        _lsGalvoSlider   = document.getElementById('devices-ls-galvo-slider');
+        _lsGalvoNum      = document.getElementById('devices-ls-galvo');
+        _lsPiezoSlider   = document.getElementById('devices-ls-piezo-slider');
+        _lsPiezoNum      = document.getElementById('devices-ls-piezo');
+        _lsExposureNum   = document.getElementById('devices-ls-exposure');
+        _lsLedToggle     = document.getElementById('devices-ls-led-toggle');
+        _lsRoomLightBtn  = document.getElementById('devices-ls-room-light-btn');
+        _lsLaserToggle   = document.getElementById('devices-ls-laser-toggle');
+        _lsSnapVolBtn    = document.getElementById('devices-ls-snap-volume');
+        _lsBurstBtn      = document.getElementById('devices-ls-burst');
+        _lsLastcap       = document.getElementById('devices-ls-lastcap');
+        _lsLastcapRef    = document.getElementById('devices-ls-lastcap-ref');
+        _lsLaserStatus   = document.getElementById('devices-ls-laser-status');
+        _lsLaserPreset   = document.getElementById('devices-laser-preset');
+        _lsSideSelect    = document.getElementById('devices-ls-side');
+        _lsTempInput     = document.getElementById('devices-ls-temp-input');
+        _lsTempSet       = document.getElementById('devices-ls-temp-set');
+
+        // Timelapse form
+        _tlToggle     = document.getElementById('devices-tl-toggle');
+        _tlBody       = document.getElementById('devices-tl-body');
+        _tlInterval   = document.getElementById('devices-tl-interval');
+        _tlStop       = document.getElementById('devices-tl-stop');
+        _tlCondRow    = document.getElementById('devices-tl-cond-row');
+        _tlCondLabel  = document.getElementById('devices-tl-cond-label');
+        _tlCondVal    = document.getElementById('devices-tl-cond-val');
+        _tlEmbryos    = document.getElementById('devices-tl-embryos');
+        _tlMode       = document.getElementById('devices-tl-mode');
+        _tlSlices     = document.getElementById('devices-tl-slices');
+        _tlExposure   = document.getElementById('devices-tl-exposure');
+        _tlGalvoAmp   = document.getElementById('devices-tl-galvo-amp');
+        _tlGalvoCtr   = document.getElementById('devices-tl-galvo-ctr');
+        _tlPiezoAmp   = document.getElementById('devices-tl-piezo-amp');
+        _tlPiezoCtr   = document.getElementById('devices-tl-piezo-ctr');
+        _tlLaser      = document.getElementById('devices-tl-laser');
+        _tlStart      = document.getElementById('devices-tl-start');
+        _tlStatus     = document.getElementById('devices-tl-status');
+        _tlStatusText = document.getElementById('devices-tl-status-text');
+
+        _roomLightToggle = document.getElementById('devices-room-light-toggle');
+        _roomLightLabel  = document.getElementById('devices-room-light-label');
+
+        _tempEl      = document.getElementById('devices-temp');
+        _tempReadout = document.getElementById('devices-temp-readout');
+        _tempInput   = document.getElementById('devices-temp-input');
+        _tempSet     = document.getElementById('devices-temp-set');
 
         // Recompute the scale bar caption whenever the canvas resizes.
         if (_mapSvg && window.ResizeObserver) {
@@ -257,6 +401,33 @@ const DevicesManager = (function () {
         }
     }
 
+    // Initial embryo snapshot — closes the gap for clients that connect
+    // mid-session, after the last EMBRYOS_UPDATE has already been broadcast
+    // and aged out of history. Subsequent updates arrive over the event bus.
+    async function loadEmbryosSnapshot() {
+        try {
+            const res = await fetch('/api/embryos/current');
+            if (!res.ok) return;
+            const data = await res.json();
+            handleEmbryosUpdate(data);
+        } catch (err) {
+            console.debug('embryos snapshot fetch failed:', err);
+        }
+    }
+
+    function handleEmbryosUpdate(payload) {
+        _embryos = (payload && Array.isArray(payload.embryos)) ? payload.embryos : [];
+        // Recompute the frame so newly-arrived embryos are always in view.
+        // computeViewBox() returns true when the bounds shifted (incl. the
+        // first-ever compute); a wider frame needs a full redraw so grid/zones/
+        // axes track the new bounds, otherwise just repaint the embryo layer.
+        if (computeViewBox()) {
+            renderMap();
+        } else {
+            renderEmbryos();
+        }
+    }
+
     // =====================================================================
     // Properties table (Details view)
     // =====================================================================
@@ -334,6 +505,18 @@ const DevicesManager = (function () {
         if (_lastXY) {
             xMin = Math.min(xMin, _lastXY.X); xMax = Math.max(xMax, _lastXY.X);
             yMin = Math.min(yMin, _lastXY.Y); yMax = Math.max(yMax, _lastXY.Y);
+        }
+        // Always frame the marked embryos — they can sit well outside the fence
+        // box / current stage position (e.g. SAM detections hundreds of µm away),
+        // and omitting them clips them to the map edge (looks like a wrong
+        // position even though their coords are correct).
+        if (_embryos && _embryos.length) {
+            _embryos.forEach(emb => {
+                const xy = embryoResolvedXY(emb);
+                if (!xy) return;
+                xMin = Math.min(xMin, xy.x); xMax = Math.max(xMax, xy.x);
+                yMin = Math.min(yMin, xy.y); yMax = Math.max(yMax, xy.y);
+            });
         }
         if (!isFinite(xMin) || !isFinite(yMin)) {
             xMin = -100; xMax = 100; yMin = -100; yMax = 100;
@@ -529,9 +712,16 @@ const DevicesManager = (function () {
     // "Forbidden" is implicit: paint the whole viewport with the red hatch
     // pattern. The optimal zone rect paints ABOVE this so the operator's safe
     // window looks carved out of a hatched danger envelope.
+    //
+    // Only paint the red envelope when we actually KNOW the safe window
+    // (_optimalBox, from XYStage fence telemetry). With no working-region data —
+    // device layer down, disconnected, or pre-calibration — an all-red map reads
+    // as "everything is off-limits" when the truth is "no position data yet".
+    // In that case leave a neutral grid instead of an alarming red field.
     function renderBeyond() {
         if (!_mapBeyond || !_viewBox) return;
         _mapBeyond.innerHTML = '';
+        if (!_optimalBox) return;   // no fence data → neutral empty-state, not red
         const { xMin, xMax, yMin, yMax } = _viewBox;
         const span = Math.max(xMax - xMin, yMax - yMin);
         const tile = Math.max(8, span / 50);
@@ -744,6 +934,215 @@ const DevicesManager = (function () {
         return Math.round(v).toString();
     }
 
+    // =====================================================================
+    // Embryo waypoints
+    // =====================================================================
+
+    // "embryo_007" / "embryo_7" -> 7. Falls back to a 1-based index from the
+    // caller so the label always shows *something*, even for stray ids.
+    function embryoLabelText(id, fallbackIndex) {
+        const m = id && String(id).match(/(\d+)/);
+        if (m) {
+            const n = parseInt(m[1], 10);
+            if (Number.isFinite(n)) return String(n);
+        }
+        return String(fallbackIndex + 1);
+    }
+
+    // Resolve XY for rendering — fine if SPIM-aligned, else coarse. Returns
+    // null when neither stage carries usable values so the entry is skipped
+    // (e.g. an embryo whose detection record came in malformed).
+    function embryoResolvedXY(emb) {
+        const f = emb && emb.position_fine;
+        if (f && Number.isFinite(f.x) && Number.isFinite(f.y)) return { x: f.x, y: f.y };
+        const c = emb && emb.position_coarse;
+        if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) return { x: c.x, y: c.y };
+        return null;
+    }
+
+    function renderEmbryos() {
+        if (!_mapEmbryos || !_viewBox) return;
+        _mapEmbryos.innerHTML = '';
+        if (!_embryos || !_embryos.length) return;
+        const span = Math.max(_viewBox.xMax - _viewBox.xMin,
+                              _viewBox.yMax - _viewBox.yMin);
+        const radius = span * 0.012;
+        const fontSize = span * 0.015;
+
+        _embryos.forEach((emb, i) => {
+            const xy = embryoResolvedXY(emb);
+            if (!xy) return;
+
+            const isFine = !!emb.has_fine_position;
+            const isSelected = _selectedEmbryoId !== null
+                            && emb.id === _selectedEmbryoId;
+
+            // Wrap circle + label in a group so a single closest() lookup
+            // finds the embryo regardless of which child the click hit.
+            const group = document.createElementNS(SVG_NS, 'g');
+            group.setAttribute('class',
+                'devices-embryo-group' + (isSelected ? ' devices-embryo-selected' : ''));
+            group.setAttribute('data-embryo-id', emb.id || '');
+            group.setAttribute('data-embryo-stage', isFine ? 'fine' : 'coarse');
+
+            const circle = document.createElementNS(SVG_NS, 'circle');
+            circle.setAttribute('cx', xy.x);
+            circle.setAttribute('cy', svgY(xy.y));
+            circle.setAttribute('r', radius);
+            circle.setAttribute('class',
+                isFine ? 'devices-embryo-disc' : 'devices-embryo-ring');
+            group.appendChild(circle);
+
+            const label = document.createElementNS(SVG_NS, 'text');
+            label.setAttribute('x', xy.x);
+            label.setAttribute('y', svgY(xy.y));
+            label.setAttribute('class', 'devices-embryo-label');
+            label.setAttribute('font-size', fontSize);
+            label.textContent = embryoLabelText(emb.id, i);
+            group.appendChild(label);
+
+            _mapEmbryos.appendChild(group);
+        });
+    }
+
+    // ---- Map-side edit interactions ------------------------------------
+    // Convert a pointer event's client coords into stage µm. SVG y axis is
+    // positive-down and stage y is positive-up, so the y component is
+    // negated to match the convention used elsewhere in this module.
+    function eventToStageXY(event) {
+        if (!_mapSvg || !_mapSvg.getScreenCTM) return null;
+        const ctm = _mapSvg.getScreenCTM();
+        if (!ctm) return null;
+        const pt = _mapSvg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        const local = pt.matrixTransform(ctm.inverse());
+        return { x: local.x, y: -local.y };
+    }
+
+    function findEmbryoIdAt(target) {
+        if (!target) return null;
+        const node = target.closest && target.closest('[data-embryo-id]');
+        return node ? node.getAttribute('data-embryo-id') : null;
+    }
+
+    function embryoById(id) {
+        return _embryos.find(e => e.id === id) || null;
+    }
+
+    function embryoNumberFor(emb) {
+        return embryoLabelText(emb.id, _embryos.indexOf(emb));
+    }
+
+    function setSelectedEmbryo(id) {
+        if (_selectedEmbryoId === id) return;
+        _selectedEmbryoId = id;
+        renderEmbryos();
+    }
+
+    function clearSelection() {
+        if (_selectedEmbryoId === null) return;
+        _selectedEmbryoId = null;
+        renderEmbryos();
+    }
+
+    async function attemptMoveSelected(targetStage) {
+        const id = _selectedEmbryoId;
+        if (!id) return;
+        const emb = embryoById(id);
+        if (!emb) { clearSelection(); return; }
+        const cur = embryoResolvedXY(emb);
+        const num = embryoNumberFor(emb);
+        const oldStr = cur ? `(${cur.x.toFixed(1)}, ${cur.y.toFixed(1)})` : '(unknown)';
+        const newStr = `(${targetStage.x.toFixed(1)}, ${targetStage.y.toFixed(1)})`;
+        if (!window.confirm(`Move embryo ${num} from ${oldStr} to ${newStr}?`)) {
+            return;  // keep the embryo picked up so they can try again
+        }
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}/position`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x: targetStage.x, y: targetStage.y }),
+            });
+            if (!res.ok) {
+                window.alert(`Move failed (${res.status}): ${await res.text()}`);
+                return;
+            }
+            // EMBRYOS_UPDATE will arrive over the bus and refresh the layer;
+            // dropping clears the picked-up state regardless.
+            clearSelection();
+        } catch (err) {
+            console.error('move embryo:', err);
+            window.alert(`Move failed: ${err.message}`);
+        }
+    }
+
+    async function attemptDeleteSelected() {
+        const id = _selectedEmbryoId;
+        if (!id) return;
+        const emb = embryoById(id);
+        const num = emb ? embryoNumberFor(emb) : id;
+        if (!window.confirm(`Remove embryo ${num}?`)) return;
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) {
+                window.alert(`Delete failed (${res.status}): ${await res.text()}`);
+                return;
+            }
+            // The embryo is gone from the server snapshot; EMBRYOS_UPDATE
+            // will arrive and drop it from _embryos. Clear locally too.
+            _selectedEmbryoId = null;
+        } catch (err) {
+            console.error('delete embryo:', err);
+            window.alert(`Delete failed: ${err.message}`);
+        }
+    }
+
+    function onMapPointerDown(event) {
+        // Ignore non-primary buttons so right-clicks etc. don't trigger UI.
+        if (event.button !== undefined && event.button !== 0) return;
+        const id = findEmbryoIdAt(event.target);
+        if (id) {
+            setSelectedEmbryo(id);
+            return;
+        }
+        // Empty-space click: drop the picked-up embryo here.
+        if (_selectedEmbryoId !== null) {
+            const stage = eventToStageXY(event);
+            if (stage) attemptMoveSelected(stage);
+        }
+    }
+
+    function onMapKeyDown(event) {
+        // Only honour keys when the operator is actually looking at the Map:
+        // not on another top-level tab, not on the Details subview, and not
+        // typing into an input / textarea / select / contenteditable.
+        if (typeof state !== 'undefined' && typeof TABS !== 'undefined'
+                && state.tab !== TABS.DEVICES) {
+            return;
+        }
+        if (_currentView !== 'map') return;
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' ||
+                  a.tagName === 'SELECT' || a.isContentEditable)) {
+            return;
+        }
+        if (event.key === 'Escape') {
+            if (_selectedEmbryoId !== null) {
+                clearSelection();
+                event.preventDefault();
+            }
+            return;
+        }
+        if (_selectedEmbryoId === null) return;
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();  // Backspace would otherwise navigate back
+            attemptDeleteSelected();
+        }
+    }
+
     function updateMapMarker() {
         if (!_mapMarker || !_lastXY) return;
         const sx = _lastXY.X;
@@ -820,6 +1219,9 @@ const DevicesManager = (function () {
             if (_camPlaceholder) _camPlaceholder.hidden = false;
             if (_camMeta) _camMeta.textContent = 'stream off';
             if (_camStaleTimer) { clearTimeout(_camStaleTimer); _camStaleTimer = null; }
+            // Operator may have zoomed in; reset so the next stream session
+            // starts at 1× rather than inheriting a stale view.
+            resetCameraZoom();
         } else {
             _camFrameTimes = [];
             if (_camMeta) _camMeta.textContent = 'waiting…';
@@ -881,13 +1283,1131 @@ const DevicesManager = (function () {
         }
     }
 
+    // ---- Camera zoom / pan ---------------------------------------------
+    function applyCameraTransform() {
+        if (!_camImg) return;
+        _camImg.style.transform =
+            `translate(${_camTx}px, ${_camTy}px) scale(${_camZoom})`;
+        // Reticle uses an SVG transform attribute on the inner <g> instead
+        // of a CSS transform on the SVG element — same geometric effect,
+        // but the SVG renderer re-rasterises at the new zoom so the 1px
+        // strokes stay crisp instead of getting bitmap-scaled.
+        if (_camCrosshairGroup && _camStage) {
+            const rect = _camStage.getBoundingClientRect();
+            // Convert pixel-space translation to viewBox units (viewBox is
+            // 0..100 in both axes, preserveAspectRatio=none).
+            const txV = rect.width  > 0 ? (_camTx * 100) / rect.width  : 0;
+            const tyV = rect.height > 0 ? (_camTy * 100) / rect.height : 0;
+            // translate(50+tx, 50+ty) scale(zoom) translate(-50, -50) keeps
+            // the viewBox centre (50, 50) as the zoom anchor and offsets by
+            // the converted pixel translation.
+            _camCrosshairGroup.setAttribute(
+                'transform',
+                `translate(${50 + txV} ${50 + tyV}) ` +
+                `scale(${_camZoom}) ` +
+                `translate(-50 -50)`
+            );
+        }
+    }
+
+    function resetCameraZoom() {
+        _camZoom = 1;
+        _camTx = 0;
+        _camTy = 0;
+        applyCameraTransform();
+        if (_camStage) _camStage.classList.remove('camera-zoomed', 'camera-panning');
+    }
+
+    // Keep at least the image centre within the visible window so the
+    // operator can't accidentally pan the entire frame off-screen. At
+    // zoom 1 this collapses to (0, 0).
+    function clampCameraPan() {
+        if (!_camStage) return;
+        const rect = _camStage.getBoundingClientRect();
+        const maxX = (rect.width  * (_camZoom - 1)) / 2;
+        const maxY = (rect.height * (_camZoom - 1)) / 2;
+        _camTx = Math.max(-maxX, Math.min(maxX, _camTx));
+        _camTy = Math.max(-maxY, Math.min(maxY, _camTy));
+    }
+
+    function onCameraWheel(event) {
+        if (!_camStage) return;
+        // Always preventDefault so the page doesn't scroll under the
+        // operator while they're framing a sample.
+        event.preventDefault();
+        const rect = _camStage.getBoundingClientRect();
+        const cx = event.clientX - rect.left - rect.width  / 2;
+        const cy = event.clientY - rect.top  - rect.height / 2;
+        const oldZoom = _camZoom;
+        const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
+        const newZoom = Math.max(_CAM_ZOOM_MIN,
+                                 Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
+        if (newZoom === oldZoom) return;
+
+        // Keep the image point under the cursor anchored under the cursor
+        // across the zoom: cursor_new = cursor_old after the transform
+        // change, which means newT = cursor - (cursor - oldT) * (new/old).
+        const ratio = newZoom / oldZoom;
+        _camTx = cx - (cx - _camTx) * ratio;
+        _camTy = cy - (cy - _camTy) * ratio;
+        _camZoom = newZoom;
+
+        if (Math.abs(_camZoom - 1) < 0.001) {
+            resetCameraZoom();
+            return;
+        }
+        clampCameraPan();
+        applyCameraTransform();
+        _camStage.classList.add('camera-zoomed');
+    }
+
+    function onCameraPointerDown(event) {
+        if (event.button !== 0) return;
+        if (_camZoom <= 1) return;
+        _camPanLast = { x: event.clientX, y: event.clientY };
+        try { _camStage.setPointerCapture(event.pointerId); } catch (_) {}
+        _camStage.classList.add('camera-panning');
+        event.preventDefault();
+    }
+
+    function onCameraPointerMove(event) {
+        if (!_camPanLast) return;
+        _camTx += event.clientX - _camPanLast.x;
+        _camTy += event.clientY - _camPanLast.y;
+        _camPanLast = { x: event.clientX, y: event.clientY };
+        clampCameraPan();
+        applyCameraTransform();
+    }
+
+    function onCameraPointerEnd(event) {
+        if (!_camPanLast) return;
+        _camPanLast = null;
+        try { _camStage.releasePointerCapture(event.pointerId); } catch (_) {}
+        if (_camStage) _camStage.classList.remove('camera-panning');
+    }
+
+    function onCameraDoubleClick(event) {
+        if (_camZoom !== 1 || _camTx !== 0 || _camTy !== 0) {
+            event.preventDefault();
+            resetCameraZoom();
+        }
+    }
+
+    function toggleCameraExpand() {
+        if (!_camPanel) return;
+        const expanded = _camPanel.classList.toggle('expanded');
+        if (_camExpand) {
+            _camExpand.classList.toggle('active', expanded);
+            _camExpand.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+            _camExpand.title = expanded ? 'Shrink view' : 'Enlarge view';
+            _camExpand.textContent = expanded ? '⤡' : '⤢';
+        }
+    }
+
     function setupCameraWiring() {
         if (!_camToggle) return;
         _camToggle.addEventListener('click', toggleCameraStream);
+        if (_camExpand) _camExpand.addEventListener('click', toggleCameraExpand);
         applyCameraState(false);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', handleCameraFrame);
         }
+        // Camera zoom/pan. wheel needs passive:false so we can preventDefault
+        // and stop the page from scrolling beneath the FOV.
+        if (_camStage) {
+            _camStage.addEventListener('wheel', onCameraWheel, { passive: false });
+            _camStage.addEventListener('pointerdown', onCameraPointerDown);
+            _camStage.addEventListener('pointermove', onCameraPointerMove);
+            _camStage.addEventListener('pointerup', onCameraPointerEnd);
+            _camStage.addEventListener('pointercancel', onCameraPointerEnd);
+            _camStage.addEventListener('dblclick', onCameraDoubleClick);
+        }
+    }
+
+    // =====================================================================
+    // Lightsheet live panel (Manual view)
+    // =====================================================================
+
+    /** Gate ALL lasers off via the Laser "ALL OFF" config-group preset.
+     *  Updates the indicator span from the actual API result (not a static label).
+     *  Fire-and-forget safe — failure shows a warning, never throws. */
+    async function setLaserOff() {
+        cacheDom();
+        try {
+            const res = await fetch('/api/devices/laser/off', { method: 'POST' });
+            if (_lsLaserStatus) {
+                _lsLaserStatus.textContent = res.ok ? 'OFF (brightfield)' : 'warning: state unknown';
+            }
+            if (res.ok) _setLaserToggleState(false);
+        } catch (err) {
+            if (_lsLaserStatus) _lsLaserStatus.textContent = 'warning: state unknown';
+            console.debug('laser off call failed:', err);
+        }
+    }
+
+    /** Fetch laser config-group presets and populate the #devices-laser-preset select.
+     *  Selects "ALL OFF" by default (entry safety preset).
+     *  Wires the change handler to POST the selected preset.
+     *  Fire-and-forget safe — failure leaves the fallback "ALL OFF" option in place. */
+    async function populateLaserPresets() {
+        cacheDom();
+        if (!_lsLaserPreset) return;
+        try {
+            const res = await fetch('/api/devices/laser/configs');
+            if (!res.ok) return;
+            const data = await res.json();
+            // data may be an array of preset names or {configs: [...]}
+            const presets = Array.isArray(data) ? data : (data.configs || []);
+            if (!presets.length) return;
+            // Rebuild option list
+            _lsLaserPreset.innerHTML = '';
+            for (const name of presets) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                _lsLaserPreset.appendChild(opt);
+            }
+            // Default to "ALL OFF" — entry safety state
+            if (presets.includes('ALL OFF')) _lsLaserPreset.value = 'ALL OFF';
+            // Wire change handler — only POST if laser is currently ON; if OFF, it's
+            // just a selection that will be activated when the toggle is pressed.
+            _lsLaserPreset.onchange = () => { if (_lsLaserOn) setLaserPreset(_lsLaserPreset.value); };
+        } catch (err) {
+            console.debug('laser preset fetch failed:', err);
+        }
+    }
+
+    /** Fetch SPIM camera roles and show the Side A/B selector if camera_b is present.
+     *  Called on manual-view entry.  Hides the selector on single-camera rigs.
+     *  Fire-and-forget safe — failure leaves the selector hidden (safe default). */
+    async function populateCameraRoles() {
+        cacheDom();
+        const group = document.getElementById('devices-ls-side-group');
+        try {
+            const res = await fetch('/api/devices/cameras');
+            if (!res.ok) return;
+            const data = await res.json();
+            // data may be {cameras: [...]} or a raw array
+            const cameras = Array.isArray(data) ? data : (data.cameras || []);
+            const hasSideB = cameras.includes('B');
+            if (group) group.style.display = hasSideB ? '' : 'none';
+            if (_lsSideSelect && hasSideB) {
+                _lsSideSelect.onchange = () => {
+                    _lsSide = _lsSideSelect.value;
+                    postLightsheetParams();
+                };
+            }
+        } catch (err) {
+            console.debug('camera roles fetch failed:', err);
+        }
+    }
+
+    /** POST a named laser preset to the device layer.
+     *  Updates the status indicator on success.
+     *  Fire-and-forget safe — failure shows a warning, never throws. */
+    async function setLaserPreset(config) {
+        cacheDom();
+        if (!config) return;
+        try {
+            const res = await fetch('/api/devices/laser/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config }),
+            });
+            if (_lsLaserStatus) {
+                _lsLaserStatus.textContent = res.ok ? config : 'warning: state unknown';
+            }
+            if (res.ok) _setLaserToggleState(config !== 'ALL OFF');
+            if (!res.ok) console.debug('laser preset set failed:', await res.text());
+        } catch (err) {
+            if (_lsLaserStatus) _lsLaserStatus.textContent = 'warning: state unknown';
+            console.debug('laser preset set failed:', err);
+        }
+    }
+
+    // =====================================================================
+    // Timelapse config form (Manual view)
+    // =====================================================================
+
+    // ── Accordion section summary builders ───────────────────────────────────
+
+    function _tlSchedSummary() {
+        const interval = (_tlInterval && _tlInterval.value) ? _tlInterval.value : '120';
+        const stop     = (_tlStop    && _tlStop.value)     ? _tlStop.value     : 'manual';
+        const condVal  = (_tlCondVal && _tlCondVal.value)  ? _tlCondVal.value  : '10';
+        if (stop === 'timepoints') return `${interval} s · ${condVal} frames`;
+        if (stop === 'duration')   return `${interval} s · ${condVal} h`;
+        return `${interval} s · manual`;
+    }
+
+    function _tlTargetsSummary() {
+        const embryos  = (_tlEmbryos && _tlEmbryos.value.trim())
+            ? _tlEmbryos.value.trim()
+            : 'all';
+        const modeEl   = _tlMode;
+        const modeText = (modeEl && modeEl.value)
+            ? modeEl.options[modeEl.selectedIndex].text
+            : 'none';
+        return `${embryos} · ${modeText}`;
+    }
+
+    function _tlGeomSummary() {
+        const slices   = (_tlSlices   && _tlSlices.value)   ? _tlSlices.value   : '50';
+        const exposure = (_tlExposure && _tlExposure.value) ? _tlExposure.value : '10';
+        const laser    = (_tlLaser    && _tlLaser.value)    ? _tlLaser.value    : 'ALL OFF';
+        return `${slices} sl · ${exposure} ms · ${laser}`;
+    }
+
+    /** Update a section's header active state and summary text, then sync the
+     *  outer panel dot and the start button.  sec = 'sched'|'targets'|'geom'. */
+    function _tlUpdateSection(sec) {
+        const head    = document.getElementById(`devices-tlacc-${sec}-head`);
+        const summary = document.getElementById(`devices-tlacc-${sec}-sum`);
+        const touched = _tlTouched[sec];
+
+        if (head)    head.classList.toggle('is-active', touched);
+        if (summary) {
+            summary.hidden = !touched;
+            if (touched) {
+                if      (sec === 'sched')   summary.textContent = _tlSchedSummary();
+                else if (sec === 'targets') summary.textContent = _tlTargetsSummary();
+                else if (sec === 'geom')    summary.textContent = _tlGeomSummary();
+            }
+        }
+
+        // Outer panel dot + start button "ready" state
+        const anyActive = Object.values(_tlTouched).some(Boolean);
+        const outerDot  = document.getElementById('devices-tl-outer-dot');
+        if (outerDot) outerDot.classList.toggle('is-active', anyActive);
+        if (_tlStart) _tlStart.classList.toggle('is-ready', anyActive);
+    }
+
+    /** Wire the timelapse panel: outer collapsible toggle, accordion section
+     *  toggles, touch listeners, and the submit button.
+     *  Safe to call multiple times (re-assigns handlers idempotently). */
+    function initTlForm() {
+        cacheDom();
+
+        // Reset touched state on each init (re-entering the manual view = fresh)
+        _tlTouched = { sched: false, targets: false, geom: false };
+        // Clear any leftover active-state visuals from a previous visit
+        ['sched', 'targets', 'geom'].forEach(sec => _tlUpdateSection(sec));
+
+        // ── Outer collapsible toggle ──────────────────────────────────────────
+        if (_tlToggle && _tlBody) {
+            _tlToggle.onclick = () => {
+                const open = _tlBody.hidden;
+                _tlBody.hidden = !open;
+                _tlToggle.setAttribute('aria-expanded', String(open));
+                const arrow = _tlToggle.querySelector('.ls-collapsible-arrow');
+                if (arrow) arrow.textContent = open ? '▼' : '▶';
+            };
+        }
+
+        // ── Accordion section toggles ─────────────────────────────────────────
+        ['sched', 'targets', 'geom'].forEach(sec => {
+            const head = document.getElementById(`devices-tlacc-${sec}-head`);
+            const body = document.getElementById(`devices-tlacc-${sec}-body`);
+            if (!head || !body) return;
+            head.onclick = () => {
+                const open = body.hidden;
+                body.hidden = !open;
+                head.setAttribute('aria-expanded', String(open));
+                const arrow = head.querySelector('.ls-acc-arrow');
+                if (arrow) arrow.textContent = open ? '▼' : '▶';
+            };
+        });
+
+        // ── Touch listeners ───────────────────────────────────────────────────
+        const markTouched = sec => {
+            _tlTouched[sec] = true;
+            _tlUpdateSection(sec);
+        };
+
+        // Schedule — interval and stop condition drive summary; cond-row visibility unchanged
+        [_tlInterval, _tlCondVal].forEach(el => {
+            if (el) el.addEventListener('input', () => markTouched('sched'));
+        });
+        if (_tlStop) {
+            _tlStop.addEventListener('change', () => {
+                const v = _tlStop.value;
+                const show = v === 'timepoints' || v === 'duration';
+                if (_tlCondRow)   _tlCondRow.hidden = !show;
+                if (_tlCondLabel) _tlCondLabel.textContent = v === 'duration' ? 'Hours' : 'Count';
+                markTouched('sched');
+            });
+        }
+
+        // Targets
+        if (_tlEmbryos) _tlEmbryos.addEventListener('input',  () => markTouched('targets'));
+        if (_tlMode)    _tlMode.addEventListener('change',    () => markTouched('targets'));
+
+        // Volume geometry
+        [_tlSlices, _tlExposure, _tlGalvoAmp, _tlGalvoCtr, _tlPiezoAmp, _tlPiezoCtr].forEach(el => {
+            if (el) el.addEventListener('input', () => markTouched('geom'));
+        });
+        if (_tlLaser) _tlLaser.addEventListener('change', () => markTouched('geom'));
+
+        // ── Submit ────────────────────────────────────────────────────────────
+        if (_tlStart) _tlStart.onclick = startTimelapse;
+    }
+
+    /** Populate timelapse volume-geometry defaults from GET /api/devices/scan_geometry,
+     *  and populate the laser preset select from GET /api/devices/laser/configs.
+     *  Fire-and-forget safe — failure leaves form-coded defaults in place. */
+    async function populateTlDefaults() {
+        cacheDom();
+        // Geometry defaults
+        try {
+            const res = await fetch('/api/devices/scan_geometry');
+            if (res.ok) {
+                const data = await res.json();
+                const scan = data.scan || {};
+                if (_tlSlices    && scan.num_slices    != null) _tlSlices.value    = scan.num_slices;
+                if (_tlExposure  && scan.exposure_ms   != null) _tlExposure.value  = scan.exposure_ms;
+                if (_tlGalvoAmp  && scan.galvo_amplitude_deg != null) _tlGalvoAmp.value = scan.galvo_amplitude_deg;
+                if (_tlGalvoCtr  && scan.galvo_center_deg    != null) _tlGalvoCtr.value = scan.galvo_center_deg;
+                if (_tlPiezoAmp  && scan.piezo_amplitude_um  != null) _tlPiezoAmp.value = scan.piezo_amplitude_um;
+                if (_tlPiezoCtr  && scan.piezo_center_um     != null) _tlPiezoCtr.value = scan.piezo_center_um;
+            }
+        } catch (err) {
+            console.debug('tl scan_geometry fetch failed:', err);
+        }
+        // Laser presets — reuse the shared endpoint; mirror populateLaserPresets()
+        if (!_tlLaser) return;
+        try {
+            const res = await fetch('/api/devices/laser/configs');
+            if (!res.ok) return;
+            const data = await res.json();
+            const presets = Array.isArray(data) ? data : (data.configs || []);
+            if (!presets.length) return;
+            _tlLaser.innerHTML = '';
+            for (const name of presets) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                _tlLaser.appendChild(opt);
+            }
+            if (presets.includes('ALL OFF')) _tlLaser.value = 'ALL OFF';
+        } catch (err) {
+            console.debug('tl laser configs fetch failed:', err);
+        }
+    }
+
+    /** Gather form values, POST to /api/devices/timelapse/start, show result. */
+    async function startTimelapse() {
+        cacheDom();
+        if (!_tlStart) return;
+        _tlStart.disabled = true;
+
+        // Build payload
+        const interval = parseFloat(_tlInterval ? _tlInterval.value : '120') || 120;
+        const stop_condition = _tlStop ? _tlStop.value : 'manual';
+        const condRaw = _tlCondVal ? _tlCondVal.value : '';
+        const condition_value = condRaw ? parseInt(condRaw, 10) : null;
+        const embryoRaw = _tlEmbryos ? _tlEmbryos.value.trim() : '';
+        const embryo_ids = embryoRaw
+            ? embryoRaw.split(',').map(s => s.trim()).filter(Boolean)
+            : null;
+        const monitoring_mode = _tlMode ? (_tlMode.value || null) : null;
+
+        const payload = {
+            interval_seconds: interval,
+            stop_condition,
+            embryo_ids,
+            condition_value,
+            monitoring_mode,
+            num_slices:      _tlSlices    ? parseInt(_tlSlices.value,    10) : 50,
+            exposure_ms:     _tlExposure  ? parseFloat(_tlExposure.value)    : 10.0,
+            galvo_amplitude: _tlGalvoAmp  ? parseFloat(_tlGalvoAmp.value)    : 0.5,
+            galvo_center:    _tlGalvoCtr  ? parseFloat(_tlGalvoCtr.value)    : 0.0,
+            piezo_amplitude: _tlPiezoAmp  ? parseFloat(_tlPiezoAmp.value)    : 25.0,
+            piezo_center:    _tlPiezoCtr  ? parseFloat(_tlPiezoCtr.value)    : 50.0,
+            laser_config:    _tlLaser     ? (_tlLaser.value || null)          : null,
+        };
+
+        if (_tlStatus)     _tlStatus.hidden = false;
+        if (_tlStatusText) _tlStatusText.textContent = 'Starting…';
+
+        try {
+            const res = await fetch('/api/devices/timelapse/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.ok) {
+                const msg = body.result || 'Timelapse started.';
+                if (_tlStatusText) _tlStatusText.textContent = msg;
+            } else {
+                const detail = body.detail || `error ${res.status}`;
+                if (_tlStatusText) _tlStatusText.textContent = `Error: ${detail}`;
+                console.debug('timelapse start failed:', body);
+            }
+        } catch (err) {
+            if (_tlStatusText) _tlStatusText.textContent = `Network error: ${err.message}`;
+            console.debug('timelapse start failed:', err);
+        } finally {
+            if (_tlStart) _tlStart.disabled = false;
+        }
+    }
+
+    async function toggleLightsheetStream() {
+        if (!_lsToggle) return;
+        _lsToggle.disabled = true;
+        try {
+            const starting = !_lsStreaming;
+            const endpoint = _lsStreaming
+                ? '/api/devices/lightsheet/live/stop'
+                : '/api/devices/lightsheet/live/start';
+            const res = await fetch(endpoint, { method: 'POST' });
+            if (!res.ok) {
+                const detail = await res.text();
+                console.error('Lightsheet toggle failed:', detail);
+                if (_lsMeta) _lsMeta.textContent = `error: ${res.status}`;
+                return;
+            }
+            const data = await res.json();
+            applyLightsheetState(!!data.streaming);
+            // Gate lasers off whenever live starts — brightfield-safe by default.
+            if (starting && data.streaming) setLaserOff();
+        } catch (err) {
+            console.error('Lightsheet toggle failed:', err);
+            if (_lsMeta) _lsMeta.textContent = `error: ${err}`;
+        } finally {
+            _lsToggle.disabled = false;
+        }
+    }
+
+    function applyLightsheetState(streaming) {
+        _lsStreaming = streaming;
+        if (_lsToggle) {
+            // Constant "Live" label; the .active class + status dot show whether
+            // the stream is currently running (muted = off, green glow = live).
+            _lsToggle.textContent = 'Live';
+            _lsToggle.classList.toggle('active', streaming);
+        }
+        if (_lsLed) {
+            _lsLed.classList.toggle('live', streaming);
+            _lsLed.classList.remove('stale');
+        }
+        if (!streaming) {
+            _lsHasFrame = false;
+            _lsFrameTimes = [];
+            _lsPendingPayload = null;
+            _lsRenderScheduled = false;
+            if (_lsImg) _lsImg.classList.remove('has-frame');
+            if (_lsPlaceholder) _lsPlaceholder.hidden = false;
+            if (_lsMeta) _lsMeta.textContent = 'stream off';
+            if (_lsStaleTimer) { clearTimeout(_lsStaleTimer); _lsStaleTimer = null; }
+            resetLightsheetZoom();
+        } else {
+            _lsFrameTimes = [];
+            if (_lsMeta) _lsMeta.textContent = 'waiting…';
+        }
+    }
+
+    function handleLightsheetFrame(payload) {
+        if (!payload || !payload.jpeg_b64 || !_lsImg) return;
+
+        // Lightweight bookkeeping runs per arriving frame so the FPS / live
+        // indicator reflects the true incoming rate.
+        const now = performance.now();
+        _lsLastFrameTs = Date.now();
+        _lsFrameTimes.push(now);
+        if (_lsFrameTimes.length > _LS_FPS_WINDOW) _lsFrameTimes.shift();
+        if (_lsLed) {
+            _lsLed.classList.add('live');
+            _lsLed.classList.remove('stale');
+        }
+        if (_lsMeta) {
+            const shape = payload.shape || [];
+            const dims = shape.length === 2 ? `${shape[1]}×${shape[0]}` : '';
+            const fps = computeLightsheetFps();
+            _lsMeta.textContent = dims
+                ? `${dims}  ·  ${fps != null ? fps.toFixed(1) + ' fps' : '…'}`
+                : (fps != null ? `${fps.toFixed(1)} fps` : 'live');
+        }
+        scheduleLightsheetStaleCheck();
+
+        // Expensive path (decode + GPU texture upload) is throttled: keep only
+        // the newest frame and coalesce paints to one per animation frame.
+        _lsPendingPayload = payload;
+        if (!_lsRenderScheduled) {
+            _lsRenderScheduled = true;
+            requestAnimationFrame(renderLightsheetFrame);
+        }
+    }
+
+    function renderLightsheetFrame() {
+        _lsRenderScheduled = false;
+        // One decode in flight at a time; a frame mid-decode means we skip this
+        // paint and let the decode's completion reschedule if newer data exists.
+        if (_lsDecoding) return;
+        const payload = _lsPendingPayload;
+        _lsPendingPayload = null;
+        if (!payload || !_lsImg) return;
+
+        _lsDecoding = true;
+        _lsImg.src = `data:${payload.mime || 'image/jpeg'};base64,${payload.jpeg_b64}`;
+
+        const done = () => {
+            _lsDecoding = false;
+            if (!_lsHasFrame) {
+                _lsHasFrame = true;
+                _lsImg.classList.add('has-frame');
+                if (_lsPlaceholder) _lsPlaceholder.hidden = true;
+            }
+            // A newer frame may have landed during decode — paint it next frame.
+            if (_lsPendingPayload && !_lsRenderScheduled) {
+                _lsRenderScheduled = true;
+                requestAnimationFrame(renderLightsheetFrame);
+            }
+        };
+
+        // img.decode() resolves once the bitmap is ready (off the main thread),
+        // giving real backpressure. Fall back to a direct apply if unsupported.
+        if (typeof _lsImg.decode === 'function') {
+            _lsImg.decode().then(done).catch(done);
+        } else {
+            done();
+        }
+    }
+
+    function computeLightsheetFps() {
+        const n = _lsFrameTimes.length;
+        if (n < 2) return null;
+        const span = _lsFrameTimes[n - 1] - _lsFrameTimes[0];
+        if (span <= 0) return null;
+        return ((n - 1) * 1000) / span;
+    }
+
+    function scheduleLightsheetStaleCheck() {
+        if (_lsStaleTimer) clearTimeout(_lsStaleTimer);
+        _lsStaleTimer = setTimeout(() => {
+            const age = (Date.now() - _lsLastFrameTs) / 1000;
+            if (_lsMeta) _lsMeta.textContent = `last frame ${age.toFixed(1)}s ago`;
+            if (_lsLed) _lsLed.classList.add('stale');
+        }, 1500);
+    }
+
+    async function syncInitialLightsheetState() {
+        try {
+            const res = await fetch('/api/devices/lightsheet/live/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            applyLightsheetState(!!data.streaming);
+        } catch (err) {
+            console.debug('lightsheet status check failed:', err);
+        }
+    }
+
+    // ---- Lightsheet zoom / pan (mirrors camera zoom/pan) ----------------
+    function applyLightsheetTransform() {
+        if (!_lsImg) return;
+        _lsImg.style.transform =
+            `translate(${_lsTx}px, ${_lsTy}px) scale(${_lsZoom})`;
+    }
+
+    function resetLightsheetZoom() {
+        _lsZoom = 1;
+        _lsTx = 0;
+        _lsTy = 0;
+        applyLightsheetTransform();
+        if (_lsStage) _lsStage.classList.remove('camera-zoomed', 'camera-panning');
+    }
+
+    function clampLightsheetPan() {
+        if (!_lsStage) return;
+        const rect = _lsStage.getBoundingClientRect();
+        const maxX = (rect.width  * (_lsZoom - 1)) / 2;
+        const maxY = (rect.height * (_lsZoom - 1)) / 2;
+        _lsTx = Math.max(-maxX, Math.min(maxX, _lsTx));
+        _lsTy = Math.max(-maxY, Math.min(maxY, _lsTy));
+    }
+
+    function onLightsheetWheel(event) {
+        if (!_lsStage) return;
+        event.preventDefault();
+        const rect = _lsStage.getBoundingClientRect();
+        const cx = event.clientX - rect.left - rect.width  / 2;
+        const cy = event.clientY - rect.top  - rect.height / 2;
+        const oldZoom = _lsZoom;
+        const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
+        const newZoom = Math.max(_CAM_ZOOM_MIN, Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
+        if (newZoom === oldZoom) return;
+        const ratio = newZoom / oldZoom;
+        _lsTx = cx - (cx - _lsTx) * ratio;
+        _lsTy = cy - (cy - _lsTy) * ratio;
+        _lsZoom = newZoom;
+        if (Math.abs(_lsZoom - 1) < 0.001) { resetLightsheetZoom(); return; }
+        clampLightsheetPan();
+        applyLightsheetTransform();
+        _lsStage.classList.add('camera-zoomed');
+    }
+
+    function onLightsheetPointerDown(event) {
+        if (event.button !== 0) return;
+        if (_lsZoom <= 1) return;
+        _lsPanLast = { x: event.clientX, y: event.clientY };
+        try { _lsStage.setPointerCapture(event.pointerId); } catch (_) {}
+        _lsStage.classList.add('camera-panning');
+        event.preventDefault();
+    }
+
+    function onLightsheetPointerMove(event) {
+        if (!_lsPanLast) return;
+        _lsTx += event.clientX - _lsPanLast.x;
+        _lsTy += event.clientY - _lsPanLast.y;
+        _lsPanLast = { x: event.clientX, y: event.clientY };
+        clampLightsheetPan();
+        applyLightsheetTransform();
+    }
+
+    function onLightsheetPointerEnd(event) {
+        if (!_lsPanLast) return;
+        _lsPanLast = null;
+        try { _lsStage.releasePointerCapture(event.pointerId); } catch (_) {}
+        if (_lsStage) _lsStage.classList.remove('camera-panning');
+    }
+
+    function onLightsheetDoubleClick(event) {
+        if (_lsZoom !== 1 || _lsTx !== 0 || _lsTy !== 0) {
+            event.preventDefault();
+            resetLightsheetZoom();
+        }
+    }
+
+    // ---- Lightsheet live params (debounced) -----------------------------
+    function postLightsheetParams() {
+        fetch('/api/devices/lightsheet/live/params', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ galvo: _lsGalvo, piezo: _lsPiezo, exposure: _lsExposure, side: _lsSide }),
+        }).catch(err => console.debug('lightsheet params post failed:', err));
+    }
+
+    function scheduleLightsheetParamPost() {
+        if (_lsParamTimer) clearTimeout(_lsParamTimer);
+        _lsParamTimer = setTimeout(postLightsheetParams, 120);
+    }
+
+    function onGalvoInput(src) {
+        const v = parseFloat(src.value);
+        if (isNaN(v)) return;
+        _lsGalvo = v;
+        // Sync the sibling control
+        if (src === _lsGalvoSlider && _lsGalvoNum) _lsGalvoNum.value = v;
+        if (src === _lsGalvoNum   && _lsGalvoSlider) _lsGalvoSlider.value = v;
+        scheduleLightsheetParamPost();
+    }
+
+    function onPiezoInput(src) {
+        const v = parseFloat(src.value);
+        if (isNaN(v)) return;
+        _lsPiezo = v;
+        if (src === _lsPiezoSlider && _lsPiezoNum) _lsPiezoNum.value = v;
+        if (src === _lsPiezoNum   && _lsPiezoSlider) _lsPiezoSlider.value = v;
+        scheduleLightsheetParamPost();
+    }
+
+    function onExposureInput() {
+        const v = parseFloat(_lsExposureNum && _lsExposureNum.value);
+        if (isNaN(v) || v < 1) return;
+        _lsExposure = v;
+        scheduleLightsheetParamPost();
+    }
+
+    // ---- Illumination toggles -------------------------------------------
+    async function postLedPreset(preset) {
+        try {
+            await fetch('/api/devices/led/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: preset }),
+            });
+        } catch (err) { console.debug('LED preset failed:', err); }
+    }
+
+    /** Single LED toggle — mirrors Cam LED / Room Light aria-pressed pattern.
+     *  Flips between Open (active) and Closed (inactive/safe default). */
+    async function toggleLedPreset() {
+        _lsLedIsOpen = !_lsLedIsOpen;
+        if (_lsLedToggle) {
+            _lsLedToggle.classList.toggle('ls-illum-btn--active', _lsLedIsOpen);
+            _lsLedToggle.setAttribute('aria-pressed', _lsLedIsOpen ? 'true' : 'false');
+            _lsLedToggle.textContent = _lsLedIsOpen ? 'LED: Open' : 'LED: Closed';
+        }
+        await postLedPreset(_lsLedIsOpen ? 'Open' : 'Closed');
+    }
+
+    /** Update laser toggle button + dot to reflect on/off state.
+     *  Called by setLaserOff() and setLaserPreset() after a successful API call. */
+    function _setLaserToggleState(on) {
+        _lsLaserOn = on;
+        if (_lsLaserToggle) {
+            _lsLaserToggle.classList.toggle('ls-illum-btn--active', on);
+            _lsLaserToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+            _lsLaserToggle.textContent = on ? 'Laser: ON' : 'Laser: OFF';
+        }
+        const dot = document.querySelector('.ls-laser-dot');
+        if (dot) dot.classList.toggle('ls-laser-dot--on', on);
+    }
+
+    /** Laser on/off toggle — OFF fires laser/off; ON applies the selected preset.
+     *  If selected preset is "ALL OFF", picks the first non-"ALL OFF" option.
+     *  Entry safety: starts OFF (setLaserOff fires on manual-view entry). */
+    async function toggleLaser() {
+        if (_lsLaserOn) {
+            await setLaserOff();
+        } else {
+            let config = _lsLaserPreset ? _lsLaserPreset.value : null;
+            if (!config || config === 'ALL OFF') {
+                const opts = _lsLaserPreset ? Array.from(_lsLaserPreset.options) : [];
+                const first = opts.find(o => o.value !== 'ALL OFF');
+                if (first) {
+                    config = first.value;
+                    _lsLaserPreset.value = config;
+                } else {
+                    if (_lsLaserStatus) _lsLaserStatus.textContent = 'select a laser line first';
+                    return;
+                }
+            }
+            await setLaserPreset(config);
+        }
+    }
+
+    async function toggleManualRoomLight() {
+        const nextState = _roomLightState === 'on' ? 'off' : 'on';
+        if (_lsRoomLightBtn) {
+            _lsRoomLightBtn.classList.toggle('ls-illum-btn--active', nextState === 'on');
+            _lsRoomLightBtn.setAttribute('aria-pressed', nextState === 'on' ? 'true' : 'false');
+        }
+        try {
+            const res = await fetch('/api/devices/room_light/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: nextState }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                _roomLightState = data.state || nextState;
+                if (_lsRoomLightBtn) {
+                    const on = _roomLightState === 'on';
+                    _lsRoomLightBtn.classList.toggle('ls-illum-btn--active', on);
+                    _lsRoomLightBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+                }
+            }
+        } catch (err) { console.debug('manual room light toggle failed:', err); }
+    }
+
+    // ---- Acquire --------------------------------------------------------
+    async function runLightsheetAcquire(mode) {
+        const btn = mode === 'burst' ? _lsBurstBtn : _lsSnapVolBtn;
+        if (btn) { btn.disabled = true; btn.textContent = 'acquiring…'; }
+        try {
+            let res;
+            if (mode === 'burst') {
+                res = await fetch('/api/devices/acquire/burst', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frames: 10, mode: 'brightfield',
+                                          num_slices: 50, exposure_ms: _lsExposure,
+                                          laser_config: 'ALL OFF',
+                                          piezo_center: _lsPiezo,
+                                          galvo_center: _lsGalvo }),
+                });
+            } else {
+                res = await fetch('/api/devices/acquire/volume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ num_slices: 50, exposure_ms: _lsExposure,
+                                          laser_config: 'ALL OFF',
+                                          piezo_center: _lsPiezo,
+                                          galvo_center: _lsGalvo }),
+                });
+            }
+            if (!res.ok) {
+                console.error('acquire failed:', res.status, await res.text());
+                return;
+            }
+            const data = await res.json();
+            if (_lsLastcap) _lsLastcap.hidden = false;
+            if (_lsLastcapRef) {
+                _lsLastcapRef.textContent = data.volume_path || data.path || data.id || 'done';
+            }
+            // Show confirmation toast — no inline preview to keep manual mode uncluttered
+            if (typeof showGentlyToast === 'function') {
+                const label = mode === 'burst' ? 'Burst acquired' : 'Volume acquired';
+                showGentlyToast(label, 'View in Gallery', () => {
+                    if (typeof switchTab === 'function' && typeof TABS !== 'undefined') {
+                        switchTab(TABS.GALLERY);
+                    }
+                });
+            }
+        } catch (err) {
+            console.error('acquire error:', err);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = mode === 'burst' ? 'Burst' : 'Snap Volume';
+            }
+        }
+    }
+
+    // ---- Temperature set (rail copy, delegates to same API) -------------
+    async function setLightsheetTemperature() {
+        if (!_lsTempInput) return;
+        const target = parseFloat(_lsTempInput.value);
+        if (isNaN(target) || target < 0 || target > 99.9) return;
+        try {
+            await fetch('/api/devices/temperature/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_c: target }),
+            });
+        } catch (err) { console.debug('ls temp set failed:', err); }
+    }
+
+    function setupManualWiring() {
+        if (!_lsToggle) return;
+        _lsToggle.addEventListener('click', toggleLightsheetStream);
+        applyLightsheetState(false);
+
+        // Param controls — slider ↔ number sync + debounced POST
+        if (_lsGalvoSlider) _lsGalvoSlider.addEventListener('input', () => onGalvoInput(_lsGalvoSlider));
+        if (_lsGalvoNum)    _lsGalvoNum.addEventListener('input',    () => onGalvoInput(_lsGalvoNum));
+        if (_lsPiezoSlider) _lsPiezoSlider.addEventListener('input', () => onPiezoInput(_lsPiezoSlider));
+        if (_lsPiezoNum)    _lsPiezoNum.addEventListener('input',    () => onPiezoInput(_lsPiezoNum));
+        if (_lsExposureNum) _lsExposureNum.addEventListener('input', onExposureInput);
+
+        // Illumination
+        if (_lsLedToggle)    _lsLedToggle.addEventListener('click',    toggleLedPreset);
+        if (_lsRoomLightBtn) _lsRoomLightBtn.addEventListener('click', toggleManualRoomLight);
+        if (_lsLaserToggle)  _lsLaserToggle.addEventListener('click',  toggleLaser);
+
+        // Acquire
+        if (_lsSnapVolBtn) _lsSnapVolBtn.addEventListener('click', () => runLightsheetAcquire('volume'));
+        if (_lsBurstBtn)   _lsBurstBtn.addEventListener('click',   () => runLightsheetAcquire('burst'));
+
+        // Temperature
+        if (_lsTempSet) _lsTempSet.addEventListener('click', setLightsheetTemperature);
+        if (_lsTempInput) {
+            _lsTempInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); setLightsheetTemperature(); }
+            });
+        }
+
+        // Zoom / pan
+        if (_lsStage) {
+            _lsStage.addEventListener('wheel', onLightsheetWheel, { passive: false });
+            _lsStage.addEventListener('pointerdown', onLightsheetPointerDown);
+            _lsStage.addEventListener('pointermove', onLightsheetPointerMove);
+            _lsStage.addEventListener('pointerup', onLightsheetPointerEnd);
+            _lsStage.addEventListener('pointercancel', onLightsheetPointerEnd);
+            _lsStage.addEventListener('dblclick', onLightsheetDoubleClick);
+        }
+
+        // Subscribe to LIGHTSHEET_FRAME events
+        if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.on('LIGHTSHEET_FRAME', handleLightsheetFrame);
+        }
+
+        syncInitialLightsheetState();
+    }
+
+    // =====================================================================
+    // Room-light toggle
+    // =====================================================================
+
+    function applyRoomLight(state, available) {
+        _roomLightState = state || 'unknown';
+        _roomLightAvailable = !!available;
+        if (!_roomLightToggle) return;
+        _roomLightToggle.hidden = !_roomLightAvailable;
+        _roomLightToggle.disabled = !_roomLightAvailable || _roomLightBusy;
+        const on = _roomLightState === 'on';
+        _roomLightToggle.classList.toggle('is-on', on);
+        _roomLightToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (_roomLightLabel && !_roomLightBusy) {
+            _roomLightLabel.textContent = on ? 'Room light: on'
+                : (_roomLightState === 'off' ? 'Room light: off' : 'Room light');
+        }
+    }
+
+    async function loadRoomLightStatus() {
+        if (!_roomLightToggle || _roomLightBusy) return;
+        try {
+            const res = await fetch('/api/devices/room_light/status');
+            if (!res.ok) { applyRoomLight('unknown', false); return; }
+            const data = await res.json();
+            applyRoomLight(data.state, data.available);
+        } catch (err) {
+            console.debug('room light status fetch failed:', err);
+            applyRoomLight('unknown', false);
+        }
+    }
+
+    async function toggleRoomLight() {
+        if (!_roomLightToggle || _roomLightBusy || !_roomLightAvailable) return;
+        const next = _roomLightState === 'on' ? 'off' : 'on';
+        _roomLightBusy = true;
+        _roomLightToggle.classList.add('is-busy');
+        _roomLightToggle.disabled = true;
+        if (_roomLightLabel) {
+            _roomLightLabel.textContent = next === 'on' ? 'Turning on…' : 'Turning off…';
+        }
+
+        // Settle back to the resolved state, or surface a transient message
+        // (insufficient control / error) for 2 s before reverting.
+        const finish = (msg) => {
+            _roomLightBusy = false;
+            _roomLightToggle.classList.remove('is-busy');
+            if (msg) {
+                if (_roomLightLabel) _roomLightLabel.textContent = msg;
+                _roomLightToggle.disabled = false;
+                setTimeout(() => applyRoomLight(_roomLightState, _roomLightAvailable), 2000);
+            } else {
+                applyRoomLight(_roomLightState, _roomLightAvailable);
+            }
+        };
+
+        try {
+            const res = await fetch('/api/devices/room_light/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: next }),
+            });
+            if (res.status === 401 || res.status === 403) { finish('Need control'); return; }
+            if (!res.ok) {
+                console.error('room light set failed:', await res.text());
+                finish('Error');
+                return;
+            }
+            const data = await res.json();
+            _roomLightState = data.state || next;
+            finish(null);
+        } catch (err) {
+            console.error('room light toggle failed:', err);
+            finish('Error');
+        }
+    }
+
+    function setupRoomLight() {
+        if (!_roomLightToggle) return;
+        _roomLightToggle.addEventListener('click', toggleRoomLight);
+        loadRoomLightStatus();
+        // Light periodic refresh: state can also change from agent plans
+        // (e.g. brightfield imaging turns it on). Status read is cached at the
+        // device layer (no BLE), so polling is cheap; it also makes the toggle
+        // appear automatically once the device layer connects.
+        if (_roomLightTimer) clearInterval(_roomLightTimer);
+        _roomLightTimer = setInterval(loadRoomLightStatus, 15000);
+    }
+
+    // =====================================================================
+    // Temperature controller (ACUITYnano) — readout + setpoint
+    // =====================================================================
+
+    function fmtTemp(v) {
+        return (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toFixed(1) + '°';
+    }
+
+    function applyTemperature(data) {
+        _tempAvailable = !!(data && data.available);
+        if (!_tempEl) return;
+        _tempEl.hidden = !_tempAvailable;
+        if (!_tempAvailable) return;
+        _tempState = (data && data.state) || 'unknown';
+        const locked = /LOCK/i.test(_tempState);
+        _tempEl.classList.toggle('is-locked', locked);
+        if (_tempBusy) return;  // a set() is in flight; leave its transient label
+        const cur = fmtTemp(data.temperature_c);
+        const hasSp = data.setpoint_c !== null && data.setpoint_c !== undefined;
+        const sp = hasSp ? fmtTemp(data.setpoint_c) : null;
+        _tempReadout.textContent = sp ? (cur + ' → ' + sp) : cur;
+        _tempReadout.title = 'Water ' + cur + (sp ? (', setpoint ' + sp) : '')
+            + (locked ? ' (locked)' : '');
+        // Seed the input with the current setpoint once, while untouched, so the
+        // operator sees where it is before nudging it.
+        if (_tempInput && document.activeElement !== _tempInput && _tempInput.value === '' && hasSp) {
+            _tempInput.value = Number(data.setpoint_c).toFixed(1);
+        }
+    }
+
+    async function loadTemperatureStatus() {
+        if (!_tempEl || _tempBusy) return;
+        try {
+            const res = await fetch('/api/devices/temperature/status');
+            if (!res.ok) { applyTemperature({ available: false }); return; }
+            applyTemperature(await res.json());
+        } catch (err) {
+            console.debug('temperature status fetch failed:', err);
+            applyTemperature({ available: false });
+        }
+    }
+
+    async function setTemperature() {
+        if (!_tempEl || _tempBusy || !_tempAvailable) return;
+        const target = parseFloat(_tempInput && _tempInput.value);
+        if (isNaN(target) || target < 0 || target > 99.9) {
+            _tempReadout.textContent = '0–99.9 °C';
+            setTimeout(loadTemperatureStatus, 1500);
+            return;
+        }
+        _tempBusy = true;
+        _tempEl.classList.add('is-busy');
+        if (_tempSet) _tempSet.disabled = true;
+        _tempReadout.textContent = 'Set ' + target.toFixed(1) + '°…';
+
+        // Settle back to the resolved state, or surface a transient message
+        // (insufficient control / error) for 2 s before reverting.
+        const finish = (msg) => {
+            _tempBusy = false;
+            _tempEl.classList.remove('is-busy');
+            if (_tempSet) _tempSet.disabled = false;
+            if (msg) {
+                _tempReadout.textContent = msg;
+                setTimeout(loadTemperatureStatus, 2000);
+            } else {
+                loadTemperatureStatus();  // controller ramps; poll shows progress
+            }
+        };
+
+        try {
+            const res = await fetch('/api/devices/temperature/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_c: target }),
+            });
+            if (res.status === 401 || res.status === 403) { finish('Need control'); return; }
+            if (!res.ok) {
+                console.error('temperature set failed:', await res.text());
+                finish('Error');
+                return;
+            }
+            await res.json();
+            finish(null);
+        } catch (err) {
+            console.error('temperature set failed:', err);
+            finish('Error');
+        }
+    }
+
+    function setupTemperature() {
+        if (!_tempEl) return;
+        if (_tempSet) _tempSet.addEventListener('click', setTemperature);
+        if (_tempInput) {
+            _tempInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); setTemperature(); }
+            });
+        }
+        loadTemperatureStatus();
+        // Periodic refresh: the setpoint can also change from agent plans, and a
+        // commanded ramp settles over time. Status is cached at the device layer,
+        // so polling is cheap; it also reveals the control once the layer connects.
+        if (_tempTimer) clearInterval(_tempTimer);
+        _tempTimer = setInterval(loadTemperatureStatus, 15000);
     }
 
     // =====================================================================
@@ -904,6 +2424,35 @@ const DevicesManager = (function () {
         if (typeof updateViewButtons === 'function') {
             updateViewButtons('devices-view-switcher', viewName);
         }
+        // The 3D optical-space view owns its own WebGL module. Build it lazily
+        // on first activation (the panel was display:none, so its container had
+        // no size until now); init() is idempotent and resizes on re-entry.
+        if (viewName === 'optical3d' && typeof Occupancy3DManager !== 'undefined') {
+            Occupancy3DManager.init();
+        }
+        // Initialize temperature graph for the active view. The TemperatureGraph
+        // is a singleton; reinit on view switch ensures only one graph target
+        // is live at a time. ClientEventBus.off/on in TemperatureGraph.init
+        // makes re-init safe (idempotent).
+        if (window.TemperatureGraph) {
+            if (viewName === 'manual') {
+                const el = document.getElementById('devices-ls-tempgraph');
+                if (el) TemperatureGraph.init(el, 'current');
+            } else {
+                const el = document.getElementById('devices-temp-graph');
+                if (el) TemperatureGraph.init(el, 'current');
+            }
+        }
+        // Entering Manual view — gate lasers off immediately (brightfield-safe).
+        // populateLaserPresets() runs after setLaserOff() so the select is always
+        // seeded with the entry-safety state first.
+        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
+        // The Operate view owns its own module; activate/deactivate it so its
+        // camera + SPIM streams only run while it's the visible view.
+        if (typeof OperateManager !== 'undefined') {
+            if (viewName === 'operate') OperateManager.activate();
+            else OperateManager.deactivate();
+        }
     }
 
     function setupViewSwitcher() {
@@ -913,8 +2462,10 @@ const DevicesManager = (function () {
         document.addEventListener('keydown', (e) => {
             if (typeof state !== 'undefined' && typeof TABS !== 'undefined' && state.tab !== TABS.DEVICES) return;
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
-            if (e.key === 'm') { e.preventDefault(); switchView('map'); }
+            if (e.key === 'o') { e.preventDefault(); switchView('operate'); }
+            else if (e.key === 'm') { e.preventDefault(); switchView('map'); }
             else if (e.key === 'd') { e.preventDefault(); switchView('details'); }
+            else if (e.key === 'v') { e.preventDefault(); switchView('optical3d'); }
         });
     }
 
@@ -945,31 +2496,54 @@ const DevicesManager = (function () {
         scheduleStaleCheck();
     }
 
+    // Single availability signal (from the launcher's device-layer watcher).
+    // When the layer goes away, drop the stale working-region so the map reverts
+    // to the neutral no-position state instead of a frozen red/green field. Live
+    // data repopulates _optimalBox via DEVICE_STATE_UPDATE once it's back.
+    function handleAvailability(d) {
+        if (d && d.available === false && _optimalBox) {
+            _optimalBox = null;
+            renderMap();
+        }
+    }
+
     function init() {
         cacheDom();
         setupViewSwitcher();
         setupCameraWiring();
+        setupManualWiring();
+        setupRoomLight();
+        setupTemperature();
         loadCoverslip();
-        loadEmbryos();
+        loadEmbryosSnapshot();
         switchView(_currentView);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);
-            // Embryo events: a fresh marking session emits one
-            // EMBRYO_DETECTED per registered embryo (via
-            // ExperimentState.add_embryo). assign_embryo_roles emits
-            // STATUS_CHANGED with change=role_assigned per change.
+            ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', handleAvailability);
+            ClientEventBus.on('EMBRYOS_UPDATE', handleEmbryosUpdate);
+            // Belt-and-braces: also listen for the fine-grained events that
+            // existed before EMBRYOS_UPDATE so direct emitters still refresh.
             ClientEventBus.on('EMBRYO_DETECTED', handleEmbryoDetected);
             ClientEventBus.on('STATUS_CHANGED', handleStatusChanged);
         }
+        // Map-side edit handlers. Pointer events on the SVG cover both
+        // "click an embryo" (selects it) and "click empty map" (drops the
+        // selected embryo). Keyboard listener is document-wide but guards
+        // against firing while an input is focused.
+        if (_mapSvg) {
+            _mapSvg.addEventListener('pointerdown', onMapPointerDown);
+        }
+        document.addEventListener('keydown', onMapKeyDown);
         setStatus('stale', 'waiting', 'no payload yet');
         syncInitialCameraState();
-        // Stop the camera stream if the tab is closed while it's running,
-        // so MMCore isn't held by a disconnected browser.
+        // Stop the camera and lightsheet streams if the tab is closed while
+        // running, so MMCore isn't held by a disconnected browser.
         window.addEventListener('beforeunload', () => {
             if (_camStreaming) {
-                try {
-                    navigator.sendBeacon('/api/devices/bottom_camera/stream/stop');
-                } catch (_) {}
+                try { navigator.sendBeacon('/api/devices/bottom_camera/stream/stop'); } catch (_) {}
+            }
+            if (_lsStreaming) {
+                try { navigator.sendBeacon('/api/devices/lightsheet/live/stop'); } catch (_) {}
             }
         });
     }

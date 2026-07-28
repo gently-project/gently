@@ -8,14 +8,37 @@ and their dependencies.
 
 import dataclasses
 import json
-from typing import Dict, List, Optional
 
-from ...tools.registry import tool, ToolCategory, ToolExample
+from ...tools.registry import ToolCategory, ToolExample, tool
+
+
+def _coerce_plan_args(spec, references, estimated_days):
+    """The model often serializes nested args (spec/references) as JSON strings
+    instead of objects — accept either so plan-item creation doesn't store a raw
+    string (which later breaks ImagingSpec/BenchSpec hydration). Returns the
+    normalized (spec, references, estimated_days)."""
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except (json.JSONDecodeError, TypeError):
+            spec = None
+    if isinstance(references, str):
+        try:
+            references = json.loads(references)
+        except (json.JSONDecodeError, TypeError):
+            references = None
+    if isinstance(estimated_days, str):
+        try:
+            estimated_days = int(estimated_days)
+        except (ValueError, TypeError):
+            estimated_days = None
+    return spec, references, estimated_days
 
 
 # ---------------------------------------------------------------------------
 # Campaign / Phase Management
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="create_campaign",
@@ -39,10 +62,10 @@ from ...tools.registry import tool, ToolCategory, ToolExample
 )
 async def create_campaign(
     description: str,
-    shorthand: str = None,
-    target: str = None,
-    parent_id: str = None,
-    context: Dict = None,
+    shorthand: str | None = None,
+    target: str | None = None,
+    parent_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Create a campaign or sub-campaign (phase)."""
     agent = context.get("agent") if context else None
@@ -53,8 +76,9 @@ async def create_campaign(
     if shorthand:
         import re
         from datetime import datetime
+
         current_year = str(datetime.now().year)
-        shorthand = re.sub(r'-20\d{2}$', f'-{current_year}', shorthand)
+        shorthand = re.sub(r"-20\d{2}$", f"-{current_year}", shorthand)
 
     store = agent.context_store
     cid = store.create_campaign(
@@ -71,6 +95,7 @@ async def create_campaign(
 # ---------------------------------------------------------------------------
 # Plan Item Management
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="create_plan_item",
@@ -112,15 +137,15 @@ async def create_plan_item(
     campaign_id: str,
     type: str,
     title: str,
-    description: str = None,
-    spec: Dict = None,
-    inherit_from: str = None,
-    depends_on: List[str] = None,
-    phase_number: int = None,
+    description: str | None = None,
+    spec: dict | None = None,
+    inherit_from: str | None = None,
+    depends_on: list[str] | None = None,
+    phase_number: int | None = None,
     phase_order: int = -1,
-    references: List[Dict] = None,
-    estimated_days: int = None,
-    context: Dict = None,
+    references: list[dict] | None = None,
+    estimated_days: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Create a plan item within a campaign/phase.
 
@@ -132,6 +157,17 @@ async def create_plan_item(
         return "Error: Context store not available"
 
     store = agent.context_store
+    spec, references, estimated_days = _coerce_plan_args(spec, references, estimated_days)
+    if isinstance(phase_number, str):
+        try:
+            phase_number = int(phase_number)
+        except (ValueError, TypeError):
+            phase_number = None
+    if isinstance(phase_order, str):
+        try:
+            phase_order = int(phase_order)
+        except (ValueError, TypeError):
+            phase_order = -1
 
     # Resolve phase_number → subcampaign ID
     target_campaign_id = campaign_id
@@ -198,15 +234,15 @@ async def create_plan_item(
 )
 async def update_plan_item(
     item_id: str,
-    status: str = None,
-    title: str = None,
-    description: str = None,
-    outcome: str = None,
-    spec: Dict = None,
-    references: List[Dict] = None,
-    estimated_days: int = None,
-    campaign_id: str = None,
-    context: Dict = None,
+    status: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    outcome: str | None = None,
+    spec: dict | None = None,
+    references: list[dict] | None = None,
+    estimated_days: int | None = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Update a plan item. item_id can be a UUID, task number (e.g. '3'),
     or phase.task reference (e.g. '1.3'). campaign_id scopes resolution
@@ -226,6 +262,7 @@ async def update_plan_item(
     from gently.harness.memory.model import PlanItemStatus
 
     status_enum = PlanItemStatus(status) if status else None
+    spec, references, estimated_days = _coerce_plan_args(spec, references, estimated_days)
     store.update_plan_item(
         item_id=resolved_id,
         status=status_enum,
@@ -240,9 +277,9 @@ async def update_plan_item(
     if status:
         changes.append(f"status -> {status}")
     if outcome:
-        changes.append(f"outcome recorded")
+        changes.append("outcome recorded")
     if spec:
-        changes.append(f"spec updated")
+        changes.append("spec updated")
     if title:
         changes.append(f"title -> {title}")
     if references:
@@ -263,8 +300,8 @@ async def update_plan_item(
 async def link_plan_items(
     item_id: str,
     depends_on_id: str,
-    campaign_id: str = None,
-    context: Dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Add a dependency between plan items. campaign_id scopes resolution
     when using shorthand refs (e.g. '1.3') with multiple plans."""
@@ -308,8 +345,8 @@ async def link_plan_items(
 )
 async def get_plan_item_tool(
     ref: str,
-    campaign_id: str = None,
-    context: Dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Look up a plan item by natural reference."""
     agent = context.get("agent") if context else None
@@ -327,6 +364,7 @@ async def get_plan_item_tool(
 # ---------------------------------------------------------------------------
 # Plan Review
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="propose_plan",
@@ -346,7 +384,7 @@ async def get_plan_item_tool(
 )
 async def propose_plan(
     campaign_id: str,
-    context: Dict = None,
+    context: dict | None = None,
 ) -> str:
     """Render the full plan for review."""
     agent = context.get("agent") if context else None
@@ -401,7 +439,7 @@ async def propose_plan(
 
     # Summary
     status = store.get_plan_status(campaign_id)
-    lines.append(f"── Summary ──")
+    lines.append("── Summary ──")
     lines.append(f"Total items: {status['total']}")
     lines.append(f"Completed: {status['completed']}")
     if status["pending_decisions"]:
@@ -485,8 +523,8 @@ def _format_plan_item(item, store, task_num: str = "") -> str:
     if item.references:
         ref_strs = []
         for r in item.references:
-            tag = f"[{r.get('source', '').upper()}]" if r.get('source') else ""
-            cite = r.get('citation', '')
+            tag = f"[{r.get('source', '').upper()}]" if r.get("source") else ""
+            cite = r.get("citation", "")
             ref_strs.append(f"{tag} {cite}")
         details.append(f"   Refs: {'; '.join(ref_strs)}")
 
@@ -505,7 +543,7 @@ def _format_plan_item(item, store, task_num: str = "") -> str:
 )
 async def get_plan_status(
     campaign_id: str,
-    context: Dict = None,
+    context: dict | None = None,
 ) -> str:
     """Get plan progress summary."""
     agent = context.get("agent") if context else None
@@ -551,6 +589,7 @@ async def get_plan_status(
 # Batch Operations
 # ---------------------------------------------------------------------------
 
+
 @tool(
     name="batch_update_status",
     description=(
@@ -574,10 +613,10 @@ async def get_plan_status(
 async def batch_update_status(
     campaign_id: str,
     new_status: str,
-    outcome: str = None,
-    phase_number: int = None,
-    item_type: str = None,
-    context: Dict = None,
+    outcome: str | None = None,
+    phase_number: int | None = None,
+    item_type: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Batch-update status of plan items."""
     agent = context.get("agent") if context else None
@@ -613,7 +652,8 @@ async def batch_update_status(
             for dep_id in item.depends_on:
                 dep = store.get_plan_item(dep_id)
                 if dep and dep.status not in (
-                    PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED,
+                    PlanItemStatus.COMPLETED,
+                    PlanItemStatus.SKIPPED,
                 ):
                     all_resolved = False
                     break
@@ -656,8 +696,8 @@ async def batch_update_spec(
     campaign_id: str,
     field_name: str,
     field_value: object,
-    phase_number: int = None,
-    context: Dict = None,
+    phase_number: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Batch-update a spec field on imaging items."""
     agent = context.get("agent") if context else None
@@ -668,6 +708,7 @@ async def batch_update_spec(
 
     # Validate field name against ImagingSpec
     from gently.harness.memory.model import ImagingSpec
+
     valid_fields = {f.name for f in dataclasses.fields(ImagingSpec)}
     if field_name not in valid_fields:
         return (
@@ -709,6 +750,7 @@ async def batch_update_spec(
 # Plan Reorganization
 # ---------------------------------------------------------------------------
 
+
 @tool(
     name="move_plan_item",
     description=(
@@ -732,10 +774,10 @@ async def batch_update_spec(
 async def move_plan_item(
     campaign_id: str,
     item_ref: str,
-    to_phase_number: int = None,
-    to_campaign_id: str = None,
-    position: int = None,
-    context: Dict = None,
+    to_phase_number: int | None = None,
+    to_campaign_id: str | None = None,
+    position: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Move a plan item to a different phase."""
     agent = context.get("agent") if context else None
@@ -794,8 +836,8 @@ async def move_plan_item(
 )
 async def delete_plan_item_tool(
     item_ref: str,
-    campaign_id: str = None,
-    context: Dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Delete a plan item."""
     agent = context.get("agent") if context else None
@@ -850,9 +892,9 @@ async def delete_plan_item_tool(
 )
 async def reorder_plan_items(
     campaign_id: str,
-    item_order: List[str],
-    phase_number: int = None,
-    context: Dict = None,
+    item_order: list[str],
+    phase_number: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Reorder plan items within a phase."""
     agent = context.get("agent") if context else None
@@ -914,10 +956,10 @@ async def reorder_plan_items(
 async def update_phase(
     campaign_id: str,
     phase_number: int,
-    description: str = None,
-    shorthand: str = None,
-    target: str = None,
-    context: Dict = None,
+    description: str | None = None,
+    shorthand: str | None = None,
+    target: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Update a phase's metadata."""
     agent = context.get("agent") if context else None
@@ -958,7 +1000,7 @@ async def update_phase(
 async def delete_phase(
     campaign_id: str,
     phase_number: int,
-    context: Dict = None,
+    context: dict | None = None,
 ) -> str:
     """Delete a phase and its contents."""
     agent = context.get("agent") if context else None
@@ -992,6 +1034,7 @@ async def delete_phase(
 # Plan Export
 # ---------------------------------------------------------------------------
 
+
 @tool(
     name="export_plan",
     description=(
@@ -1011,7 +1054,7 @@ async def delete_phase(
 async def export_plan(
     campaign_id: str,
     include_validation: bool = False,
-    context: Dict = None,
+    context: dict | None = None,
 ) -> str:
     """Export a plan as a shareable markdown document."""
     agent = context.get("agent") if context else None
@@ -1088,7 +1131,7 @@ async def export_plan(
     seen_ids = set()
     for item in all_items:
         for ref in item.references:
-            ref_key = ref.get('id') or ref.get('citation', '')
+            ref_key = ref.get("id") or ref.get("citation", "")
             if ref_key and ref_key not in seen_ids:
                 seen_ids.add(ref_key)
                 all_refs.append(ref)
@@ -1096,10 +1139,10 @@ async def export_plan(
     if all_refs:
         lines.append("---\n## References\n")
         for i, r in enumerate(all_refs, 1):
-            tag = f"[{r.get('source', '').upper()}]" if r.get('source') else ""
-            cite = r.get('citation', '')
-            rid = r.get('id', '')
-            note = r.get('note', '')
+            tag = f"[{r.get('source', '').upper()}]" if r.get("source") else ""
+            cite = r.get("citation", "")
+            rid = r.get("id", "")
+            note = r.get("note", "")
             line = f"{i}. {tag} {cite}"
             if rid:
                 line += f" ({rid})"
@@ -1128,10 +1171,11 @@ async def export_plan(
 def _export_date() -> str:
     """Return current date in human-readable format."""
     from datetime import datetime
+
     return datetime.now().strftime("%Y-%m-%d")
 
 
-def _export_item(item, store, num: str) -> List[str]:
+def _export_item(item, store, num: str) -> list[str]:
     """Format a plan item for the export document."""
     from gently.harness.memory.model import PlanItemStatus
 
@@ -1211,10 +1255,10 @@ def _export_item(item, store, num: str) -> List[str]:
     if item.references:
         lines.append("**References:**")
         for r in item.references:
-            tag = f"[{r.get('source', '').upper()}]" if r.get('source') else ""
-            cite = r.get('citation', '')
-            rid = r.get('id', '')
-            note = r.get('note', '')
+            tag = f"[{r.get('source', '').upper()}]" if r.get("source") else ""
+            cite = r.get("citation", "")
+            rid = r.get("id", "")
+            note = r.get("note", "")
             line = f"- {tag} {cite}"
             if rid:
                 line += f" ({rid})"
@@ -1229,9 +1273,9 @@ def _export_item(item, store, num: str) -> List[str]:
 async def validate_plan_for_export(campaign_id: str, store) -> str:
     """Run validation and return a markdown-formatted report for export."""
     from .validation import (
-        HARDWARE_LIMITS, CONTROL_KEYWORDS,
-        _check_dependency_cycles, _stage_order, _normalise_stage,
-        _get_temp_factor, STAGE_TIMING_20C,
+        CONTROL_KEYWORDS,
+        HARDWARE_LIMITS,
+        _check_dependency_cycles,
     )
 
     items = store.get_plan_items(campaign_id=campaign_id, include_children=True)
@@ -1240,11 +1284,15 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
 
     try:
         from gently.organisms import get_organism
+
         org = get_organism()
-        presets_mod = __import__(f"gently.organisms.{org.ORGANISM_NAME}.detector_presets", fromlist=["get_detector_presets"])
-        valid_detectors = set(presets_mod.get_detector_presets().keys())
+        presets_mod = __import__(
+            f"gently.organisms.{org.ORGANISM_NAME}.detector_presets",
+            fromlist=["get_detector_presets"],
+        )
+        set(presets_mod.get_detector_presets().keys())
     except ImportError:
-        valid_detectors = set()
+        pass
 
     issues = []
     has_control = False
@@ -1253,9 +1301,18 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
         label = f"{item.title}"
         text_blob = " ".join(filter(None, [item.title, item.description])).lower()
         if item.imaging_spec:
-            text_blob += " " + " ".join(filter(None, [
-                item.imaging_spec.strain, item.imaging_spec.genotype,
-            ])).lower()
+            text_blob += (
+                " "
+                + " ".join(
+                    filter(
+                        None,
+                        [
+                            item.imaging_spec.strain,
+                            item.imaging_spec.genotype,
+                        ],
+                    )
+                ).lower()
+            )
         if any(kw in text_blob for kw in CONTROL_KEYWORDS):
             has_control = True
 
@@ -1286,6 +1343,7 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
 # Plan Versioning
 # ---------------------------------------------------------------------------
 
+
 @tool(
     name="snapshot_plan",
     description=(
@@ -1306,8 +1364,8 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
 )
 async def snapshot_plan(
     campaign_id: str,
-    label: str = None,
-    context: Dict = None,
+    label: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Save a snapshot of the current plan."""
     agent = context.get("agent") if context else None
@@ -1346,7 +1404,7 @@ async def snapshot_plan(
 )
 async def list_plan_versions(
     campaign_id: str,
-    context: Dict = None,
+    context: dict | None = None,
 ) -> str:
     """List saved plan versions."""
     agent = context.get("agent") if context else None
@@ -1367,10 +1425,7 @@ async def list_plan_versions(
         if s.get("summary"):
             first_line = s["summary"].split("\n")[0]
             summary_line = f"  {first_line}"
-        lines.append(
-            f"  v{s['version_number']}{label}  ({s['version_id']})  "
-            f"{s['created_at']}"
-        )
+        lines.append(f"  v{s['version_number']}{label}  ({s['version_id']})  {s['created_at']}")
         if summary_line:
             lines.append(f"    {summary_line}")
 
@@ -1397,9 +1452,9 @@ async def list_plan_versions(
 )
 async def restore_plan_version(
     campaign_id: str,
-    version_id: str = None,
-    version_number: int = None,
-    context: Dict = None,
+    version_id: str | None = None,
+    version_number: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Restore a plan to a previous snapshot."""
     agent = context.get("agent") if context else None

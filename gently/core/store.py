@@ -31,19 +31,23 @@ Usage::
 
 import json
 import logging
-import os
 import shutil
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, cast
 
 import numpy as np
 
 from .store_types import (
-    SessionInfo, EmbryoInfo, VolumeInfo, ProjectionInfo,
-    PerceptionRunInfo, PredictionInfo, GroundTruthEntry, StoreStats,
+    EmbryoInfo,
+    GroundTruthEntry,
+    PredictionInfo,
+    ProjectionInfo,
+    SessionInfo,
+    StoreStats,
+    VolumeInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -194,6 +198,7 @@ INNER JOIN (
 # GentlyStore
 # ---------------------------------------------------------------------------
 
+
 class GentlyStore:
     """One class for all Gently storage. Owns one SQLite DB + one directory tree."""
 
@@ -271,8 +276,13 @@ class GentlyStore:
     # Sessions
     # ==================================================================
 
-    def create_session(self, session_id: str, name: str = None,
-                       description: str = None, metadata: dict = None) -> str:
+    def create_session(
+        self,
+        session_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        metadata: dict | None = None,
+    ) -> str:
         """Create a new session. Returns session_id."""
         now = self._now()
         with self._tx():
@@ -280,13 +290,19 @@ class GentlyStore:
                 "INSERT OR IGNORE INTO sessions "
                 "(session_id, name, description, created_at, last_active, metadata) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (session_id, name, description, now, now,
-                 json.dumps(metadata) if metadata else None),
+                (
+                    session_id,
+                    name,
+                    description,
+                    now,
+                    now,
+                    json.dumps(metadata) if metadata else None,
+                ),
             )
         logger.info(f"Created session {session_id}")
         return session_id
 
-    def get_session(self, session_id: str) -> Optional[SessionInfo]:
+    def get_session(self, session_id: str) -> SessionInfo | None:
         """Return session row as dict, or None."""
         row = self._conn.execute(
             "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
@@ -295,19 +311,17 @@ class GentlyStore:
             return None
         d = dict(row)
         self._parse_json_field(d, "metadata")
-        return d
+        return d  # type: ignore[return-value]  # dict matches TypedDict shape
 
-    def list_sessions(self) -> List[SessionInfo]:
+    def list_sessions(self) -> list[SessionInfo]:
         """Return all sessions ordered by last_active descending."""
-        rows = self._conn.execute(
-            "SELECT * FROM sessions ORDER BY last_active DESC"
-        ).fetchall()
+        rows = self._conn.execute("SELECT * FROM sessions ORDER BY last_active DESC").fetchall()
         result = []
         for row in rows:
             d = dict(row)
             self._parse_json_field(d, "metadata")
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     def touch_session(self, session_id: str):
         """Update last_active timestamp."""
@@ -325,12 +339,12 @@ class GentlyStore:
             json.dump(snapshot, f, indent=2, ensure_ascii=False, default=str)
         self.touch_session(session_id)
 
-    def load_session_snapshot(self, session_id: str) -> Optional[dict]:
+    def load_session_snapshot(self, session_id: str) -> dict | None:
         """Load session snapshot JSON. Returns None if missing."""
         path = self.root / "sessions" / f"{session_id}.json"
         if not path.exists():
             return None
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
 
     # ==================================================================
@@ -341,11 +355,11 @@ class GentlyStore:
         self,
         session_id: str,
         embryo_id: str,
-        embryo_uid: str = None,
-        nickname: str = None,
-        position_x: float = None,
-        position_y: float = None,
-        calibration: dict = None,
+        embryo_uid: str | None = None,
+        nickname: str | None = None,
+        position_x: float | None = None,
+        position_y: float | None = None,
+        calibration: dict | None = None,
     ):
         """Register or update an embryo in a session."""
         now = self._now()
@@ -362,11 +376,19 @@ class GentlyStore:
                 "  position_x = COALESCE(excluded.position_x, embryos.position_x), "
                 "  position_y = COALESCE(excluded.position_y, embryos.position_y), "
                 "  calibration = COALESCE(excluded.calibration, embryos.calibration)",
-                (embryo_id, session_id, embryo_uid, nickname,
-                 position_x, position_y, cal_json, now),
+                (
+                    embryo_id,
+                    session_id,
+                    embryo_uid,
+                    nickname,
+                    position_x,
+                    position_y,
+                    cal_json,
+                    now,
+                ),
             )
 
-    def get_embryo(self, session_id: str, embryo_id: str) -> Optional[EmbryoInfo]:
+    def get_embryo(self, session_id: str, embryo_id: str) -> EmbryoInfo | None:
         row = self._conn.execute(
             "SELECT * FROM embryos WHERE session_id = ? AND embryo_id = ?",
             (session_id, embryo_id),
@@ -375,9 +397,9 @@ class GentlyStore:
             return None
         d = dict(row)
         self._parse_json_field(d, "calibration")
-        return d
+        return d  # type: ignore[return-value]  # dict matches TypedDict shape
 
-    def list_embryos(self, session_id: str) -> List[EmbryoInfo]:
+    def list_embryos(self, session_id: str) -> list[EmbryoInfo]:
         rows = self._conn.execute(
             "SELECT * FROM embryos WHERE session_id = ? ORDER BY embryo_id",
             (session_id,),
@@ -387,7 +409,7 @@ class GentlyStore:
             d = dict(row)
             self._parse_json_field(d, "calibration")
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     # ==================================================================
     # Volumes
@@ -411,7 +433,7 @@ class GentlyStore:
         embryo_id: str,
         timepoint: int,
         volume: np.ndarray,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, insert DB rows.
@@ -444,17 +466,23 @@ class GentlyStore:
 
         # Insert DB rows
         self._insert_volume_row(
-            session_id, embryo_id, timepoint, vol_path,
-            volume.shape, str(volume.dtype), metadata,
+            session_id,
+            embryo_id,
+            timepoint,
+            vol_path,
+            volume.shape,
+            str(volume.dtype),
+            metadata,
         )
         if proj_path is not None:
             self._insert_projection_row(
-                session_id, embryo_id, timepoint, proj_path,
+                session_id,
+                embryo_id,
+                timepoint,
+                proj_path,
             )
 
-        logger.debug(
-            f"put_volume: {session_id}/{embryo_id} t={timepoint} -> {vol_path}"
-        )
+        logger.debug(f"put_volume: {session_id}/{embryo_id} t={timepoint} -> {vol_path}")
         return vol_path
 
     def register_volume(
@@ -463,8 +491,8 @@ class GentlyStore:
         embryo_id: str,
         timepoint: int,
         incoming_path: Path,
-        metadata: dict = None,
-        volume_data: np.ndarray = None,
+        metadata: dict | None = None,
+        volume_data: np.ndarray | None = None,
     ) -> Path:
         """
         Zero-copy path: rename an existing TIFF to canonical location.
@@ -510,22 +538,29 @@ class GentlyStore:
             volume = volume_data
         else:
             from gently.core.imaging import load_volume
+
             volume = load_volume(canonical)
 
         proj_path = self._generate_projection(session_id, embryo_id, timepoint, volume)
 
         self._insert_volume_row(
-            session_id, embryo_id, timepoint, canonical,
-            volume.shape, str(volume.dtype), metadata,
+            session_id,
+            embryo_id,
+            timepoint,
+            canonical,
+            volume.shape,
+            str(volume.dtype),
+            metadata,
         )
         if proj_path is not None:
             self._insert_projection_row(
-                session_id, embryo_id, timepoint, proj_path,
+                session_id,
+                embryo_id,
+                timepoint,
+                proj_path,
             )
 
-        logger.debug(
-            f"register_volume: {incoming_path.name} -> {canonical}"
-        )
+        logger.debug(f"register_volume: {incoming_path.name} -> {canonical}")
         return canonical
 
     # ------------------------------------------------------------------
@@ -540,7 +575,7 @@ class GentlyStore:
         session_id: str,
         source: str,
         incoming_path: Path,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """Move a transient TIFF from *incoming/* to ``snapshots/{session}/``.
 
@@ -577,6 +612,7 @@ class GentlyStore:
 
         # Read shape for DB record
         import tifffile
+
         arr = tifffile.imread(str(canonical))
 
         with self._tx():
@@ -585,7 +621,8 @@ class GentlyStore:
                 "(session_id, source, file_path, width, height, metadata, captured_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    session_id, source,
+                    session_id,
+                    source,
                     self._rel_path(canonical),
                     arr.shape[-1] if arr.ndim >= 2 else None,
                     arr.shape[-2] if arr.ndim >= 2 else None,
@@ -596,14 +633,11 @@ class GentlyStore:
         logger.debug("register_snapshot: %s -> %s", incoming_path.name, canonical)
         return canonical
 
-    def list_snapshots(
-        self, session_id: str, source: str = None
-    ) -> List[Dict[str, Any]]:
+    def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""
         if source:
             rows = self._conn.execute(
-                "SELECT * FROM snapshots WHERE session_id = ? AND source = ? "
-                "ORDER BY captured_at",
+                "SELECT * FROM snapshots WHERE session_id = ? AND source = ? ORDER BY captured_at",
                 (session_id, source),
             ).fetchall()
         else:
@@ -611,10 +645,10 @@ class GentlyStore:
                 "SELECT * FROM snapshots WHERE session_id = ? ORDER BY captured_at",
                 (session_id,),
             ).fetchall()
-        cols = [d[0] for d in self._conn.execute(
-            "SELECT * FROM snapshots LIMIT 0"
-        ).description or []]
-        return [dict(zip(cols, row)) for row in rows]
+        cols = [
+            d[0] for d in self._conn.execute("SELECT * FROM snapshots LIMIT 0").description or []
+        ]
+        return [dict(zip(cols, row, strict=False)) for row in rows]
 
     # ------------------------------------------------------------------
     # Incoming cleanup
@@ -652,19 +686,16 @@ class GentlyStore:
     # Volume retrieval
     # ------------------------------------------------------------------
 
-    def get_volume(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[np.ndarray]:
+    def get_volume(self, session_id: str, embryo_id: str, timepoint: int) -> np.ndarray | None:
         """Load a volume from disk. Returns None if not found."""
         path = self.get_volume_path(session_id, embryo_id, timepoint)
         if path is None or not path.exists():
             return None
         import tifffile
+
         return tifffile.imread(str(path))
 
-    def get_volume_path(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[Path]:
+    def get_volume_path(self, session_id: str, embryo_id: str, timepoint: int) -> Path | None:
         """Return the absolute path to a volume, or None."""
         row = self._conn.execute(
             "SELECT file_path FROM volumes "
@@ -675,14 +706,11 @@ class GentlyStore:
             return None
         return self._abs_path(row["file_path"])
 
-    def list_volumes(
-        self, session_id: str, embryo_id: str = None
-    ) -> List[VolumeInfo]:
+    def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:
         """List volume metadata rows for a session (optionally filtered)."""
         if embryo_id:
             rows = self._conn.execute(
-                "SELECT * FROM volumes WHERE session_id = ? AND embryo_id = ? "
-                "ORDER BY timepoint",
+                "SELECT * FROM volumes WHERE session_id = ? AND embryo_id = ? ORDER BY timepoint",
                 (session_id, embryo_id),
             ).fetchall()
         else:
@@ -698,11 +726,9 @@ class GentlyStore:
             if d.get("metadata"):
                 d["metadata"] = json.loads(d["metadata"])
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
-    def get_acquisition_params(
-        self, session_id: str, embryo_id: str = None
-    ) -> Optional[dict]:
+    def get_acquisition_params(self, session_id: str, embryo_id: str | None = None) -> dict | None:
         """
         Get the acquisition parameters used in a session.
 
@@ -742,9 +768,12 @@ class GentlyStore:
     # -- internal helpers --
 
     def _generate_projection(
-        self, session_id: str, embryo_id: str, timepoint: int,
+        self,
+        session_id: str,
+        embryo_id: str,
+        timepoint: int,
         volume: np.ndarray,
-    ) -> Optional[Path]:
+    ) -> Path | None:
         """Generate JPEG projection file from volume data."""
         from .imaging import generate_jpeg_projection
 
@@ -753,8 +782,14 @@ class GentlyStore:
         return generate_jpeg_projection(volume, proj_path)
 
     def _insert_volume_row(
-        self, session_id, embryo_id, timepoint, vol_path,
-        shape, dtype, metadata,
+        self,
+        session_id,
+        embryo_id,
+        timepoint,
+        vol_path,
+        shape,
+        dtype,
+        metadata,
     ):
         now = self._now()
         with self._tx():
@@ -764,7 +799,9 @@ class GentlyStore:
                 " acquired_at, metadata) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    session_id, embryo_id, timepoint,
+                    session_id,
+                    embryo_id,
+                    timepoint,
                     self._rel_path(vol_path),
                     json.dumps(list(shape)),
                     dtype,
@@ -774,7 +811,11 @@ class GentlyStore:
             )
 
     def _insert_projection_row(
-        self, session_id, embryo_id, timepoint, proj_path,
+        self,
+        session_id,
+        embryo_id,
+        timepoint,
+        proj_path,
     ):
         from PIL import Image as PILImage
 
@@ -794,9 +835,14 @@ class GentlyStore:
                 " size_kb, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    session_id, embryo_id, timepoint,
+                    session_id,
+                    embryo_id,
+                    timepoint,
                     self._rel_path(proj_path),
-                    w, h, size_kb, now,
+                    w,
+                    h,
+                    size_kb,
+                    now,
                 ),
             )
 
@@ -804,9 +850,7 @@ class GentlyStore:
     # Projections
     # ==================================================================
 
-    def get_projection_path(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[Path]:
+    def get_projection_path(self, session_id: str, embryo_id: str, timepoint: int) -> Path | None:
         """Return absolute path to the JPEG projection, or None."""
         row = self._conn.execute(
             "SELECT file_path FROM projections "
@@ -817,9 +861,7 @@ class GentlyStore:
             return None
         return self._abs_path(row["file_path"])
 
-    def get_projection_b64(
-        self, session_id: str, embryo_id: str, timepoint: int
-    ) -> Optional[str]:
+    def get_projection_b64(self, session_id: str, embryo_id: str, timepoint: int) -> str | None:
         """Return base64-encoded JPEG projection, or None."""
         import base64
 
@@ -829,15 +871,12 @@ class GentlyStore:
         with open(path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
 
-    def list_projections(
-        self, session_id: str, embryo_id: str
-    ) -> List[ProjectionInfo]:
+    def list_projections(self, session_id: str, embryo_id: str) -> list[ProjectionInfo]:
         rows = self._conn.execute(
-            "SELECT * FROM projections "
-            "WHERE session_id = ? AND embryo_id = ? ORDER BY timepoint",
+            "SELECT * FROM projections WHERE session_id = ? AND embryo_id = ? ORDER BY timepoint",
             (session_id, embryo_id),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows]  # type: ignore[misc]  # dict matches TypedDict shape
 
     # ==================================================================
     # Perception Runs & Predictions
@@ -848,10 +887,10 @@ class GentlyStore:
         session_id: str,
         name: str,
         method: str,
-        model_name: str = None,
+        model_name: str | None = None,
         trace_type: str = "perception",
         source: str = "live",
-        config: dict = None,
+        config: dict | None = None,
     ) -> int:
         """Create a perception run. Returns run_id."""
         now = self._now()
@@ -862,13 +901,17 @@ class GentlyStore:
                 " source, config, status, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?)",
                 (
-                    session_id, name, method, model_name,
-                    trace_type, source,
+                    session_id,
+                    name,
+                    method,
+                    model_name,
+                    trace_type,
+                    source,
                     json.dumps(config) if config else None,
                     now,
                 ),
             )
-            return cursor.lastrowid
+            return cast("int", cursor.lastrowid)
 
     def store_prediction(
         self,
@@ -877,14 +920,14 @@ class GentlyStore:
         embryo_id: str,
         timepoint: int,
         predicted_stage: str,
-        confidence: float = None,
-        reasoning: str = None,
+        confidence: float | None = None,
+        reasoning: str | None = None,
         is_transitional: bool = False,
-        execution_time_ms: float = None,
-        trace_data: dict = None,
-        observed_features: dict = None,
-        ground_truth_stage: str = None,
-        is_correct: int = None,
+        execution_time_ms: float | None = None,
+        trace_data: dict | None = None,
+        observed_features: dict | None = None,
+        ground_truth_stage: str | None = None,
+        is_correct: int | None = None,
     ) -> int:
         """
         Insert a prediction row. Optionally writes trace JSON file.
@@ -919,19 +962,26 @@ class GentlyStore:
                 " created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    run_id, session_id, embryo_id, timepoint, predicted_stage,
-                    confidence, reasoning,
+                    run_id,
+                    session_id,
+                    embryo_id,
+                    timepoint,
+                    predicted_stage,
+                    confidence,
+                    reasoning,
                     1 if is_transitional else 0,
-                    ground_truth_stage, is_correct, execution_time_ms,
+                    ground_truth_stage,
+                    is_correct,
+                    execution_time_ms,
                     trace_file_rel,
                     json.dumps(observed_features) if observed_features else None,
                     now,
                 ),
             )
-            return cursor.lastrowid
+            return cast("int", cursor.lastrowid)
 
     def complete_perception_run(
-        self, run_id: int, status: str = "completed", error_message: str = None
+        self, run_id: int, status: str = "completed", error_message: str | None = None
     ):
         """Mark a perception run as completed or failed."""
         now = self._now()
@@ -945,9 +995,9 @@ class GentlyStore:
     def get_predictions(
         self,
         session_id: str,
-        embryo_id: str = None,
-        run_id: int = None,
-    ) -> List[PredictionInfo]:
+        embryo_id: str | None = None,
+        run_id: int | None = None,
+    ) -> list[PredictionInfo]:
         """Query predictions with optional filters."""
         clauses = ["session_id = ?"]
         params: list = [session_id]
@@ -961,8 +1011,7 @@ class GentlyStore:
 
         where = " AND ".join(clauses)
         rows = self._conn.execute(
-            f"SELECT * FROM predictions WHERE {where} "
-            "ORDER BY timepoint, prediction_id",
+            f"SELECT * FROM predictions WHERE {where} ORDER BY timepoint, prediction_id",
             params,
         ).fetchall()
 
@@ -972,7 +1021,7 @@ class GentlyStore:
             if d.get("observed_features"):
                 d["observed_features"] = json.loads(d["observed_features"])
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     # ==================================================================
     # Ground Truth
@@ -984,9 +1033,9 @@ class GentlyStore:
         embryo_id: str,
         stage: str,
         start_timepoint: int,
-        end_timepoint: int = None,
-        annotator: str = None,
-        notes: str = None,
+        end_timepoint: int | None = None,
+        annotator: str | None = None,
+        notes: str | None = None,
     ):
         """Insert or update a ground-truth annotation."""
         with self._tx():
@@ -1000,17 +1049,24 @@ class GentlyStore:
                 "  end_timepoint = excluded.end_timepoint, "
                 "  annotator = excluded.annotator, "
                 "  notes = excluded.notes",
-                (session_id, embryo_id, stage, start_timepoint,
-                 end_timepoint, annotator, notes),
+                (
+                    session_id,
+                    embryo_id,
+                    stage,
+                    start_timepoint,
+                    end_timepoint,
+                    annotator,
+                    notes,
+                ),
             )
 
-    def get_ground_truth(self, session_id: str, embryo_id: str) -> List[GroundTruthEntry]:
+    def get_ground_truth(self, session_id: str, embryo_id: str) -> list[GroundTruthEntry]:
         rows = self._conn.execute(
             "SELECT * FROM ground_truth "
             "WHERE session_id = ? AND embryo_id = ? ORDER BY start_timepoint",
             (session_id, embryo_id),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows]  # type: ignore[misc]  # dict matches TypedDict shape
 
     # ==================================================================
     # Utility
@@ -1018,8 +1074,15 @@ class GentlyStore:
 
     def stats(self) -> StoreStats:
         """Return counts and disk-usage summary."""
-        tables = ["sessions", "embryos", "volumes", "projections",
-                  "perception_runs", "predictions", "ground_truth"]
+        tables = [
+            "sessions",
+            "embryos",
+            "volumes",
+            "projections",
+            "perception_runs",
+            "predictions",
+            "ground_truth",
+        ]
         counts = {}
         for t in tables:
             counts[t] = self._conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
@@ -1035,7 +1098,7 @@ class GentlyStore:
 
         counts["disk_usage_mb"] = round(total_bytes / (1024 * 1024), 1)
         counts["db_size_mb"] = round(self._db_path.stat().st_size / (1024 * 1024), 2)
-        return counts
+        return counts  # type: ignore[return-value]  # dict matches TypedDict shape
 
     @property
     def db_path(self) -> Path:

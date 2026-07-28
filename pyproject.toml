@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gently"
-version = "0.20.0"
+version = "1.0.0.dev0"
 description = "Agentic harnessing for microscopy"
 readme = "docs/README.md"
-license = {text = "MIT"}
-requires-python = ">=3.10"
+license = {text = "GPL-3.0-or-later"}
+# Upper bound from numpy<2: numpy 1.26.4 (the last 1.x) ships wheels only for
+# cp310-cp312, so 3.13+ cannot resolve. pymmcore 70 itself goes to cp315.
+requires-python = ">=3.10,<3.13"
 authors = [
-    {name = "Shroff Lab", email = "shroffl@nih.gov"},
+    {name = "Kesavan Subburam", email = "pskeshu@gmail.com"},
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -26,34 +28,138 @@ dependencies = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "aiohttp>=3.9.0",
-    "numpy>=1.24.0",
+    # numpy capped <2: pymmcore 10.1.1.70.6 is a C-extension built against the
+    # numpy 1.x ABI and fails to import under numpy 2.x. The wheel declares no
+    # upper bound, so we enforce it here.
+    "numpy>=1.24.0,<2",
     "pillow>=10.0.0",
     "tifffile>=2023.0.0",
     "scipy>=1.10.0",
     "scikit-image>=0.21.0",
+    # OpenCV is imported (unguarded) by detection (sam_detection), the device
+    # layer, analysis steps, and video_maker — so it's a true runtime dep, not
+    # optional. headless avoids the libGL.so requirement of full opencv-python
+    # on headless servers/agents.
+    "opencv-python-headless>=4.8.0",
     "jinja2>=3.1.0",
     "pyyaml>=6.0",
     "matplotlib>=3.7.0",
-    # Device control
-    "pymmcore>=11.1.1",
-    "bluesky>=1.11.0",
-    "ophyd>=1.9.0",
-    # ML / SAM
-    "torch>=2.0.0",
-    "torchvision>=0.15.0",
-    "nvidia-ml-py>=12.0.0",
-    # Testing
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
+    "python-dotenv>=1.0.0",
+    # Perception harness — installed as an editable sibling clone (see
+    # [tool.uv.sources]); clone gently-project/gently-perception next to this repo.
+    "gently-perception",
+    # NOTE: the hardware-control stack (pymmcore / bluesky / ophyd) is NOT a base
+    # dep — it lives in the default-on `device` group below so a machine with no
+    # microscope can drop it via `uv sync --no-group device`. It is imported only
+    # by the device-layer process and gently.hardware.dispim, never by the agent
+    # or `--offline` launch.
+    # NOTE: torch / torchvision / nvidia-ml-py are NOT base deps — CUDA build is
+    # machine-specific. Install via an extra: `uv sync --extra torch-gpu` (CUDA
+    # 11.8) or `uv sync --extra torch-cpu`. All torch imports are lazy/guarded.
+    # Test/dev tooling lives in [dependency-groups] below, not here.
 ]
 
 [project.optional-dependencies]
 sam = [
     "segment-anything",
 ]
+# PyTorch — CUDA build is per-machine, so it lives in mutually-exclusive extras
+# wired to dedicated indexes below (see [tool.uv.sources] / [[tool.uv.index]]).
+#   uv sync --extra torch-gpu   # CUDA 11.8 build (microscope / GPU box)
+#   uv sync --extra torch-cpu   # CPU-only build (dev laptops, CI)
+# torch-gpu pins the cu118 index: those wheels bundle their own CUDA 11.8 runtime
+# and only need a recent NVIDIA driver, so the same build runs across GPU machines
+# regardless of their system CUDA version.
+torch-gpu = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "nvidia-ml-py>=12.0.0",
+]
+torch-cpu = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
+# Dependency groups are installed by `uv sync` (per [tool.uv] default-groups
+# below) but excluded from gently's published runtime requirements. Exclude any
+# group on a given machine with `uv sync --no-group <name>`.
+[dependency-groups]
+# Test/dev tooling.
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    # Pinned so local runs, the pre-commit hook, and CI all use the same
+    # ruff. Keep in sync with the ruff-pre-commit rev in .pre-commit-config.yaml
+    # and the install step in .github/workflows/lint.yml.
+    "ruff==0.16.0",
+    "pre-commit>=3.7.0",
+    # Pinned so local runs, the pre-commit hook, and CI all use the same
+    # mypy. Keep in sync with the mirrors-mypy rev in .pre-commit-config.yaml
+    # and the install step in .github/workflows/lint.yml.
+    "mypy==2.1.0",
+    # UI-crawler / simulator + per-story UX-audit toolkit (tools/ui_crawler).
+    # Headless browser driving for the web UI; a baseline-diff over per-story
+    # verdicts is the audit + regression spine (not pytest — it's a 4-state
+    # audit, not pass/fail). After `uv sync`, run `playwright install chromium`
+    # once. Dev-only; never in the published runtime.
+    "playwright>=1.44.0",
+]
+# Everything the microscope computer needs to drive hardware. Default-on (see
+# [tool.uv] default-groups); drop on a machine with no microscope via
+# `uv sync --no-group device`. None of these is imported by the agent or by
+# `--offline` launch — only by the device-layer process and gently.hardware.dispim.
+device = [
+    # pymmcore pinned exactly: its MMCore must match the device-interface version
+    # (70) of the Micro-Manager device adapters installed on the microscope PC.
+    # Bumping this requires upgrading the MM adapter install in lockstep.
+    "pymmcore==10.1.1.70.6",
+    "bluesky>=1.11.0",
+    "ophyd>=1.9.0",
+    # Accessory transports: BLE (SwitchBot room light), serial and MQTT
+    # (ACUITYnano thermal controller).
+    "bleak>=0.21.0",
+    "pyserial>=3.5",
+    "paho-mqtt>=1.6.0",
+]
 
 [project.scripts]
 gently = "launch_gently:cli_main"
+
+# torch-gpu and torch-cpu extras are mutually exclusive — they pull torch/
+# torchvision from different indexes, so they can't be installed together.
+[tool.uv]
+# Groups installed by default. `dev` is uv's implicit default; listing it here
+# keeps it on while also defaulting `device` (the microscope computer's
+# accessory transports) on. Exclude either with `uv sync --no-group <name>`.
+default-groups = ["dev", "device"]
+conflicts = [
+    [{ extra = "torch-gpu" }, { extra = "torch-cpu" }],
+]
+
+# gently-perception is not published to PyPI; clone gently-project/gently-perception
+# as a sibling of this repo and it is installed editable from there — so your edits
+# are live immediately. A missing sibling makes `uv sync` fail by design; clone it.
+# torch/torchvision are routed to a CUDA or CPU index depending on the extra.
+[tool.uv.sources]
+gently-perception = { path = "../gently-perception", editable = true }
+torch = [
+    { index = "pytorch-cu118", extra = "torch-gpu" },
+    { index = "pytorch-cpu", extra = "torch-cpu" },
+]
+torchvision = [
+    { index = "pytorch-cu118", extra = "torch-gpu" },
+    { index = "pytorch-cpu", extra = "torch-cpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.setuptools.packages.find]
 include = ["gently*"]
@@ -62,3 +168,17 @@ exclude = ["tests*", "benchmarks*", "scripts*", "examples*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+explicit_package_bases = true
+mypy_path = "."
+

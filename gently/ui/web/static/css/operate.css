@@ -1,0 +1,662 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Operate — three instrument surfaces.
+
+   Bottom cam · SPIM head · Acquisition. Each pane is fully live whenever it is
+   visible; nothing here is disclosed or gated by "which step you are on",
+   because there are no steps. There is deliberately no rule in this file that
+   shows or hides a control based on anything but its own pane.
+
+   Restyle scope: Operate only. Theme tokens are inherited from main.css so
+   light/dark keeps working; on top of them sits a local instrument layer with
+   THREE signal colours and nothing else. Measurements are monospace, spacing is
+   one 4px scale, surfaces are hairlines — no shadows, no gradients.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.devices-view-operate {
+    container-type: inline-size;
+    container-name: operate;
+}
+
+/* Every display rule below outranks the UA's `[hidden] { display: none }`, so
+   a class would silently defeat the attribute. Anything hidden stays hidden. */
+.operate [hidden] { display: none !important; }
+
+.operate {
+    /* instrument layer */
+    --op-panel: #12161d;
+    --op-rule: #262c36;
+    --op-ink: #d7dee8;
+    --op-ink-dim: #7d8899;
+    /* the only three signal colours on this surface */
+    --op-live: #4ade80;   /* a stream is running */
+    --op-warn: #f5a524;   /* floor proximity, XY locked */
+    --op-emit: #f4485d;   /* LED or laser emitting — nothing else may use this */
+
+    --op-1: 4px;  --op-2: 8px;  --op-3: 12px;
+    --op-4: 16px; --op-5: 20px; --op-6: 24px;
+
+    --op-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --op-ui: 'Inter Tight', system-ui, sans-serif;
+
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-3);
+    /* Sized by the flex parent (.devices-view is flex:1; min-height:0). A hard
+       vh calc here fights it and overflows once the agent panel is open. */
+    flex: 1 1 auto;
+    min-height: 0;
+    color: var(--op-ink);
+    font-family: var(--op-ui);
+}
+
+[data-theme="light"] .operate {
+    --op-panel: #ffffff;
+    --op-rule: #dfe4ea;
+    --op-ink: #1c2430;
+    --op-ink-dim: #667081;
+    --op-live: #16a34a;
+    --op-warn: #b45309;
+    --op-emit: #dc2626;
+}
+
+/* ── sub-navigation ─────────────────────────────────────────────────────── */
+.op-subnav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--op-3);
+    padding-bottom: var(--op-2);
+    border-bottom: 1px solid var(--op-rule);
+    flex: 0 0 auto;
+}
+.op-subviews .view-btn { font-size: 0.72rem; }
+.op-subnav-meta {
+    font-family: var(--op-mono);
+    font-size: 0.62rem;
+    color: var(--op-ink-dim);
+    letter-spacing: 0.04em;
+}
+
+/* ── shared embryo rail + pane area ─────────────────────────────────────── */
+.op-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    gap: var(--op-3);
+}
+.op-panearea {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+/* The rail is redundant on Acquisition, which carries its own richer roster. */
+.op-body[data-pane="acquire"] .op-embryos { display: none; }
+.op-embryos {
+    flex: 0 0 208px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--op-panel);
+    overflow: hidden;
+}
+.op-erail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--op-2) var(--op-3);
+    border-bottom: 1px solid var(--op-rule);
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+    flex: 0 0 auto;
+}
+.op-erail-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--op-1);
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-1);
+}
+.op-erail-empty {
+    padding: var(--op-3);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--op-ink-dim);
+    text-align: center;
+}
+.op-erow {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: var(--op-2);
+    padding: var(--op-2);
+    border: 1px solid transparent;
+    border-radius: 5px;
+    cursor: pointer;
+}
+.op-erow:hover { background: color-mix(in srgb, var(--op-ink) 6%, transparent); }
+.op-erow.is-sel {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.op-erow:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.op-erow-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.op-erow-label { font-size: 0.78rem; color: var(--op-ink); font-weight: 600; }
+.op-erow-xy { font-family: var(--op-mono); font-size: 0.62rem; color: var(--op-ink-dim); }
+.op-erow-del {
+    border: none;
+    background: none;
+    color: var(--op-ink-dim);
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 2px 5px;
+    border-radius: 4px;
+}
+.op-erow-del:hover { color: var(--op-emit); background: color-mix(in srgb, var(--op-emit) 14%, transparent); }
+
+/* ── pane shell ─────────────────────────────────────────────────────────── */
+.op-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: var(--op-3);
+    align-content: start;
+    /* Never triggers in the two-column layout (both children carry min-height:0);
+       it is what makes the stacked layout scroll instead of spilling. */
+    overflow-y: auto;
+}
+.op-pane[hidden] { display: none; }
+
+.op-main {
+    grid-column: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+}
+.op-inst {
+    grid-column: 2;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+    overflow-y: auto;
+    padding-right: var(--op-1);
+}
+
+/* ── the XY interlock banner ────────────────────────────────────────────────
+   The one piece of chrome that appears in more than one pane. It is rendered
+   from a single function into a per-pane host — deliberately NOT a shared
+   header abstraction. */
+.op-lock {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--op-3);
+    padding: var(--op-2) var(--op-3);
+    border: 1px solid var(--op-warn);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--op-warn) 12%, transparent);
+}
+.op-lock[hidden] { display: none; }
+.op-lock-txt {
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--op-warn);
+}
+.op-lock-txt i { font-style: normal; color: var(--op-ink-dim); }
+
+/* ── viewport ───────────────────────────────────────────────────────────── */
+/* The viewport is a centering box; the frame chrome (border, background,
+   placeholder) lives on .op-cam-fit, which is sized to the frame's own aspect
+   ratio (--cam-ar, set from the image once a frame arrives). That way the
+   border hugs the image instead of letterboxing it inside an oversized box. */
+.op-cam {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+.op-cam-fit {
+    position: relative;
+    aspect-ratio: var(--cam-ar, 1 / 1);
+    /* Height drives (the main column is landscape, the frame square/portrait),
+       so the box fills the available height and its width follows the aspect —
+       capped by the column width. The narrow layout flips this below. */
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+    max-height: 100%;
+    min-height: 0;
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--img-bg);
+    overflow: hidden;
+}
+.op-cam-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+}
+.op-cam-img.has-frame { display: block; }
+.op-mark-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+/* Marking is always available on the bottom pane — it is not a mode you enter. */
+#op-cam-bottom .op-mark-canvas { cursor: crosshair; }
+/* While the sample is at the objective the affordance withdraws itself, so the
+   rule is learned from the surface rather than from a toast after the click. */
+#op-cam-bottom.is-locked .op-mark-canvas { cursor: not-allowed; }
+.op-cam-ph {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    color: var(--op-ink-dim);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+/* Detection-in-progress overlay: sits over the frame so the wait is legible
+   on the image itself, not only in the button label. */
+.op-cam-busy {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--op-2);
+    background: color-mix(in srgb, var(--img-bg) 55%, transparent);
+    backdrop-filter: blur(1px);
+    z-index: 3;
+    pointer-events: none;
+}
+.op-cam-busy[hidden] { display: none; }
+.op-cam-busy-txt {
+    font-size: 0.72rem;
+    color: var(--op-ink);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.op-cam-spin {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--op-ink) 30%, transparent);
+    border-top-color: var(--accent, currentColor);
+    animation: op-cam-spin 0.8s linear infinite;
+}
+@keyframes op-cam-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .op-cam-spin { animation-duration: 2s; }
+}
+
+/* Action bar beneath a viewport: what you do TO the image lives next to it. */
+.op-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--op-3);
+    flex-wrap: wrap;
+    flex: 0 0 auto;
+}
+.op-bar-r { display: flex; align-items: center; gap: var(--op-2); }
+.op-bar-r .op-num { min-width: 22px; }
+
+/* ── instrument blocks ──────────────────────────────────────────────────── */
+.op-block, .op-gauge {
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--op-panel);
+    padding: var(--op-2) var(--op-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+}
+.op-block-head, .op-gauge-name, .op-label {
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+.op-block-head { color: var(--op-ink); }
+
+.op-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--op-2);
+}
+.op-actions { display: flex; gap: var(--op-2); }
+.op-actions > .op-btn { flex: 1; }
+
+/* Every measurement is monospace and right-aligned; a bare number never
+   appears without its unit. */
+.op-num {
+    font-family: var(--op-mono);
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--op-ink);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.op-cap {
+    font-size: 0.68rem;
+    line-height: 1.45;
+    color: var(--op-ink-dim);
+    margin: 0;
+}
+
+/* ── the Z instrument ───────────────────────────────────────────────────────
+   The nudge ladder sits beside the track rather than under it, so the control
+   is spatially next to the travel it commands — ups above, downs below. */
+.op-gauge {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "head head" "body nudge" "foot foot";
+    align-items: center;
+    column-gap: var(--op-3);
+}
+.op-gauge-head { grid-area: head; }
+.op-gauge-body { grid-area: body; }
+.op-gauge-nudge { grid-area: nudge; }
+.op-gauge-foot { grid-area: foot; }
+
+.op-gauge-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--op-2); }
+.op-gauge-read b { font-size: 0.92rem; }
+.op-gauge-read i {
+    font-style: normal;
+    font-size: 0.6rem;
+    color: var(--op-ink-dim);
+    margin-left: 3px;
+}
+.op-gauge-body { display: flex; gap: var(--op-2); height: 84px; }
+.op-gauge-track {
+    position: relative;
+    flex: 0 0 10px;
+    border: 1px solid var(--op-rule);
+    border-radius: 3px;
+    background: linear-gradient(to top,
+        color-mix(in srgb, var(--op-warn) 22%, transparent) 0%,
+        transparent 34%);
+}
+.op-gauge-mark {
+    position: absolute;
+    left: -4px;
+    right: -4px;
+    height: 2px;
+    background: var(--op-ink);
+    border-radius: 1px;
+    transition: bottom 0.18s ease;
+}
+.op-gauge-ticks { position: absolute; inset: 0; }
+.op-gauge-ticks span {
+    position: absolute;
+    left: 100%;
+    transform: translateY(50%);
+    margin-left: 3px;
+    font-family: var(--op-mono);
+    font-size: 0.54rem;
+    color: var(--op-ink-dim);
+    white-space: nowrap;
+}
+.op-gauge-ticks span::before {
+    content: '';
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    width: 3px;
+    height: 1px;
+    background: var(--op-rule);
+}
+.op-gauge-scale {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: flex-start;
+    font-size: 0.58rem;
+    color: var(--op-ink-dim);
+    padding-left: 20px;   /* clears the log-scale tick labels */
+}
+.op-gauge-nudge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--op-1);
+}
+.op-gauge-foot {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--op-2);
+    font-size: 0.6rem;
+    color: var(--op-ink-dim);
+}
+.op-gauge-foot-r { white-space: nowrap; }
+.op-gauge.is-near-floor { border-color: var(--op-warn); }
+.op-gauge.is-near-floor .op-gauge-mark { background: var(--op-warn); }
+
+/* An axis the rig does not have is a fact, not an error: dimmed, no marker,
+   nudges removed from the DOM entirely (there is nothing to press). */
+.op-gauge[data-status="absent"] { opacity: 0.55; }
+.op-gauge[data-status="absent"] .op-gauge-track,
+.op-gauge[data-status="error"] .op-gauge-track { background: none; }
+
+/* ── controls ───────────────────────────────────────────────────────────── */
+.op-btn, .op-nbtn, .op-segbtn {
+    font-family: var(--op-ui);
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--bg-hover);
+    color: var(--op-ink);
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+.op-btn {
+    padding: var(--op-2) var(--op-3);
+    font-size: 0.72rem;
+    font-weight: 500;
+}
+.op-btn-wide { width: 100%; }
+.op-btn:hover:not(:disabled), .op-nbtn:hover:not(:disabled), .op-segbtn:hover { background: var(--border); }
+.op-btn:disabled, .op-nbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.op-btn-primary { background: var(--accent); border-color: var(--accent); color: #071018; font-weight: 600; }
+.op-btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.op-btn-ghost { background: transparent; }
+.op-btn-warn { background: var(--op-warn); border-color: var(--op-warn); color: #1a1204; font-weight: 600; }
+.op-btn-toggle[aria-pressed="true"], .op-btn.is-on {
+    border-color: var(--op-live);
+    color: var(--op-live);
+}
+.op-btn.is-emitting { border-color: var(--op-emit); color: var(--op-emit); }
+
+.op-nbtn {
+    padding: var(--op-1) var(--op-2);
+    font-family: var(--op-mono);
+    font-size: 0.66rem;
+}
+.op-micro { display: inline-flex; align-items: center; gap: var(--op-1); }
+.op-micro .op-num { min-width: 34px; }
+
+.op-seg { display: flex; flex-wrap: wrap; gap: var(--op-1); }
+.op-segbtn { padding: var(--op-2) var(--op-3); font-size: 0.68rem; }
+.op-segbtn.is-on { border-color: var(--accent); color: var(--accent); }
+
+.op-field { display: flex; align-items: center; justify-content: space-between; gap: var(--op-2); }
+.op-num-in, .op-sel {
+    font-family: var(--op-mono);
+    font-size: 0.72rem;
+    padding: var(--op-1) var(--op-2);
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--bg-dark);
+    color: var(--op-ink);
+    width: 110px;
+}
+.op-modepanel { display: flex; flex-direction: column; gap: var(--op-2); }
+.op-modepanel[hidden] { display: none; }
+
+/* Focus is visible on EVERY interactive element, including the canvas and the
+   gauge tracks. */
+.op-btn:focus-visible, .op-nbtn:focus-visible, .op-segbtn:focus-visible,
+.op-num-in:focus-visible, .op-sel:focus-visible, .op-gauge-track:focus-visible,
+.op-mark-canvas:focus-visible, .op-rrow:focus-visible, .op-libitem:focus-visible,
+.op-rrole:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* ── acquisition pane ───────────────────────────────────────────────────── */
+.op-pane-acquire { grid-template-columns: minmax(0, 1fr); }
+.op-main-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: var(--op-4);
+    min-height: 0;
+}
+.op-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.op-roster { display: flex; flex-direction: column; gap: var(--op-1); }
+.op-rrow {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    align-items: center;
+    gap: var(--op-2);
+    padding: var(--op-2);
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--op-panel);
+    cursor: pointer;
+    text-align: left;
+    color: var(--op-ink);
+    transition: background-color 0.12s ease;
+}
+.op-rrow:hover { background: var(--bg-hover); }
+.op-rrow.is-sel { border-color: var(--accent); }
+.op-rlabel { font-size: 0.72rem; font-weight: 500; }
+.op-rxy { font-family: var(--op-mono); font-size: 0.64rem; color: var(--op-ink-dim); }
+.op-rrole {
+    font-family: var(--op-ui);
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 2px var(--op-2);
+    border: 1px solid var(--op-rule);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--op-ink-dim);
+    cursor: pointer;
+}
+.op-rrole.is-reference { border-color: var(--accent-purple); color: var(--accent-purple); }
+.op-rcenter {
+    font-family: var(--op-ui);
+    font-size: 0.62rem;
+    padding: 3px var(--op-2);
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--bg-hover);
+    color: var(--op-ink);
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+}
+.op-rcenter:hover { background: var(--border); }
+.op-rcenter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.op-lib-list { display: flex; flex-direction: column; gap: var(--op-1); }
+.op-libitem {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--op-2);
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    background: var(--op-panel);
+    cursor: pointer;
+    text-align: left;
+    color: var(--op-ink);
+    font-size: 0.7rem;
+}
+.op-libitem small { font-family: var(--op-mono); font-size: 0.58rem; color: var(--op-ink-dim); }
+.op-libitem.is-sel { border-color: var(--accent); }
+
+.op-runspine { display: flex; flex-direction: column; gap: var(--op-2); }
+.op-tcard {
+    border: 1px solid var(--op-rule);
+    border-left-width: 2px;
+    border-radius: 6px;
+    background: var(--op-panel);
+    padding: var(--op-2) var(--op-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.op-tcard.st-active { border-left-color: var(--op-live); }
+.op-tcard.st-paused { border-left-color: var(--op-warn); }
+.op-tcard.st-done { opacity: 0.6; }
+.op-tcard-head { display: flex; justify-content: space-between; gap: var(--op-2); align-items: baseline; }
+.op-tcard-name { font-size: 0.74rem; font-weight: 600; }
+.op-tcard-state, .op-tcard-kind, .op-tcard-meta {
+    font-family: var(--op-mono);
+    font-size: 0.58rem;
+    color: var(--op-ink-dim);
+}
+.op-empty {
+    font-size: 0.68rem;
+    color: var(--op-ink-dim);
+    padding: var(--op-3);
+    border: 1px dashed var(--op-rule);
+    border-radius: 6px;
+    text-align: center;
+}
+.op-empty .op-btn { margin-top: var(--op-2); }
+
+/* ── narrow ─────────────────────────────────────────────────────────────── */
+@container operate (max-width: 900px) {
+    .op-pane { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+    .op-main, .op-inst { grid-column: 1; }
+    .op-inst { overflow-y: visible; }
+    .op-cam { flex: 0 0 auto; min-height: 260px; }
+    /* Stacked/narrow: the box is width-limited, so width drives and height
+       follows the aspect (the parent's height is no longer definite here). */
+    .op-cam-fit { width: 100%; height: auto; }
+    /* Keep the embryo rail beside the camera even here — just make it narrower.
+       It only stacks on top at the much smaller breakpoint below. */
+    .op-embryos { flex: 0 0 168px; }
+    .op-col { overflow-y: visible; }
+    .op-main-cols { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Only when there is genuinely no room for two columns does the rail stack on
+   top of the pane, capped so the camera keeps most of the height. */
+@container operate (max-width: 560px) {
+    .op-body { flex-direction: column; }
+    .op-embryos { flex: 0 0 auto; max-height: 148px; }
+}

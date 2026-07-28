@@ -23,6 +23,13 @@
     --accent-pink: #f472b6;
     --accent-cyan: #22d3ee;
 
+    /* Temperature graph colors (root-level so the graph is portable outside
+       .devices-container-map — e.g. when reused in manual mode) */
+    --temp-setpoint-color: #f59e0b;
+    --temp-water-color: #22d3ee;
+    --temp-grid-line-color: rgba(212, 221, 232, 0.20);
+    --temp-grid-label-color: #6a778a;
+
     /* Gradients for modern feel */
     --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #c084fc 100%);
     --gradient-success: linear-gradient(135deg, #4ade80 0%, #22d3ee 100%);
@@ -34,6 +41,10 @@
 
     /* Image backgrounds */
     --img-bg: #000;
+
+    /* Docked agent panel */
+    --panel-edge-shadow: rgba(0, 0, 0, 0.55);
+    --border-strong: #444c56;
 }
 
 /* ========================================
@@ -59,6 +70,12 @@
     --accent-pink: #ec4899;
     --accent-cyan: #06b6d4;
 
+    /* Temperature graph colors (root-level; see dark block) */
+    --temp-setpoint-color: #f59e0b;
+    --temp-water-color: #0e7490;
+    --temp-grid-line-color: rgba(29, 43, 58, 0.22);
+    --temp-grid-label-color: #6b7280;
+
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
     --gradient-success: linear-gradient(135deg, #22c55e 0%, #06b6d4 100%);
@@ -70,6 +87,10 @@
 
     /* Image backgrounds */
     --img-bg: #1e293b;
+
+    /* Docked agent panel — softer shadow + stronger seam for light mode */
+    --panel-edge-shadow: rgba(0, 0, 0, 0.18);
+    --border-strong: #cbd5e1;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -88,6 +109,25 @@ body {
     flex-direction: column;
     overflow: hidden;
     transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* App shell: main column + docked agent panel side by side. The flex row lets
+   the panel become a real column (pushing content) when pinned to dock; in the
+   default overlay mode the panel is position:fixed and sits out of this flow. */
+.app-shell {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    position: relative;   /* anchor for the overlay-mode agent panel */
+}
+.app-main {
+    flex: 1 1 auto;
+    min-width: 0;   /* allow canvases to shrink (not overflow) when docked */
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* Smooth theme transitions for key elements */
@@ -624,6 +664,114 @@ a.tab-link.active {
     display: flex;
     flex-direction: column;
 }
+
+/* ── Home (landing) tab ─────────────────────────────────────
+   #home-content is a flex column with overflow:hidden, so the scroll lives on
+   .home-scroll. */
+.home-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.home-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 22px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-card);
+}
+.home-hero-title { font-size: 1.35rem; font-weight: 700; color: var(--text); margin: 0; }
+.home-hero-status { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
+.home-start-btn {
+    flex: 0 0 auto;
+    padding: 10px 18px;
+    border: none; border-radius: 10px;
+    background: var(--gradient-primary, var(--accent));
+    color: #fff; font-weight: 600; font-size: 13.5px; cursor: pointer;
+    box-shadow: var(--shadow-glow);
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.home-start-btn:hover { transform: translateY(-1px); box-shadow: var(--shadow-glow-strong); }
+
+.home-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.home-card-wide { grid-column: 1 / -1; }
+@media (max-width: 820px) {
+    .home-grid { grid-template-columns: 1fr; }
+    .home-card-wide { grid-column: auto; }
+}
+
+.home-card {
+    display: flex; flex-direction: column;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-card);
+    min-height: 120px;
+}
+.home-card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 10px;
+}
+.home-card-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.home-card-link { font-size: 11.5px; color: var(--accent); text-decoration: none; }
+.home-card-link:hover { text-decoration: underline; }
+.home-card-body { display: flex; flex-direction: column; gap: 6px; }
+
+.home-item {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 10px; border-radius: 8px;
+    background: rgba(127, 127, 127, 0.05);
+    border: 1px solid transparent;
+}
+.home-item-clickable { cursor: pointer; }
+.home-item-clickable:hover { border-color: var(--accent); background: var(--bg-hover); }
+.home-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.home-item-row { display: flex; align-items: center; gap: 7px; }
+.home-item-name {
+    font-size: 13px; color: var(--text); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.home-item-meta { font-size: 11.5px; color: var(--text-muted); }
+.home-tag {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 999px;
+}
+.home-tag-live { color: var(--accent-green); border: 1px solid rgba(74, 222, 128, 0.4); }
+.home-resume {
+    flex: 0 0 auto;
+    padding: 4px 11px; border-radius: 7px;
+    border: 1px solid var(--accent); background: transparent; color: var(--accent);
+    font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.home-resume:hover { background: var(--accent); color: #fff; }
+.home-resume:disabled { opacity: 0.6; cursor: default; }
+.home-chip {
+    flex: 0 0 auto;
+    font-size: 11px; font-weight: 600;
+    padding: 2px 8px; border-radius: 999px;
+    background: var(--bg-hover); color: var(--text-muted);
+}
+
+.home-image-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.home-image {
+    width: 84px; height: 84px; border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--border); background: var(--img-bg); flex: 0 0 auto;
+}
+.home-image img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Live View - Clean full-width layout */
 .live-view {
@@ -1482,12 +1630,200 @@ a.tab-link.active {
     background: #000;
     border-radius: 3px;
     border: 1px solid var(--border);
-    display: none;  /* shown when frame arrives via .has-frame */
-    opacity: 1;
+    display: inline-block;
+    opacity: 0.35;  /* dim until a real frame arrives (.has-frame) */
 }
 
 .cal-spim-thumb.has-frame {
-    display: inline-block;
+    opacity: 1;
+}
+
+/* Thumb wrapped in a button so click pops out a larger live view.
+   Sized to match the thumb so it remains clickable even before the
+   first frame arrives. */
+.cal-spim-thumb-btn {
+    position: relative;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    line-height: 0;
+    color: inherit;
+    width: 96px;
+    height: 72px;
+}
+
+.cal-spim-thumb-btn:focus-visible {
+    outline: 2px solid var(--accent, #4f8cff);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.cal-spim-expand-icon {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    pointer-events: none;
+}
+
+.cal-spim-thumb-btn:hover .cal-spim-expand-icon,
+.cal-spim-thumb-btn:focus-visible .cal-spim-expand-icon {
+    opacity: 1;
+}
+
+/* Hide the expand chip when the thumb has no frame yet — nothing to expand. */
+.cal-spim-thumb-btn:has(.cal-spim-thumb:not(.has-frame)) .cal-spim-expand-icon {
+    display: none;
+}
+
+/* ---------- Floating SPIM popout ---------- */
+.cal-spim-popout {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    width: 560px;
+    height: 480px;
+    min-width: 320px;
+    min-height: 260px;
+    z-index: 9000;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45),
+                0 2px 8px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    resize: both;
+}
+
+.cal-spim-popout[hidden] {
+    display: none;
+}
+
+.cal-spim-popout.dragging {
+    user-select: none;
+    cursor: grabbing;
+}
+
+.cal-spim-popout-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-elevated, var(--bg-card));
+    border-bottom: 1px solid var(--border);
+    cursor: grab;
+    touch-action: none;
+}
+
+.cal-spim-popout.dragging .cal-spim-popout-header {
+    cursor: grabbing;
+}
+
+.cal-spim-popout-led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 6px rgba(74, 222, 128, 0.7);
+    animation: cal-spim-led-blink 1.6s ease-in-out infinite;
+}
+
+.cal-spim-popout-led.idle {
+    background: var(--text-muted, #666);
+    box-shadow: none;
+    animation: none;
+}
+
+.cal-spim-popout-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text);
+}
+
+.cal-spim-popout-embryo {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.cal-spim-popout-spacer {
+    flex: 1;
+}
+
+.cal-spim-popout-close {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    padding: 0 6px;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.cal-spim-popout-close:hover {
+    color: var(--text);
+    background: var(--border);
+}
+
+.cal-spim-popout-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    overflow: hidden;
+    padding: 4px;
+}
+
+.cal-spim-popout-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: none;
+}
+
+.cal-spim-popout-img.has-frame {
+    display: block;
+}
+
+.cal-spim-popout-placeholder {
+    color: var(--text-muted);
+    font-size: 12px;
+    letter-spacing: 0.4px;
+}
+
+.cal-spim-popout-placeholder[hidden] {
+    display: none;
+}
+
+.cal-spim-popout-footer {
+    flex: 0 0 auto;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elevated, var(--bg-card));
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* When a live frame is active, let the SPIM cell breathe a bit so the
@@ -2035,6 +2371,20 @@ a.tab-link.active {
 .event-type-badge.session { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
 .event-type-badge.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
 .event-type-badge.default { background: var(--bg-hover); color: var(--text-muted); }
+
+/* Log-record badges per level. The level is the badge text (DEBUG / INFO /
+   WARN / ERROR) for log rows; the LOG_RECORD type itself is collapsed into
+   the level so the column doesn't read the same string for every line. */
+.event-type-badge.log-debug { background: rgba(125, 134, 145, 0.18); color: #9ba3b0; }
+.event-type-badge.log-info  { background: rgba(88, 166, 255, 0.16); color: var(--accent); }
+.event-type-badge.log-warn  { background: rgba(210, 153, 34, 0.22); color: var(--accent-orange); }
+.event-type-badge.log-error { background: rgba(248, 81, 73, 0.22); color: #f85149; }
+
+/* Log line message: monospace, faint logger prefix, expandable trace. */
+.log-row .event-data { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.log-logger { color: var(--text-muted); opacity: 0.85; margin-right: 0.5rem; }
+.log-message { color: var(--text); }
+.log-exc { color: #f85149; opacity: 0.85; }
 
 .event-source {
     color: var(--text-muted);
@@ -3330,6 +3680,15 @@ kbd {
     padding: 0;
 }
 
+/* Filmstrip: rows on the left, reasoning/detail panel pinned on the right.
+   (Recovered from the lost WIP commit 0269e18d.) */
+.view-filmstrip {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    overflow: hidden;
+}
+
 /* ========================================
    AMBIENT HEALTH PULSE
    ======================================== */
@@ -3405,11 +3764,23 @@ kbd {
 .board-col { padding: 0 0.5rem; }
 .board-col-embryo { width: 100px; flex-shrink: 0; }
 .board-col-stage { width: 130px; flex-shrink: 0; }
-.board-col-conf { width: 60px; flex-shrink: 0; text-align: center; }
-.board-col-rate { width: 70px; flex-shrink: 0; text-align: center; }
-.board-col-eta { width: 70px; flex-shrink: 0; text-align: center; }
+.board-col-clock { width: 72px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.board-col-stereo { width: 140px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.board-col-pace { width: 90px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.board-col-eta { width: 70px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .board-col-spark { flex: 1; min-width: 100px; }
 .board-col-alert { width: 110px; flex-shrink: 0; text-align: right; }
+
+/* Pace cell coloring — green when on reference, orange when slow,
+   red when seriously slow. Class names mirror _formatPace(). */
+.board-col-pace.pace-unknown { color: var(--text-muted); }
+.board-col-pace.pace-normal  { color: var(--accent-green, #4ade80); }
+.board-col-pace.pace-slow    { color: #fb923c; }
+.board-col-pace.pace-slow-bad { color: #f87171; font-weight: 600; }
+
+/* Subtle overdue mark in the stereo cell when clock has run past the
+   expected stage duration. */
+.stereo-overdue { color: #fb923c; margin-left: 4px; }
 
 .board-rows { flex: 1; }
 
@@ -3500,8 +3871,10 @@ kbd {
        scrollbar shared by all rows. Labels pin to the left via
        position:sticky inside each row. */
     display: block;
+    flex: 1 1 0;        /* flex-1 child: shrinks/grows as the panel opens */
+    min-width: 0;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-gutter: stable;
     position: relative;
@@ -3634,6 +4007,10 @@ kbd {
     border-radius: 4px;
     border: 2px solid;
     object-fit: cover;
+    /* The stored projection is a three-view ([XY|YZ] over [XZ]); the embryo is
+       in the LEFT column (XY/XZ), and the centre is the black XY|YZ divider.
+       Crop to the left so the square thumbnail shows the embryo, not the gap. */
+    object-position: left center;
     background: var(--bg-dark);
 }
 
@@ -3658,15 +4035,25 @@ kbd {
 
 .filmstrip-detail {
     background: var(--bg-card);
-    /* Cap the detail panel so it always leaves the rows visible AND
-       has a scrollable body of its own. Without this, when an item is
-       expanded the detail panel can grow past the viewport bottom and
-       the parent's scroll is unintuitive (mouse wheel over the rows
-       converts to horizontal). max-height keeps it bounded; overflow-y
-       lets long VLM summaries scroll on their own. */
-    max-height: 60vh;
+    /* Right-side panel: fixed-ish width that shrinks gracefully on narrow
+       viewports. Scrolls vertically inside itself so long VLM summaries
+       don't push the layout. When empty (no frame selected) it collapses
+       entirely so the rows get full width. (Recovered from WIP 0269e18d.) */
+    flex: 0 0 auto;
+    width: clamp(360px, 32vw, 520px);
+    border-left: 1px solid var(--border);
     overflow-y: auto;
     overscroll-behavior: contain;
+    animation: filmstripDetailIn 0.18s ease-out;
+}
+.filmstrip-detail:empty { display: none; }
+@keyframes filmstripDetailIn {
+    from { transform: translateX(8px); opacity: 0; }
+    to   { transform: translateX(0);   opacity: 1; }
+}
+/* In the narrow side panel, stack the image | VLM summary split vertically. */
+#filmstrip-detail .detail-split {
+    grid-template-columns: 1fr;
 }
 
 /* ========================================
@@ -8698,7 +9085,7 @@ body.modal-open {
 .settings-content {
     flex: 1;
     max-width: 720px;
-    padding: 2rem 2.5rem;
+    padding: 2rem 2.5rem 0;
     overflow-y: auto;
 }
 
@@ -8820,6 +9207,46 @@ body.modal-open {
     color: var(--text-muted);
 }
 
+/* Thermalizer / server-backed settings controls */
+.th-note { margin-bottom: 0.9rem; }
+.th-ro { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
+.th-status {
+    font-size: 0.85rem; color: var(--text); font-variant-numeric: tabular-nums;
+    padding: 0.5rem 0.7rem; background: var(--bg-hover);
+    border: 1px solid var(--border); border-radius: 6px;
+}
+.th-actions { display: flex; gap: 0.6rem; }
+.settings-btn {
+    background: var(--bg-hover); border: 1px solid var(--border); color: var(--text);
+    font: 600 0.82rem/1 'Inter Tight', system-ui, sans-serif;
+    padding: 0.55rem 0.9rem; border-radius: 7px; cursor: pointer;
+    transition: background 0.13s, border-color 0.13s, color 0.13s, opacity 0.13s;
+}
+.settings-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.settings-btn:disabled { opacity: 0.5; cursor: progress; }
+.settings-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.settings-btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.settings-result { font-size: 0.8rem; margin-top: 0.6rem; min-height: 1.1em; }
+.settings-result.is-ok { color: var(--accent-green); }
+.settings-result.is-err { color: var(--accent-orange); }
+.settings-pre {
+    font: 0.78rem/1.5 ui-monospace, SFMono-Regular, monospace;
+    color: var(--text); background: var(--bg-dark); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.8rem 1rem; overflow-x: auto; white-space: pre;
+    max-height: 460px; overflow-y: auto;
+}
+.settings-defaults-bar { display: flex; gap: 0.5rem; margin-left: auto; flex-wrap: wrap; }
+.settings-subhead {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted); margin: 1.4rem 0 0.6rem; padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+}
+.settings-subhead:first-child { margin-top: 0.2rem; }
+.settings-pre code, .settings-hint code {
+    font: 0.85em ui-monospace, SFMono-Regular, monospace;
+    background: var(--bg-hover); padding: 0.05rem 0.3rem; border-radius: 4px;
+}
+
 /* Range slider */
 .settings-range {
     -webkit-appearance: none;
@@ -8863,6 +9290,13 @@ body.modal-open {
     position: sticky;
     bottom: 0;
     padding: 0.75rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    z-index: 5;
 }
 
 .settings-save-status {
@@ -8992,6 +9426,74 @@ body.modal-open {
 .devices-status-pill.paused { background: rgba(88, 166, 255, 0.2); color: var(--accent, #58a6ff); }
 .devices-status-pill.stale { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange, #d29922); }
 .devices-status-pill.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
+
+/* Device-layer supervision card (device-layer.js) */
+.devices-layer-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 0.9rem;
+    margin: 0.75rem 0 0.25rem;
+}
+.devices-layer-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+.devices-layer-head .devices-card-title { margin-bottom: 0; }
+.devices-layer-meta {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.devices-layer-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.devices-layer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    flex-wrap: wrap;
+}
+/* Stop tears down the running device layer — the destructive action, so it
+   reads red (filled + active when there's something to stop). When nothing is
+   running it stays red-tinted but clearly inactive, mirroring how Start is
+   blue-active/blue-faded. Overrides the generic .marking-action-btn:disabled
+   0.4 opacity so the red stays legible while disabled. */
+#devices-layer-stop {
+    background: #f85149;
+    border-color: #f85149;
+    color: #fff;
+}
+#devices-layer-stop:hover:not(:disabled) {
+    filter: brightness(1.08);
+    background: #f85149;
+}
+#devices-layer-stop:disabled {
+    opacity: 1;
+    background: transparent;
+    border-color: rgba(248, 81, 73, 0.4);
+    color: rgba(248, 81, 73, 0.55);
+}
+.devices-layer-log {
+    margin: 0.55rem 0 0;
+    padding: 0.5rem 0.65rem;
+    max-height: 220px;
+    overflow: auto;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 
 .devices-positions {
     display: grid;
@@ -9172,6 +9674,7 @@ body.modal-open {
     --map-zone-green:  90, 168, 122;     /* RGB triples for compositing */
     --map-zone-orange: 215, 152, 84;
     --map-zone-red:    220, 96,  88;
+    --map-embryo:      156, 120, 220;    /* lavender — distinct from zones and marker */
     --map-overlay-bg:    rgba(11, 14, 19, 0.78);
     --map-overlay-bg-2:  rgba(11, 14, 19, 0.92);
     --map-overlay-edge:  rgba(212, 221, 232, 0.18);
@@ -9189,6 +9692,7 @@ body.modal-open {
     --map-accent:    #0e7490;
     --map-accent-2:  #155e75;
     --map-warm:      #a16207;
+    --map-embryo:    100, 60, 180;       /* deeper purple for cream paper */
     --map-overlay-bg:    rgba(246, 243, 236, 0.82);
     --map-overlay-bg-2:  rgba(246, 243, 236, 0.96);
     --map-overlay-edge:  rgba(29, 43, 58, 0.18);
@@ -9252,6 +9756,179 @@ body.modal-open {
 .devices-status-led.paused::before{ background: var(--map-accent); }
 .devices-status-led.stale::before { background: var(--map-warm); }
 .devices-status-led.error::before { background: #f87171; }
+/* Status sub-label (e.g. the live "Δt 0.20s"). The value updates every frame;
+   tabular figures + a reserved, right-aligned width keep its box from changing
+   size, so the rapidly-changing digits can't reflow and jitter the LIVE badge
+   and room-light button beside it (the cluster is right-anchored in the bar). */
+.devices-status-meta {
+    font-variant-numeric: tabular-nums;
+    min-width: 3.4rem;
+    text-align: right;
+}
+
+/* --- Room-light toggle (header) -------------------------------------- */
+.devices-room-light {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.18rem 0.6rem 0.18rem 0.45rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.devices-room-light[hidden] { display: none; }
+.devices-room-light:hover:not(:disabled) {
+    border-color: var(--map-accent);
+    color: var(--map-ink);
+}
+.devices-room-light:disabled { opacity: 0.5; cursor: default; }
+.devices-room-light-bulb {
+    display: inline-flex;
+    align-items: center;
+    color: var(--map-ink-mute);
+    transition: color 0.15s, filter 0.15s;
+}
+/* "on" — warm glow on the bulb to read like a lit lamp */
+.devices-room-light.is-on {
+    border-color: rgba(255, 210, 74, 0.7);
+    color: #ffd24a;
+    background: rgba(255, 210, 74, 0.12);
+}
+.devices-room-light.is-on .devices-room-light-bulb {
+    color: #ffd24a;
+    filter: drop-shadow(0 0 5px rgba(255, 210, 74, 0.7));
+}
+.devices-room-light.is-busy { opacity: 0.65; cursor: progress; }
+
+/* --- Temperature controller ------------------------------------------- */
+/* Readout + setpoint input + Set, styled as a pill to sit beside the
+   room-light toggle in the Devices header. Hidden until a controller is
+   available (mirrors the room light). */
+.devices-temp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.12rem 0.28rem 0.12rem 0.5rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.devices-temp[hidden] { display: none; }
+.devices-temp-icon { display: inline-flex; align-items: center; color: var(--map-ink-mute); transition: color 0.15s, filter 0.15s; }
+/* "locked" — cool glow once the controller reports SYSTEM LOCKED */
+.devices-temp.is-locked { border-color: rgba(90, 200, 250, 0.6); color: #5ac8fa; background: rgba(90, 200, 250, 0.1); }
+.devices-temp.is-locked .devices-temp-icon { color: #5ac8fa; filter: drop-shadow(0 0 5px rgba(90, 200, 250, 0.6)); }
+.devices-temp.is-busy { opacity: 0.7; cursor: progress; }
+.devices-temp-readout {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    min-width: 3.4em;
+    text-align: right;
+    white-space: nowrap;
+}
+.devices-temp-input {
+    width: 3.4em;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-paper, rgba(0, 0, 0, 0.2));
+    border-radius: 6px;
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    -moz-appearance: textfield;
+}
+.devices-temp-input:focus { outline: none; border-color: var(--map-accent); }
+.devices-temp-input::-webkit-outer-spin-button,
+.devices-temp-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.devices-temp-set {
+    padding: 0.16rem 0.5rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.devices-temp-set:hover:not(:disabled) { border-color: var(--map-accent); color: var(--map-ink); }
+.devices-temp-set:disabled { opacity: 0.5; cursor: default; }
+
+/* --- Temperature trajectory graph ------------------------------------- */
+/* SVG chart card mounted at the bottom of #devices-content.              */
+.devices-temp-graph {
+    padding: 0.6rem 1rem 0.5rem;
+    border-top: 1px solid var(--map-overlay-edge);
+    min-height: 2rem;     /* keeps the section visible even when empty    */
+}
+/* Solid line: water temperature */
+.temp-water {
+    stroke: var(--temp-water-color);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+/* Dashed line: setpoint (stepped) */
+.temp-setpoint {
+    stroke: var(--temp-setpoint-color);
+    stroke-width: 1.5;
+    stroke-dasharray: 5 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: 0.85;
+}
+/* Y-axis reference gridlines */
+.temp-grid-line {
+    stroke: var(--temp-grid-line-color);
+    stroke-width: 0.75;
+}
+/* Y-axis tick labels */
+.temp-grid-label {
+    fill: var(--temp-grid-label-color);
+    font-size: 8px;
+    font-family: ui-monospace, monospace;
+    text-anchor: end;
+    dominant-baseline: middle;
+}
+/* Calm empty state — never shows mock data */
+.temp-graph-empty {
+    padding: 1rem 0;
+    text-align: center;
+    color: var(--map-ink-mute);
+    font-size: 0.78rem;
+}
+/* Last-sample readout above the SVG */
+.temp-graph-readout {
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    color: var(--map-ink-mute);
+    margin-bottom: 0.2rem;
+    padding: 0 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* --- Containers ------------------------------------------------------- */
 .devices-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -9427,6 +10104,53 @@ body.modal-open {
 @keyframes devices-marker-pulse {
     0%   { opacity: 0.35; r: 6; }
     100% { opacity: 0;    r: 28; }
+}
+
+/* --- Embryo waypoints ------------------------------------------------ */
+/* Coarse = bottom-camera / manual placement; fine = SPIM-objective
+   alignment. Coarse reads as an outlined ring (provisional), fine as a
+   filled disc (committed). Same hue so the row of embryos still reads as
+   one cohort, but visual weight signals calibration state at a glance. */
+.devices-embryo-group {
+    cursor: pointer;
+}
+.devices-embryo-ring {
+    fill: rgba(var(--map-embryo), 0.08);
+    stroke: rgba(var(--map-embryo), 0.85);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+}
+.devices-embryo-disc {
+    fill: rgba(var(--map-embryo), 0.65);
+    stroke: rgba(var(--map-embryo), 0.95);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+}
+.devices-embryo-label {
+    fill: var(--map-ink);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--map-paper);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
+/* Selected = "picked up" — outlined dashed, hollow fill, brighter label.
+   Click on empty map drops the picked-up embryo at that XY; Delete /
+   Backspace removes it; Escape deselects. */
+.devices-embryo-group.devices-embryo-selected .devices-embryo-ring,
+.devices-embryo-group.devices-embryo-selected .devices-embryo-disc {
+    fill: rgba(var(--map-embryo), 0.12);
+    stroke: rgba(var(--map-embryo), 1);
+    stroke-width: 2;
+    stroke-dasharray: 4 3;
+}
+.devices-embryo-group.devices-embryo-selected .devices-embryo-label {
+    fill: rgba(var(--map-embryo), 1);
 }
 
 /* --- Overlay panels (compass, readout, scalebar, legend) ------------- */
@@ -9619,6 +10343,72 @@ body.modal-open {
     color: var(--map-paper);
     border-color: var(--map-accent);
 }
+
+/* ---- Top-right rail: the XY stage readout (Detect/mark moved to Operate) ---- */
+.devices-map-rail {
+    position: absolute;
+    top: 0.85rem;
+    right: 0.85rem;
+    width: 230px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    z-index: 4;
+}
+/* Readout drops its own absolute positioning inside the rail and fills it. */
+.devices-map-rail .devices-map-readout {
+    position: static;
+    top: auto;
+    right: auto;
+    width: 100%;
+    min-width: 0;
+}
+
+
+.devices-camera-head-btns {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.devices-camera-expand {
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.72rem;
+    line-height: 1;
+    padding: 0.16rem 0.4rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.devices-camera-expand:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+.devices-camera-expand.active {
+    background: var(--map-accent);
+    color: var(--map-paper);
+    border-color: var(--map-accent);
+}
+/* Enlarged bottom-camera view — centred over the map, toggled by the
+   expand button. Reuses the same streaming <img>; sized by height so the
+   whole panel (header + stage + foot) stays within the map area. */
+.devices-camera-panel.expanded {
+    bottom: auto;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: auto;
+    max-width: calc(100% - 2rem);
+    z-index: 9;
+}
+.devices-camera-panel.expanded .devices-camera-stage {
+    height: min(64vh, 640px);
+    width: auto;
+    max-width: 100%;
+}
 .devices-camera-stage {
     position: relative;
     width: 100%;
@@ -9635,8 +10425,43 @@ body.modal-open {
     display: block;
     opacity: 0;
     transition: opacity 0.25s;
+    /* Zoom anchored at frame centre; scroll-wheel + cursor adjust translate
+       so the point under the cursor stays under the cursor. */
+    transform-origin: center center;
+    will-change: transform;
 }
 .devices-camera-img.has-frame { opacity: 1; }
+
+/* Cursor hints for zoom/pan mode. Default cursor stays untouched at zoom 1
+   so the operator can still interact with overlays under the camera. */
+.devices-camera-stage.camera-zoomed   { cursor: grab; }
+.devices-camera-stage.camera-panning  { cursor: grabbing; }
+
+/* Centre reticle — full-span horizontal + vertical hairline marking the
+   FOV centre IN the image. SVG is a sibling of <img>; the inner <g>
+   receives the same translate/scale (in viewBox units) so the lines
+   track the camera image through zoom/pan instead of staying pinned to
+   the viewer rect. Transform lives on the <g>, not the SVG element, so
+   the renderer re-rasterises at each zoom step — otherwise the strokes
+   get bitmap-scaled and go blurry. */
+.devices-camera-crosshair {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+.devices-camera-stage:has(.devices-camera-img.has-frame) .devices-camera-crosshair {
+    opacity: 1;
+}
+.devices-camera-crosshair line {
+    stroke: var(--map-warm);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    stroke-opacity: 0.85;
+}
 
 .devices-camera-placeholder {
     position: absolute;
@@ -9914,4 +10739,839 @@ body.modal-open {
 .chat-send:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* =========================================================================
+   Manual view — lightsheet live panel + control rail
+   ========================================================================= */
+
+/* Two-column layout: image stage (flex-grow) + fixed control rail */
+.ls-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 1rem;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+}
+
+/* Left column — live image stage */
+.ls-image-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.ls-stage-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+/* The stage itself reuses .devices-camera-stage aspect + overflow */
+.ls-stage {
+    flex: 1;
+    min-height: 280px;
+    /* override aspect-ratio: let the flex column stretch it */
+    aspect-ratio: unset;
+}
+
+/* Right column — control rail.
+   Two-column masonry so every control stays visible without scrolling.
+   multicol packs the varying-height cards tighter than a grid would (no
+   row-alignment gaps); each .ls-group sets break-inside to stay whole.
+   overflow-y:auto is a safety net only — the default (collapsed) control
+   set fits with no scrollbar; it appears solely if Timelapse is expanded. */
+.ls-rail {
+    width: 380px;
+    flex-shrink: 0;
+    columns: 2;
+    column-gap: 0.7rem;
+    overflow-y: auto;
+    padding: 0.1rem 0 0.5rem;
+}
+
+/* Control group block */
+.ls-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.32rem;
+    padding: 0.55rem 0.65rem;
+    background: var(--map-overlay-bg);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 5px;
+    /* multicol: keep each card intact and space them (rail gap is gone) */
+    break-inside: avoid;
+    margin-bottom: 0.7rem;
+}
+
+/* Stream group: the live toggle, relocated from the viewer header to a
+   prominent full-width button at the top of the rail. column-span makes it
+   a header across both columns, whose top lines up with the image stage. */
+.ls-group-stream {
+    column-span: all;
+    /* no card frame — this is just the toggle, not a boxed control group */
+    background: transparent;
+    border: none;
+    padding: 0;
+    /* top margin ≈ the viewer's header row height so the button lines up
+       with the top of the image-stage box (not the "LIGHTSHEET" label row). */
+    margin-top: 1.05rem;
+    margin-bottom: 0.85rem;
+}
+/* Slim outline "● LIVE" toggle. Muted when off; glows green while streaming
+   (the .active class is toggled on by applyLightsheetState). */
+.ls-stream-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.34rem 0.6rem;
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ls-stream-btn::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--map-ink-mute);
+    flex: none;
+    transition: background 0.12s, box-shadow 0.12s;
+}
+.ls-stream-btn:hover { border-color: var(--map-accent); color: var(--map-ink); }
+.ls-stream-btn.active {
+    border-color: #4ade80;
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.10);
+}
+.ls-stream-btn.active::before {
+    background: #4ade80;
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+}
+
+.ls-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+}
+
+/* Generic inline row */
+.ls-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+/* Slider + number inline */
+.ls-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.ls-slider {
+    flex: 1;
+    min-width: 0;
+    height: 3px;
+    accent-color: var(--map-accent);
+    cursor: pointer;
+}
+
+.ls-number {
+    width: 64px;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    border-radius: 4px;
+    padding: 0.2rem 0.35rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.ls-number-sm {
+    width: 50px;
+}
+
+.ls-number:focus {
+    outline: none;
+    border-color: var(--map-accent);
+}
+
+.ls-unit {
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    font-size: 0.62rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+/* Illumination button rows */
+.ls-btn-row {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.ls-illum-btn {
+    flex: 1;
+    /* Reserve enough width that labels wrap to a new row instead of
+       truncating to an ellipsis in the narrower 2-column rail. */
+    min-width: 4.25rem;
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.28rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ls-illum-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+
+.ls-illum-btn--active {
+    background: rgba(34, 211, 238, 0.14);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+
+/* Laser-off indicator */
+.ls-laser-indicator {
+    font-size: 0.6rem;
+    color: var(--map-ink-mute);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.1rem;
+}
+
+.ls-laser-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+.ls-laser-dot--on {
+    background: var(--map-accent);
+}
+
+/* Laser preset row (B2) */
+.ls-laser-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+}
+
+.ls-laser-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+.ls-laser-select {
+    flex: 1;
+    min-width: 0;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.62rem;
+    border-radius: 4px;
+    padding: 0.18rem 0.3rem;
+    cursor: pointer;
+    transition: border-color 0.12s;
+}
+
+.ls-laser-select:focus {
+    outline: none;
+    border-color: var(--map-accent);
+}
+
+/* Temperature setpoint button */
+.ls-set-btn {
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.ls-set-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+}
+
+/* Temperature mini-graph */
+.ls-tempgraph {
+    min-height: 48px;
+    margin-top: 0.25rem;
+}
+
+/* Acquire buttons */
+.ls-acquire-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.ls-acquire-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+
+.ls-acquire-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Last-captured ref card */
+.ls-lastcap {
+    margin-top: 0.35rem;
+    padding: 0.35rem 0.45rem;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.ls-lastcap[hidden] { display: none; }
+
+.ls-lastcap-label {
+    font-size: 0.58rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+}
+
+.ls-lastcap-ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--map-ink);
+    word-break: break-all;
+}
+
+/* ── Timelapse collapsible panel (B2 Task 3) ─────────────────────────────── */
+
+/* Clickable header button (also carries .ls-label for font/color) */
+.ls-collapsible-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+/* ▶/▼ caret — rotates when expanded */
+.ls-collapsible-arrow {
+    font-size: 0.5rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+
+.ls-collapsible-head[aria-expanded="true"] .ls-collapsible-arrow {
+    transform: rotate(90deg);
+}
+
+/* Collapsible body — hidden via [hidden] attribute; explicit rule prevents
+   display overrides from fighting the attribute (mirrors .ls-lastcap[hidden]) */
+.ls-collapsible-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.32rem;
+    margin-top: 0.35rem;
+}
+
+.ls-collapsible-body[hidden] { display: none; }
+
+/* Sub-rows: like .ls-row but slightly indented for the body interior */
+.ls-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-left: 0.25rem;
+}
+
+/* Sub-label: like .ls-label but fixed-width to align inputs column */
+.ls-sub-label {
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    min-width: 4.5rem;
+    flex-shrink: 0;
+}
+
+/* Volume-Geometry inset sub-group */
+.ls-sub-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    padding: 0.4rem 0.5rem;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    margin: 0.15rem 0;
+}
+
+/* "VOLUME GEOMETRY" sub-header */
+.ls-sub-section-label {
+    font-size: 0.52rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    margin-bottom: 0.1rem;
+}
+
+/* Start-result / status line — mono, muted */
+.ls-tl-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--map-ink-mute);
+    padding: 0.2rem 0.25rem;
+    word-break: break-all;
+}
+
+.ls-tl-status[hidden] { display: none; }
+
+/* ── Timelapse accordion (active/inactive section states — B3 UX) ─────────── */
+
+/* Wrapper for each accordion section */
+.ls-acc-section {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--map-rule-soft);
+    padding-bottom: 0.12rem;
+    margin-bottom: 0.08rem;
+}
+.ls-acc-section:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Section header button */
+.ls-acc-head {
+    display: flex;
+    align-items: center;
+    gap: 0.32rem;
+    background: transparent;
+    border: none;
+    padding: 0.26rem 0;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+}
+
+/* Status dot — hollow/muted when inactive */
+.ls-acc-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid var(--map-ink-mute);
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+/* Section label */
+.ls-acc-title {
+    font-size: 0.575rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+
+/* One-line summary — shown only when section is touched */
+.ls-acc-summary {
+    flex: 1;
+    font-size: 0.57rem;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+    color: var(--map-ink-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.ls-acc-summary[hidden] { display: none; }
+
+/* Caret arrow */
+.ls-acc-arrow {
+    font-size: 0.44rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: transform 0.15s, color 0.15s;
+}
+.ls-acc-head[aria-expanded="true"] .ls-acc-arrow {
+    transform: rotate(90deg);
+}
+
+/* ── Active / touched state ────────────────────────────────────────────────── */
+.ls-acc-head.is-active .ls-acc-dot {
+    background: var(--map-accent);
+    border-color: var(--map-accent);
+}
+.ls-acc-head.is-active .ls-acc-title {
+    color: var(--map-accent);
+}
+.ls-acc-head.is-active .ls-acc-summary {
+    color: var(--map-accent);
+    opacity: 0.85;
+}
+.ls-acc-head.is-active .ls-acc-arrow {
+    color: var(--map-accent);
+}
+
+/* Section body */
+.ls-acc-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.26rem;
+    padding: 0.18rem 0 0.32rem 0.5rem;
+}
+.ls-acc-body[hidden] { display: none; }
+
+/* Outer timelapse panel header dot — signals any section is set */
+.ls-tl-outer-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+.ls-tl-outer-dot.is-active {
+    background: var(--map-accent);
+    border-color: var(--map-accent);
+}
+
+/* Start button reads "ready" (accent) once any section is configured */
+.ls-tl-start-btn {
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.ls-tl-start-btn.is-ready {
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+    background: rgba(34, 211, 238, 0.08);
+}
+
+/* Submit row — give the button its full row width */
+.ls-tl-submit-row {
+    margin-top: 0.3rem;
+}
+
+/* ==========================================
+   Gallery Tab
+   ========================================== */
+
+.gallery-tab-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    padding: 1.25rem 1.5rem 0;
+    box-sizing: border-box;
+}
+
+.gallery-tab-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-shrink: 0;
+}
+
+.gallery-tab-title {
+    font-size: 1.35rem;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin: 0;
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+
+.gallery-tab-title-script {
+    font-family: 'Georgia', serif;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.gallery-tab-title-em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--accent);
+}
+
+.gallery-tab-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.gallery-filter-select {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.8rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.gallery-filter-select:hover,
+.gallery-filter-select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.gallery-refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 1rem;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.gallery-refresh-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.gallery-tab-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 1.5rem;
+}
+
+.gallery-tab-empty,
+.gallery-tab-loading,
+.gallery-tab-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.gallery-tab-error {
+    color: var(--accent-red, #ef4444);
+}
+
+.gallery-tab-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.75rem;
+}
+
+.gallery-tab-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.gallery-tab-item:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.gallery-tab-thumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: contain;
+    background: var(--bg-dark);
+}
+
+.gallery-tab-thumb-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1;
+    background: var(--bg-dark);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 0.5rem;
+    box-sizing: border-box;
+}
+
+.gallery-tab-item-info {
+    padding: 0.4rem 0.5rem 0.45rem;
+    border-top: 1px solid var(--border);
+}
+
+.gallery-tab-item-type {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gallery-tab-item-embryo {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.1rem;
+}
+
+.gallery-tab-item-ts {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    opacity: 0.65;
+    margin-top: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ==========================================
+   Gently Toast — volume acquired / burst acquired
+   ========================================== */
+
+.gently-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--bg-card);
+    border: 1px solid var(--accent-green);
+    border-radius: 10px;
+    padding: 0.6rem 1rem 0.6rem 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    z-index: 10010;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: auto;
+}
+
+.gently-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.gently-toast-msg {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.gently-toast-action {
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.gently-toast-action:hover {
+    background: var(--accent);
+    color: var(--bg-dark);
+}
+
+.gently-toast-dismiss {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.1rem;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+    margin-left: 0.2rem;
+}
 }

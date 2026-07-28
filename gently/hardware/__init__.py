@@ -14,12 +14,23 @@ Usage:
 
 import importlib
 import logging
+import pkgutil
 from types import ModuleType
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_active_hardware: Optional[ModuleType] = None
+_active_hardware: ModuleType | None = None
+
+
+def available_hardware() -> list[str]:
+    """Names of the hardware plugins shipped under gently.hardware."""
+    import gently.hardware as _pkg
+
+    return sorted(
+        m.name
+        for m in pkgutil.iter_modules(_pkg.__path__)
+        if m.ispkg and not m.name.startswith("_")
+    )
 
 
 def load_hardware(name: str) -> ModuleType:
@@ -43,7 +54,18 @@ def load_hardware(name: str) -> ModuleType:
         If the hardware module cannot be found.
     """
     global _active_hardware
-    module = importlib.import_module(f"gently.hardware.{name}")
+    try:
+        module = importlib.import_module(f"gently.hardware.{name}")
+    except ModuleNotFoundError as e:
+        # Only a missing hardware *package* is a config error; re-raise if a
+        # dependency inside the module is what's missing.
+        if e.name in (f"gently.hardware.{name}", name):
+            avail = ", ".join(available_hardware()) or "(none found)"
+            raise ValueError(
+                f"Unknown hardware '{name}'. Available: {avail}. "
+                f"Set 'hardware:' in config/config.yml."
+            ) from e
+        raise
     _active_hardware = module
     logger.info("Loaded hardware module: %s", name)
     return module
@@ -60,7 +82,6 @@ def get_hardware() -> ModuleType:
     """
     if _active_hardware is None:
         raise RuntimeError(
-            "No hardware loaded. Call load_hardware() at startup, "
-            "or set 'hardware' in config.yml."
+            "No hardware loaded. Call load_hardware() at startup, or set 'hardware' in config.yml."
         )
     return _active_hardware

@@ -9,7 +9,9 @@ Provides tables and methods for:
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from ._protocols import StoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_ml_data_assessments_pipeline ON ml_data_assessmen
 """
 
 
-class MlPipelinesMixin:
+class MlPipelinesMixin(StoreProtocol):
     """ContextStore mixin for ML pipeline management."""
 
     def _ensure_ml_tables(self):
@@ -91,10 +93,10 @@ class MlPipelinesMixin:
         campaign_id: str,
         name: str,
         task: str = "embryo_stage_classification",
-        model_config: Optional[Dict] = None,
-        data_split: Optional[Dict] = None,
-        training_config: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
+        model_config: dict | None = None,
+        data_split: dict | None = None,
+        training_config: dict | None = None,
+    ) -> dict[str, Any]:
         """Create a new ML pipeline."""
         self._ensure_ml_tables()
         pipeline_id = self._gen_id()
@@ -106,16 +108,22 @@ class MlPipelinesMixin:
                     training_config, created_at, updated_at)
                    VALUES (?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?)""",
                 (
-                    pipeline_id, campaign_id, name, task,
+                    pipeline_id,
+                    campaign_id,
+                    name,
+                    task,
                     json.dumps(model_config) if model_config else None,
                     json.dumps(data_split) if data_split else None,
                     json.dumps(training_config) if training_config else None,
-                    now, now,
+                    now,
+                    now,
                 ),
             )
-        return self.get_ml_pipeline(pipeline_id)
+        pipeline = self.get_ml_pipeline(pipeline_id)
+        assert pipeline is not None
+        return pipeline
 
-    def get_ml_pipeline(self, pipeline_id: str) -> Optional[Dict[str, Any]]:
+    def get_ml_pipeline(self, pipeline_id: str) -> dict[str, Any] | None:
         """Get a pipeline by ID."""
         self._ensure_ml_tables()
         row = self._conn.execute(
@@ -125,7 +133,7 @@ class MlPipelinesMixin:
             return None
         return self._row_to_pipeline(row)
 
-    def list_ml_pipelines(self, campaign_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_ml_pipelines(self, campaign_id: str | None = None) -> list[dict[str, Any]]:
         """List pipelines, optionally filtered by campaign."""
         self._ensure_ml_tables()
         if campaign_id:
@@ -139,11 +147,18 @@ class MlPipelinesMixin:
             ).fetchall()
         return [self._row_to_pipeline(r) for r in rows]
 
-    def update_ml_pipeline(self, pipeline_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    def update_ml_pipeline(self, pipeline_id: str, **kwargs) -> dict[str, Any] | None:
         """Update pipeline fields."""
         self._ensure_ml_tables()
-        allowed = {"status", "model_config", "data_split", "training_config",
-                    "best_run_id", "best_accuracy", "name"}
+        allowed = {
+            "status",
+            "model_config",
+            "data_split",
+            "training_config",
+            "best_run_id",
+            "best_accuracy",
+            "name",
+        }
         updates = []
         values = []
         for k, v in kwargs.items():
@@ -168,7 +183,7 @@ class MlPipelinesMixin:
             )
         return self.get_ml_pipeline(pipeline_id)
 
-    def _row_to_pipeline(self, row) -> Dict[str, Any]:
+    def _row_to_pipeline(self, row) -> dict[str, Any]:
         return {
             "id": row["id"],
             "campaign_id": row["campaign_id"],
@@ -177,7 +192,9 @@ class MlPipelinesMixin:
             "status": row["status"],
             "model_config": json.loads(row["model_config"]) if row["model_config"] else None,
             "data_split": json.loads(row["data_split"]) if row["data_split"] else None,
-            "training_config": json.loads(row["training_config"]) if row["training_config"] else None,
+            "training_config": json.loads(row["training_config"])
+            if row["training_config"]
+            else None,
             "best_run_id": row["best_run_id"],
             "best_accuracy": row["best_accuracy"],
             "created_at": row["created_at"],
@@ -191,11 +208,11 @@ class MlPipelinesMixin:
     def create_training_run(
         self,
         pipeline_id: str,
-        model_config: Optional[Dict] = None,
-        training_config: Optional[Dict] = None,
-        data_split: Optional[Dict] = None,
+        model_config: dict | None = None,
+        training_config: dict | None = None,
+        data_split: dict | None = None,
         peer_instance_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new training run."""
         self._ensure_ml_tables()
         run_id = self._gen_id()
@@ -206,16 +223,19 @@ class MlPipelinesMixin:
                     data_split, peer_instance_id)
                    VALUES (?, ?, 'planned', ?, ?, ?, ?)""",
                 (
-                    run_id, pipeline_id,
+                    run_id,
+                    pipeline_id,
                     json.dumps(model_config) if model_config else None,
                     json.dumps(training_config) if training_config else None,
                     json.dumps(data_split) if data_split else None,
                     peer_instance_id,
                 ),
             )
-        return self.get_training_run(run_id)
+        run = self.get_training_run(run_id)
+        assert run is not None
+        return run
 
-    def get_training_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+    def get_training_run(self, run_id: str) -> dict[str, Any] | None:
         """Get a training run by ID."""
         self._ensure_ml_tables()
         row = self._conn.execute(
@@ -225,7 +245,7 @@ class MlPipelinesMixin:
             return None
         return self._row_to_run(row)
 
-    def list_training_runs(self, pipeline_id: str) -> List[Dict[str, Any]]:
+    def list_training_runs(self, pipeline_id: str) -> list[dict[str, Any]]:
         """List runs for a pipeline."""
         self._ensure_ml_tables()
         rows = self._conn.execute(
@@ -234,13 +254,22 @@ class MlPipelinesMixin:
         ).fetchall()
         return [self._row_to_run(r) for r in rows]
 
-    def update_training_run(self, run_id: str, **kwargs) -> Optional[Dict[str, Any]]:
+    def update_training_run(self, run_id: str, **kwargs) -> dict[str, Any] | None:
         """Update training run fields."""
         self._ensure_ml_tables()
         allowed = {
-            "status", "current_epoch", "total_epochs", "train_loss", "val_loss",
-            "val_accuracy", "best_val_accuracy", "model_weights_path", "metrics_path",
-            "started_at", "completed_at", "error_message",
+            "status",
+            "current_epoch",
+            "total_epochs",
+            "train_loss",
+            "val_loss",
+            "val_accuracy",
+            "best_val_accuracy",
+            "model_weights_path",
+            "metrics_path",
+            "started_at",
+            "completed_at",
+            "error_message",
         }
         updates = []
         values = []
@@ -261,13 +290,15 @@ class MlPipelinesMixin:
             )
         return self.get_training_run(run_id)
 
-    def _row_to_run(self, row) -> Dict[str, Any]:
+    def _row_to_run(self, row) -> dict[str, Any]:
         return {
             "id": row["id"],
             "pipeline_id": row["pipeline_id"],
             "status": row["status"],
             "model_config": json.loads(row["model_config"]) if row["model_config"] else None,
-            "training_config": json.loads(row["training_config"]) if row["training_config"] else None,
+            "training_config": json.loads(row["training_config"])
+            if row["training_config"]
+            else None,
             "data_split": json.loads(row["data_split"]) if row["data_split"] else None,
             "current_epoch": row["current_epoch"],
             "total_epochs": row["total_epochs"],
@@ -289,15 +320,15 @@ class MlPipelinesMixin:
 
     def save_data_assessment(
         self,
-        pipeline_id: Optional[str] = None,
+        pipeline_id: str | None = None,
         total_sessions: int = 0,
         total_embryos: int = 0,
         total_volumes: int = 0,
         annotated_embryos: int = 0,
-        stage_distribution: Optional[Dict] = None,
-        coverage_gaps: Optional[List] = None,
+        stage_distribution: dict | None = None,
+        coverage_gaps: list | None = None,
         quality_notes: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Save a data assessment snapshot."""
         self._ensure_ml_tables()
         assessment_id = self._gen_id()
@@ -310,16 +341,23 @@ class MlPipelinesMixin:
                     quality_notes, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    assessment_id, pipeline_id, total_sessions, total_embryos,
-                    total_volumes, annotated_embryos,
+                    assessment_id,
+                    pipeline_id,
+                    total_sessions,
+                    total_embryos,
+                    total_volumes,
+                    annotated_embryos,
                     json.dumps(stage_distribution) if stage_distribution else None,
                     json.dumps(coverage_gaps) if coverage_gaps else None,
-                    quality_notes, now,
+                    quality_notes,
+                    now,
                 ),
             )
-        return self.get_data_assessment(assessment_id)
+        assessment = self.get_data_assessment(assessment_id)
+        assert assessment is not None
+        return assessment
 
-    def get_data_assessment(self, assessment_id: str) -> Optional[Dict[str, Any]]:
+    def get_data_assessment(self, assessment_id: str) -> dict[str, Any] | None:
         """Get a data assessment by ID."""
         self._ensure_ml_tables()
         row = self._conn.execute(
@@ -334,7 +372,9 @@ class MlPipelinesMixin:
             "total_embryos": row["total_embryos"],
             "total_volumes": row["total_volumes"],
             "annotated_embryos": row["annotated_embryos"],
-            "stage_distribution": json.loads(row["stage_distribution"]) if row["stage_distribution"] else None,
+            "stage_distribution": json.loads(row["stage_distribution"])
+            if row["stage_distribution"]
+            else None,
             "coverage_gaps": json.loads(row["coverage_gaps"]) if row["coverage_gaps"] else None,
             "quality_notes": row["quality_notes"],
             "created_at": row["created_at"],

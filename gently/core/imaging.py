@@ -22,7 +22,8 @@ import base64
 import io
 import logging
 from pathlib import Path
-from typing import Optional, Tuple
+from types import ModuleType
+from typing import Any
 
 import numpy as np
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -135,7 +137,7 @@ def image_to_base64(
             )
 
     buffer = io.BytesIO()
-    save_kwargs = {"format": format, "optimize": True}
+    save_kwargs: dict[str, Any] = {"format": format, "optimize": True}
     if format.upper() == "JPEG":
         save_kwargs["quality"] = quality
     pil_image.save(buffer, **save_kwargs)
@@ -246,8 +248,7 @@ def compress_image_for_api(
             image = np.repeat(image, 10, axis=1)
 
     img = normalize_to_uint8(image, method="percentile", p_low=1, p_high=99.5)
-    b64 = image_to_base64(img, format="JPEG", quality=quality,
-                          max_dimension=max_dimension)
+    b64 = image_to_base64(img, format="JPEG", quality=quality, max_dimension=max_dimension)
     size_kb = len(base64.b64decode(b64)) / 1024
     return b64, size_kb
 
@@ -257,7 +258,7 @@ def generate_jpeg_projection(
     output_path: Path,
     max_dimension: int = 1024,
     quality: int = 90,
-) -> Optional[Path]:
+) -> Path | None:
     """
     Generate a JPEG max-projection from a volume and write to disk.
 
@@ -282,9 +283,19 @@ def generate_jpeg_projection(
         return None
 
     try:
-        max_proj = extract_view_a_and_max_project(volume)
-        normalized = normalize_to_uint8(max_proj, method="percentile",
-                                        p_low=1, p_high=99.5)
+        # Build the three-orthogonal-view layout (the projection we actually
+        # want — matches what the perceiver sees). For an explicit 4D
+        # (Views, Z, Y, X) volume, use View A. For a 3D volume, project the
+        # whole thing — do NOT try to split views by aspect ratio: the embryo
+        # is often centered and straddles the X midline, so a width-based
+        # "dual-view" guess slices it in half (the XY-rendered-halfway bug).
+        vol = np.squeeze(volume)
+        if vol.ndim == 4:
+            vol = vol[0]
+        if vol.ndim == 3:
+            normalized, _ = projection_three_view(vol)
+        else:
+            normalized = normalize_to_uint8(vol, method="percentile", p_low=1, p_high=99.5)
 
         pil_image = Image.fromarray(normalized)
 
@@ -313,8 +324,11 @@ def generate_jpeg_projection(
 # (visualization/ was importing from agent/).
 
 # Optional tifffile import (only needed for load_volume)
+_tifffile: ModuleType | None
 try:
-    import tifffile as _tifffile
+    import tifffile as _tif
+
+    _tifffile = _tif
 except ImportError:
     _tifffile = None
 
@@ -336,17 +350,18 @@ def load_volume(path: Path) -> np.ndarray:
         raise ImportError("tifffile is required for load_volume")
     vol = _tifffile.imread(str(path))
     vol = np.squeeze(vol)
-    if vol.ndim == 3:
-        z_depth, height, width = vol.shape
-        # Extract View A (left half) if dual-view format
-        if width > height * 2:
-            vol = vol[:, :, :width // 2]
+    # A 3D volume is a single view — do NOT split by aspect ratio. Native SPIM
+    # frames are 2048x512 (4:1), so a width-based "dual-view" guess fires on
+    # every real frame and discards half the image. Explicit 4D (Views, Z, Y, X)
+    # volumes are the only real dual-view form; squeeze leaves those at ndim 4.
+    if vol.ndim == 4:
+        vol = vol[0]
     return vol
 
 
 def compute_crop_bounds(
     volume: np.ndarray, padding: int = 20, sigma_mult: float = 3.5
-) -> Tuple[int, int, int, int]:
+) -> tuple[int, int, int, int]:
     """Compute crop bounds for 3D volume using center-of-mass of bright pixels.
 
     Parameters
@@ -371,19 +386,17 @@ def compute_crop_bounds(
     y_coords, x_coords = np.where(mask)
     if len(y_coords) < 10:
         return (0, volume.shape[1], 0, volume.shape[2])
-    cy, cx = np.mean(y_coords), np.mean(x_coords)
-    y_std = max(np.std(y_coords), 20)
-    x_std = max(np.std(x_coords), 20)
-    y_min = int(max(0, cy - sigma_mult * y_std - padding))
-    y_max = int(min(volume.shape[1], cy + sigma_mult * y_std + padding))
-    x_min = int(max(0, cx - sigma_mult * x_std - padding))
-    x_max = int(min(volume.shape[2], cx + sigma_mult * x_std + padding))
+    cy, cx = float(np.mean(y_coords)), float(np.mean(x_coords))
+    y_std = max(float(np.std(y_coords)), 20.0)
+    x_std = max(float(np.std(x_coords)), 20.0)
+    y_min = int(max(0.0, cy - sigma_mult * y_std - padding))
+    y_max = int(min(float(volume.shape[1]), cy + sigma_mult * y_std + padding))
+    x_min = int(max(0.0, cx - sigma_mult * x_std - padding))
+    x_max = int(min(float(volume.shape[2]), cx + sigma_mult * x_std + padding))
     return (y_min, y_max, x_min, x_max)
 
 
-def apply_crop_bounds(
-    volume: np.ndarray, bounds: Tuple[int, int, int, int]
-) -> np.ndarray:
+def apply_crop_bounds(volume: np.ndarray, bounds: tuple[int, int, int, int]) -> np.ndarray:
     """Apply pre-computed crop bounds to a volume.
 
     Parameters
@@ -408,8 +421,8 @@ def apply_crop_bounds(
 
 def projection_three_view(
     volume: np.ndarray,
-    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
-) -> Tuple[np.ndarray, str]:
+    voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> tuple[np.ndarray, str]:
     """Generate three orthogonal views layout from a 3D volume.
 
     Views are scaled to be physically isometric based on voxel dimensions.
@@ -484,9 +497,7 @@ def projection_three_view(
     total_width = top_row.shape[1]
 
     if xz_scaled.shape[1] < total_width:
-        pad = np.zeros(
-            (xz_scaled.shape[0], total_width - xz_scaled.shape[1]), dtype=np.uint8
-        )
+        pad = np.zeros((xz_scaled.shape[0], total_width - xz_scaled.shape[1]), dtype=np.uint8)
         bottom_row = np.concatenate([xz_scaled, pad], axis=1)
     else:
         bottom_row = xz_scaled[:, :total_width]
@@ -496,9 +507,7 @@ def projection_three_view(
     return combined, "Three-view: [XY|YZ] top, [XZ] bottom"
 
 
-def _euler_to_rotation_matrix(
-    rx: float, ry: float, rz: float
-) -> np.ndarray:
+def _euler_to_rotation_matrix(rx: float, ry: float, rz: float) -> np.ndarray:
     """Convert Euler angles (degrees) to a 3x3 rotation matrix.
 
     Matches BVV's sequential rotation order: Rz * Ry * Rx applied from the
@@ -518,11 +527,11 @@ def _euler_to_rotation_matrix(
 
 def clip_volume(
     volume: np.ndarray,
-    z_range: Optional[Tuple[float, float]] = None,
-    y_range: Optional[Tuple[float, float]] = None,
-    x_range: Optional[Tuple[float, float]] = None,
-    center: Optional[Tuple[float, float, float]] = None,
-    rotation: Optional[Tuple[float, float, float]] = None,
+    z_range: tuple[float, float] | None = None,
+    y_range: tuple[float, float] | None = None,
+    x_range: tuple[float, float] | None = None,
+    center: tuple[float, float, float] | None = None,
+    rotation: tuple[float, float, float] | None = None,
 ) -> np.ndarray:
     """Clip a 3D volume using an arbitrarily-oriented 3D box.
 
@@ -575,6 +584,8 @@ def clip_volume(
         return volume[z0:z1, y0:y1, x0:x1]
 
     # Rotated clip box: build a mask in volume space
+    # has_rotation is only True when rotation is not None
+    assert rotation is not None
     # 1. Compute box half-extents in voxel coordinates
     z0, z1 = _frac_to_abs(z_range, z_depth)
     y0, y1 = _frac_to_abs(y_range, height)
@@ -632,11 +643,11 @@ def clip_volume(
 
 def clip_and_project(
     volume: np.ndarray,
-    z_range: Optional[Tuple[float, float]] = None,
-    y_range: Optional[Tuple[float, float]] = None,
-    x_range: Optional[Tuple[float, float]] = None,
-    center: Optional[Tuple[float, float, float]] = None,
-    rotation: Optional[Tuple[float, float, float]] = None,
+    z_range: tuple[float, float] | None = None,
+    y_range: tuple[float, float] | None = None,
+    x_range: tuple[float, float] | None = None,
+    center: tuple[float, float, float] | None = None,
+    rotation: tuple[float, float, float] | None = None,
     projection: str = "max",
     axis: int = 0,
     max_dimension: int = 800,
@@ -690,7 +701,7 @@ def render_volume_view(
     rotation_x: float = 0,
     rotation_y: float = 0,
     threshold: float = 0.2,
-    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+    voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625),
 ) -> str:
     """Render a 3D volume from a specific viewing angle using alpha compositing.
 

@@ -9,6 +9,7 @@ Env vars:
     GENTLY_LOG_FORMAT  — console format string
     GENTLY_LOG_DATEFMT — timestamp format (default: %H:%M:%S)
 """
+
 import logging
 import os
 import sys
@@ -19,8 +20,8 @@ _DEFAULT_DATEFMT = "%H:%M:%S"
 
 
 def configure_logging(
-    level: str = None,
-    log_file: str = None,
+    level: str | None = None,
+    log_file: str | None = None,
 ):
     """Configure root logger for the Gently system.
 
@@ -32,7 +33,7 @@ def configure_logging(
     # the standard streams to UTF-8 with replacement so logging never raises.
     for _stream in (sys.stdout, sys.stderr):
         try:
-            _stream.reconfigure(encoding="utf-8", errors="replace")
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except (AttributeError, OSError):
             pass
 
@@ -54,10 +55,28 @@ def configure_logging(
         lgr.addHandler(console)
 
     # Suppress noisy third-party loggers on console
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access",
-                  "httpx", "httpcore", "anthropic", "aiohttp",
-                  "aiohttp.access", "bluesky", "bluesky.RE.state"):
+    for name in (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "httpx",
+        "httpcore",
+        "anthropic",
+        "aiohttp",
+        "aiohttp.access",
+        "bluesky",
+        "bluesky.RE.state",
+    ):
         logging.getLogger(name).setLevel(logging.WARNING)
+
+    # The `websockets` library logs a full "data transfer failed" traceback at
+    # ERROR level every time a client disconnects ungracefully (e.g. a browser
+    # tab sleeping or dropping — Windows raises WinError 121, "semaphore timeout").
+    # These are routine, not faults, and flood the console hundreds of lines deep,
+    # burying real errors. Suppress below CRITICAL so a genuinely fatal WS fault
+    # still surfaces. WARNING is not enough here because the noise is ERROR-level.
+    for name in ("websockets", "websockets.server", "websockets.client"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 
     # File handler — always INFO+ regardless of console level
     if log_file:
