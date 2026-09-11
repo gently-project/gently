@@ -1149,7 +1149,7 @@ def create_router(server) -> APIRouter:
         confirm. This keeps the human in the loop and the canonical embryo list
         clean (a marking step, not a blind auto-register).
 
-        Body (all optional): {exposure_ms, min_confidence, brightness_percentile,
+        Body (all optional): {exposure_ms, min_confidence, min_relative_peak,
         min_area, max_area, use_claude_review, use_last_frame}. Claude review
         defaults OFF. use_last_frame detects on the last streamed frame (if any)
         instead of capturing a fresh image.
@@ -1175,6 +1175,7 @@ def create_router(server) -> APIRouter:
             ("exposure_ms", float),
             ("min_confidence", float),
             ("brightness_percentile", float),
+            ("min_relative_peak", float),
             ("min_area", int),
             ("max_area", int),
         ):

@@ -1172,13 +1172,14 @@ class DiSPIMMicroscope(Microscope):
         min_confidence: float = 0.7,
         exposure_ms: float | None = None,
         brightness_percentile: float = 99.0,
-        min_area: int = 5000,
-        max_area: int = 150000,
+        min_area: int | None = None,
+        max_area: int | None = None,
+        min_relative_peak: float = 0.6,
         use_last_frame: bool = False,
         capture_only: bool = False,
     ) -> dict:
         """
-        Capture image and detect embryos using brightness detection + SAM.
+        Capture image and detect embryos using blob detection + SAM.
 
         Returns raw SAM detections plus the bottom-camera image and stage
         position. Interactive editing is the caller's responsibility — the
@@ -1198,9 +1199,13 @@ class DiSPIMMicroscope(Microscope):
         exposure_ms : float, optional
             Camera exposure time in milliseconds.
         brightness_percentile : float
-            Percentile threshold for brightness-based detection.
-        min_area, max_area : int
-            Embryo area bounds in pixels.
+            Deprecated / ignored (see ``min_relative_peak``).
+        min_area, max_area : int, optional
+            Optional hard blob-area bounds in pixels. ``None`` (default)
+            auto-scales the size band from the image resolution.
+        min_relative_peak : float
+            Keep candidates at least this fraction as strong as the strongest
+            one. Lower = more recall for dim embryos, more debris.
         use_last_frame : bool
             Detect on the last streamed bottom-camera frame instead of capturing
             a fresh image. Falls back to a capture if no frame is cached.
@@ -1225,13 +1230,16 @@ class DiSPIMMicroscope(Microscope):
                 "use_claude_review": use_claude_review,
                 "min_confidence": min_confidence,
                 "brightness_percentile": brightness_percentile,
-                "min_area": min_area,
-                "max_area": max_area,
+                "min_relative_peak": min_relative_peak,
                 "use_last_frame": use_last_frame,
                 "capture_only": capture_only,
             }
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms
+            if min_area is not None:
+                payload["min_area"] = min_area
+            if max_area is not None:
+                payload["max_area"] = max_area
 
             assert self._session is not None
             async with self._session.post(
