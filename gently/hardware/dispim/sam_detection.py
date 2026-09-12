@@ -217,6 +217,7 @@ class SAMEmbryoDetector:
         clahe_tile: int = 16,
         mad_k: float = 6.0,
         min_relative_peak: float = 0.6,
+        max_candidates: int | None = None,
     ) -> tuple[list[dict], np.ndarray]:
         """
         Find embryo candidates by flat-fielding + scale-matched blob detection.
@@ -272,8 +273,12 @@ class SAMEmbryoDetector:
         min_relative_peak : float
             Keep peaks whose background-subtracted response is at least this
             fraction of the strongest peak's. Lower = more recall for dim
-            embryos, more debris. A single compact artifact brighter than every
-            embryo would suppress them — the operator confirms on the map view.
+            embryos, more debris. Note this normalises by the brightest peak, so
+            a compact artifact brighter than every embryo suppresses them; pass
+            0.0 with ``max_candidates`` when a later stage can reject junk.
+        max_candidates : int, optional
+            Keep at most this many candidates, strongest first. Bounds the work
+            handed to a later filter without thresholding on relative strength.
 
         Returns
         -------
@@ -392,6 +397,10 @@ class SAMEmbryoDetector:
                     "relative_strength": float(rel),
                 }
             )
+
+        if max_candidates is not None and len(candidates) > max_candidates:
+            candidates.sort(key=lambda c: -c["relative_strength"])
+            candidates = candidates[:max_candidates]
 
         logger.info("Found %d embryo candidates", len(candidates))
         return candidates, img_enhanced
@@ -585,11 +594,12 @@ class SAMEmbryoDetector:
         # filter remove the junk; without it, cut conservatively here.
         review_enabled = bool(use_claude_review and self.claude_client)
         if min_relative_peak is None:
-            min_relative_peak = (
-                self._REVIEW_RELATIVE_PEAK if review_enabled else self._NO_REVIEW_RELATIVE_PEAK
-            )
+            min_relative_peak = 0.0 if review_enabled else self._NO_REVIEW_RELATIVE_PEAK
+        max_candidates = self._REVIEW_MAX_CANDIDATES if review_enabled else None
         logger.info(
-            "[1/3] Finding embryo candidates (min_relative_peak=%.2f)...", min_relative_peak
+            "[1/3] Finding embryo candidates (min_relative_peak=%.2f, max=%s)...",
+            min_relative_peak,
+            max_candidates,
         )
         candidates, image_enhanced = self.find_embryo_candidates(
             image,
@@ -597,6 +607,7 @@ class SAMEmbryoDetector:
             min_area=min_area,
             max_area=max_area,
             min_relative_peak=min_relative_peak,
+            max_candidates=max_candidates,
         )
 
         # Step 2: Claude classifies each candidate (removes only; never adds).
@@ -770,7 +781,14 @@ class SAMEmbryoDetector:
 
     # Candidate finding runs permissively when the Claude filter is available
     # (the filter removes the junk), and conservatively when it is not.
-    _REVIEW_RELATIVE_PEAK = 0.35
+    # With the Claude filter available, do NOT threshold on relative strength
+    # at all: just hand it the strongest N peaks above the noise floor. A
+    # relative-strength cut normalises by the BRIGHTEST peak, so one compact
+    # artifact brighter than the embryos (a dust glint, a bubble catching the
+    # light) collapses every real embryo's score and silently drops them --
+    # measured at 3 of 4 real frames losing most or all of their embryos.
+    # Proposals are cheap (~11 per field) and the filter removes the junk.
+    _REVIEW_MAX_CANDIDATES = 16
     _NO_REVIEW_RELATIVE_PEAK = 0.6
 
     # Contact-sheet geometry for the candidate classifier.
