@@ -2987,8 +2987,12 @@ class DeviceLayerServer(Service):
             data.get("min_confidence", 0.7)
             exposure_ms = data.get("exposure_ms")
             brightness_percentile = data.get("brightness_percentile", 99.0)
-            min_area = data.get("min_area", 5000)
-            max_area = data.get("max_area", 150000)
+            # None => detector auto-scales the size band from image resolution.
+            # (Hard-coding 5000/150000 here was tuned for the 2048² raw frame and
+            # silently rejected genuine embryos on any downsampled input.)
+            min_area = data.get("min_area")
+            max_area = data.get("max_area")
+            min_relative_peak = data.get("min_relative_peak", 0.6)
 
             # When the operator already has a frame on screen, detect on that
             # exact frame instead of re-capturing — re-capturing disturbs the
@@ -3134,6 +3138,7 @@ class DeviceLayerServer(Service):
                 brightness_percentile,
                 min_area,
                 max_area,
+                min_relative_peak,
             )
 
             # Save image if volume_dir configured
@@ -3202,8 +3207,9 @@ class DeviceLayerServer(Service):
         objective_mag: float,
         use_claude_review: bool,
         brightness_percentile: float,
-        min_area: int,
-        max_area: int,
+        min_area: int | None,
+        max_area: int | None,
+        min_relative_peak: float = 0.6,
     ) -> dict:
         """Run SAM detection synchronously (called from thread).
 
@@ -3226,6 +3232,7 @@ class DeviceLayerServer(Service):
                     brightness_percentile=brightness_percentile,
                     min_area=min_area,
                     max_area=max_area,
+                    min_relative_peak=min_relative_peak,
                 )
             )
 
@@ -3444,18 +3451,30 @@ class DeviceLayerServer(Service):
                     },
                     "brightness_percentile": {
                         "type": "number",
-                        "description": "Brightness threshold percentile",
+                        "description": "Deprecated / ignored (see min_relative_peak)",
                         "default": 99.0,
+                    },
+                    "min_relative_peak": {
+                        "type": "number",
+                        "description": (
+                            "Keep candidates at least this fraction as strong as the "
+                            "strongest one. Lower = more recall for dim embryos, more debris."
+                        ),
+                        "default": 0.6,
                     },
                     "min_area": {
                         "type": "integer",
-                        "description": "Minimum embryo area in pixels",
-                        "default": 5000,
+                        "description": (
+                            "Optional hard min blob area (px, input resolution). "
+                            "Omit to auto-scale the size band from image resolution."
+                        ),
                     },
                     "max_area": {
                         "type": "integer",
-                        "description": "Maximum embryo area in pixels",
-                        "default": 150000,
+                        "description": (
+                            "Optional hard max blob area (px, input resolution). "
+                            "Omit to auto-scale the size band from image resolution."
+                        ),
                     },
                 },
             },

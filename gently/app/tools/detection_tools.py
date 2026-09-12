@@ -115,9 +115,9 @@ async def detect_embryos(
     min_confidence: float = 0.7,
     use_claude_review: bool = False,
     exposure_ms: float | None = None,
-    brightness_percentile: float = 99.0,
-    min_area: int = 5000,
-    max_area: int = 150000,
+    min_relative_peak: float = 0.6,
+    min_area: int | None = None,
+    max_area: int | None = None,
     default_role: str = "test",
     context: dict | None = None,
 ) -> str:
@@ -140,7 +140,7 @@ async def detect_embryos(
             min_confidence=min_confidence,
             use_claude_review=use_claude_review,
             exposure_ms=exposure_ms,
-            brightness_percentile=brightness_percentile,
+            min_relative_peak=min_relative_peak,
             min_area=min_area,
             max_area=max_area,
         )

@@ -200,101 +200,193 @@ class SAMEmbryoDetector:
         )
         return img_smooth
 
+    # Reference image size the blob-detector scales were validated at: the
+    # 410 px bottom-camera display frame (5x downsample of the 2048 px raw
+    # capture). Larger inputs are area-downsampled to this size for candidate
+    # finding and the results mapped back, so every resolution sees the same
+    # validated parameters (and the raw frame stays fast).
+    _REF_MAXDIM = 410.0
+
     def find_embryo_candidates(
         self,
         image: np.ndarray,
         brightness_percentile: float = 99.0,
-        min_area: int = 5000,
-        max_area: int = 150000,
+        min_area: int | None = None,
+        max_area: int | None = None,
         clahe_clip: float = 3.0,
         clahe_tile: int = 16,
+        mad_k: float = 6.0,
+        min_relative_peak: float = 0.6,
     ) -> tuple[list[dict], np.ndarray]:
         """
-        Find embryo candidates using brightness-based detection.
+        Find embryo candidates by flat-fielding + scale-matched blob detection.
 
-        Embryos appear as BRIGHT objects against darker background.
-        This method finds them by thresholding the brightest pixels.
+        Embryos are compact BRIGHT ovals on a noisy background that carries a
+        strong low-frequency illumination gradient (dark corners) and, often, a
+        diffuse bright glow. The previous approach — a global brightness
+        percentile + dilation — could not separate a compact embryo from those
+        large bright regions, so it fired on the gradient and the glow (≈1 false
+        positive per real embryo) while its 2048²-tuned ``min_area`` silently
+        rejected genuine embryos on a downsampled frame.
+
+        This method instead:
+
+        1. Median-filters to kill salt-and-pepper noise.
+        2. Applies a white top-hat with a kernel larger than an embryo, which
+           removes anything bigger than an embryo — the gradient and the diffuse
+           glow — while keeping compact bright structures.
+        3. Smooths at the embryo scale (matched filter) to pool signal and
+           suppress single-pixel spikes.
+        4. Takes local maxima (with a minimum separation) above a noise floor,
+           ``median + mad_k · 1.4826 · MAD`` of that response.
+        5. Keeps only peaks at least ``min_relative_peak`` × the strongest one.
+           Embryos are the brightest compact objects in the field; debris and
+           specks are real structure, often far above the noise floor, but
+           clearly dimmer than the embryos. On raw frames a noise-relative
+           threshold alone let that debris through.
+
+        Inputs larger than ``_REF_MAXDIM`` are area-downsampled to it for these
+        steps and the candidates mapped back to input pixels, so the same call
+        works on the 410 px display frame and the raw 2048 px capture.
 
         Parameters
         ----------
         image : np.ndarray
-            Input grayscale image (16-bit or 8-bit)
+            Input grayscale image (16-bit or 8-bit).
         brightness_percentile : float
-            Percentile threshold for detecting bright embryos.
-            99.0 = fewer, confident detections. 98.0 = more detections.
-        min_area : int
-            Minimum embryo area in pixels (filters small noise)
-        max_area : int
-            Maximum embryo area in pixels (filters large artifacts)
-        clahe_clip : float
-            CLAHE clip limit for contrast enhancement
-        clahe_tile : int
-            CLAHE tile grid size
+            Deprecated / ignored. Kept for call-site compatibility.
+        min_area, max_area : int, optional
+            Hard bounds (in pixels, at the input resolution) on a candidate's
+            above-threshold blob area. ``None`` (default) means no lower bound
+            and an upper bound of ~12x the nominal embryo area at this
+            resolution. Pass explicit values only to override — a fixed
+            ``min_area`` tuned for one resolution is what used to reject
+            genuine embryos on another.
+        clahe_clip, clahe_tile : float, int
+            CLAHE settings for the 8-bit image handed to SAM (contrast only;
+            does not affect which candidates are found).
+        mad_k : float
+            Noise floor in robust standard deviations above the background;
+            peaks below it are never candidates. Guards against returning pure
+            noise, while ``min_relative_peak`` does the main discrimination.
+        min_relative_peak : float
+            Keep peaks whose background-subtracted response is at least this
+            fraction of the strongest peak's. Lower = more recall for dim
+            embryos, more debris. A single compact artifact brighter than every
+            embryo would suppress them — the operator confirms on the map view.
 
         Returns
         -------
         candidates : List[Dict]
-            List of candidate embryos with keys:
-            - bbox: (x, y, w, h) bounding box
-            - centroid: (cx, cy) center point
-            - area: area in pixels
+            Candidates with keys ``bbox`` (x, y, w, h), ``centroid`` (cx, cy),
+            and ``area`` (pixels).
         enhanced_image : np.ndarray
-            Contrast-enhanced 8-bit image for SAM
+            Contrast-enhanced 8-bit image for SAM.
         """
-        logger.info(
-            "Finding embryo candidates (brightness percentile=%.1f)...", brightness_percentile
-        )
+        from skimage.feature import peak_local_max
+
+        logger.info("Finding embryo candidates (flat-field + blob, mad_k=%.1f)...", mad_k)
         logger.debug("Input range: %s - %s", image.min(), image.max())
 
-        # Step 1: Percentile normalization (handles low dynamic range)
-        p2, p98 = np.percentile(image, (2, 98))
-        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(
-            np.uint8
-        )
-        logger.debug("Normalized to 0-255")
+        h, w = image.shape[:2]
 
-        # Step 2: CLAHE for local contrast enhancement
+        # 8-bit normalization (percentile stretch handles low dynamic range).
+        p2, p98 = np.percentile(image, (2, 98))
+        denom = float(p98 - p2) or 1.0
+        img_norm = np.clip((image.astype(np.float32) - p2) / denom * 255, 0, 255).astype(np.uint8)
+
+        # CLAHE image is only for SAM's benefit (better contrast to segment on),
+        # so it stays at full resolution.
         clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(clahe_tile, clahe_tile))
         img_enhanced = clahe.apply(img_norm)
-        logger.debug("CLAHE applied (clip=%.1f, tile=%d)", clahe_clip, clahe_tile)
 
-        # Step 3: Light smoothing
-        img_smooth = cv2.GaussianBlur(img_enhanced, (5, 5), 2)
+        # Candidate finding runs at (at most) the reference resolution: the
+        # scales below were validated there, and a top-hat with an
+        # embryo-scaled ellipse kernel costs ~13 s on a 2048² frame versus
+        # <0.1 s at 410 px. Area-averaged downsampling also lifts embryo SNR.
+        factor = max(1.0, max(h, w) / self._REF_MAXDIM)
+        if factor > 1.0:
+            work_size = (max(1, round(w / factor)), max(1, round(h / factor)))
+            work = cv2.resize(img_norm, work_size, interpolation=cv2.INTER_AREA)
+        else:
+            work = img_norm
+        wh, ww = work.shape[:2]
+        sx, sy = w / ww, h / wh  # working frame -> input frame
 
-        # Step 4: Threshold brightest pixels (embryos are BRIGHT)
-        threshold_value = np.percentile(img_smooth, brightness_percentile)
-        _, mask = cv2.threshold(img_smooth, threshold_value, 255, cv2.THRESH_BINARY)
-        logger.debug("Threshold at %.1f (percentile %.1f)", threshold_value, brightness_percentile)
+        # Scales at the working resolution (== the reference values unless the
+        # input is smaller than the reference frame).
+        s = max(wh, ww) / self._REF_MAXDIM
+        r_emb = max(2.0, 7.7 * s)  # embryo radius ≈ 7.7 px at the reference frame
+        r_bg = max(3, int(round(25 * s)))  # top-hat kernel: > embryo, < gradient
+        embryo_sigma = max(1.0, 4.0 * s)  # matched-filter smoothing
+        min_sep = max(2, int(round(12 * s)))  # min separation between embryos
+        border = max(1, int(round(6 * s)))  # ignore peaks this close to the edge
 
-        # Step 5: Morphological cleanup
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        denoised = cv2.medianBlur(work, 3).astype(np.float32)
+        kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r_bg + 1, 2 * r_bg + 1))
+        tophat = cv2.morphologyEx(denoised, cv2.MORPH_TOPHAT, kern)
+        resp = cv2.GaussianBlur(tophat, (0, 0), sigmaX=embryo_sigma)
 
-        # Step 6: Dilate to capture full embryo extent
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-        mask = cv2.dilate(mask, kernel_dilate, iterations=2)
-        logger.debug("Morphological cleanup complete")
+        med = float(np.median(resp))
+        mad = float(np.median(np.abs(resp - med))) + 1e-6
+        thr = med + mad_k * 1.4826 * mad
 
-        # Step 7: Find connected components and filter by area
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
-            mask, connectivity=8
-        )
+        peaks = peak_local_max(resp, min_distance=min_sep, threshold_abs=thr, exclude_border=border)
+        if len(peaks):
+            strength = resp[peaks[:, 0], peaks[:, 1]] - med
+            peaks = peaks[strength >= min_relative_peak * strength.max()]
+
+        # Area bounds, in INPUT-resolution pixels. Explicit values override;
+        # by default there is only an upper bound. The measured area is the
+        # above-threshold footprint, which shrinks as mad_k rises — an automatic
+        # lower bound would couple to the threshold and drop faint embryos
+        # that the matched filter has already accepted.
+        px_area = sx * sy
+        lo = float(min_area) if min_area is not None else 0.0
+        hi = float(max_area) if max_area is not None else 12.0 * np.pi * r_emb**2 * px_area
+
+        # Bounding boxes from the thresholded blob mask; peaks sharing one blob
+        # (touching embryos) each get a local box so SAM refines them separately.
+        mask = (resp > thr).astype(np.uint8)
+        _, labels = cv2.connectedComponents(mask, connectivity=8)
+        peaks_per_label: dict[int, int] = {}
+        for py, px in peaks:
+            lbl = int(labels[py, px])
+            peaks_per_label[lbl] = peaks_per_label.get(lbl, 0) + 1
 
         candidates = []
-        for i in range(1, num_labels):  # Skip background (label 0)
-            area = stats[i, cv2.CC_STAT_AREA]
-            if min_area < area < max_area:
-                x = stats[i, cv2.CC_STAT_LEFT]
-                y = stats[i, cv2.CC_STAT_TOP]
-                w = stats[i, cv2.CC_STAT_WIDTH]
-                h = stats[i, cv2.CC_STAT_HEIGHT]
-                cx, cy = centroids[i]
+        for py, px in peaks:
+            lbl = int(labels[py, px])
+            if lbl != 0 and peaks_per_label[lbl] == 1:
+                ys, xs = np.where(labels == lbl)
+                bx0, bx1 = float(xs.min()), float(xs.max() + 1)
+                by0, by1 = float(ys.min()), float(ys.max() + 1)
+                area_work = float(len(xs))
+            else:
+                # No blob (edge) or a shared blob: use a local embryo-sized box.
+                half = 1.5 * r_emb
+                bx0, bx1 = px + 0.5 - half, px + 0.5 + half
+                by0, by1 = py + 0.5 - half, py + 0.5 + half
+                area_work = float(np.pi * r_emb**2)
 
-                candidates.append({"bbox": (x, y, w, h), "centroid": (cx, cy), "area": area})
+            area = area_work * px_area
+            if not (lo <= area <= hi):
+                continue
+            # Map working-frame box/peak back to input pixels.
+            x0 = max(0, int(np.floor(bx0 * sx)))
+            y0 = max(0, int(np.floor(by0 * sy)))
+            x1 = min(w, int(np.ceil(bx1 * sx)))
+            y1 = min(h, int(np.ceil(by1 * sy)))
+            candidates.append(
+                {
+                    "bbox": (x0, y0, x1 - x0, y1 - y0),
+                    "centroid": ((px + 0.5) * sx - 0.5, (py + 0.5) * sy - 0.5),
+                    "area": area,
+                }
+            )
 
         logger.info("Found %d embryo candidates", len(candidates))
-        return candidates, img_smooth
+        return candidates, img_enhanced
 
     def refine_with_sam(
         self, image: np.ndarray, candidates: list[dict], padding: int = 20
@@ -410,14 +502,17 @@ class SAMEmbryoDetector:
         save_visualizations: bool = True,
         output_dir: Path | None = None,
         brightness_percentile: float = 99.0,
-        min_area: int = 5000,
-        max_area: int = 150000,
+        min_area: int | None = None,
+        max_area: int | None = None,
+        min_relative_peak: float = 0.6,
     ) -> dict:
         """
-        Detect embryos using brightness-based detection + SAM refinement.
+        Detect embryos using blob-based candidate finding + SAM refinement.
 
         This hybrid approach:
-        1. Uses brightness thresholding to find candidate embryo regions
+        1. Finds candidate embryos with flat-fielding + blob detection
+           (:meth:`find_embryo_candidates`) — this step sets recall, since SAM
+           only refines the boxes it is given
         2. Uses SAM with bounding box prompts to get precise segmentation
         3. Optionally uses Claude Vision for verification
 
@@ -438,12 +533,13 @@ class SAMEmbryoDetector:
         output_dir : Path, optional
             Where to save visualizations. If None, uses './detection_results'
         brightness_percentile : float
-            Percentile threshold for brightness detection.
-            99.0 = fewer, confident detections. 98.0 = more detections.
-        min_area : int
-            Minimum embryo area in pixels. Default: 5000
-        max_area : int
-            Maximum embryo area in pixels. Default: 150000
+            Deprecated / ignored (see ``min_relative_peak``).
+        min_area, max_area : int, optional
+            Optional hard blob-area bounds in input pixels; ``None`` (default)
+            auto-scales from the image resolution.
+        min_relative_peak : float
+            Keep candidates at least this fraction as strong as the strongest
+            one. Lower = more recall for dim embryos, more debris. Default: 0.6
 
         Returns
         -------
@@ -470,13 +566,17 @@ class SAMEmbryoDetector:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("=" * 70)
-        logger.info("BRIGHTNESS + SAM EMBRYO DETECTION")
+        logger.info("BLOB + SAM EMBRYO DETECTION")
         logger.info("=" * 70)
 
-        # Step 1: Find candidates using brightness detection
-        logger.info("[1/4] Finding embryo candidates (brightness-based)...")
+        # Step 1: Find candidates (flat-field + blob detection)
+        logger.info("[1/4] Finding embryo candidates...")
         candidates, image_enhanced = self.find_embryo_candidates(
-            image, brightness_percentile=brightness_percentile, min_area=min_area, max_area=max_area
+            image,
+            brightness_percentile=brightness_percentile,
+            min_area=min_area,
+            max_area=max_area,
+            min_relative_peak=min_relative_peak,
         )
 
         if len(candidates) == 0:
