@@ -2992,7 +2992,7 @@ class DeviceLayerServer(Service):
             # silently rejected genuine embryos on any downsampled input.)
             min_area = data.get("min_area")
             max_area = data.get("max_area")
-            min_relative_peak = data.get("min_relative_peak", 0.6)
+            min_relative_peak = data.get("min_relative_peak")
 
             # When the operator already has a frame on screen, detect on that
             # exact frame instead of re-capturing — re-capturing disturbs the
@@ -3209,7 +3209,7 @@ class DeviceLayerServer(Service):
         brightness_percentile: float,
         min_area: int | None,
         max_area: int | None,
-        min_relative_peak: float = 0.6,
+        min_relative_peak: float | None = None,
     ) -> dict:
         """Run SAM detection synchronously (called from thread).
 
@@ -3458,9 +3458,9 @@ class DeviceLayerServer(Service):
                         "type": "number",
                         "description": (
                             "Keep candidates at least this fraction as strong as the "
-                            "strongest one. Lower = more recall for dim embryos, more debris."
+                            "strongest one. Omit to let the detector choose from whether "
+                            "the Claude candidate filter is enabled."
                         ),
-                        "default": 0.6,
                     },
                     "min_area": {
                         "type": "integer",

@@ -1174,7 +1174,7 @@ class DiSPIMMicroscope(Microscope):
         brightness_percentile: float = 99.0,
         min_area: int | None = None,
         max_area: int | None = None,
-        min_relative_peak: float = 0.6,
+        min_relative_peak: float | None = None,
         use_last_frame: bool = False,
         capture_only: bool = False,
     ) -> dict:
@@ -1203,9 +1203,10 @@ class DiSPIMMicroscope(Microscope):
         min_area, max_area : int, optional
             Optional hard blob-area bounds in pixels. ``None`` (default)
             auto-scales the size band from the image resolution.
-        min_relative_peak : float
+        min_relative_peak : float, optional
             Keep candidates at least this fraction as strong as the strongest
-            one. Lower = more recall for dim embryos, more debris.
+            one. ``None`` (default) lets the detector choose: permissive when
+            the Claude candidate filter is on, conservative when it is off.
         use_last_frame : bool
             Detect on the last streamed bottom-camera frame instead of capturing
             a fresh image. Falls back to a capture if no frame is cached.
@@ -1230,7 +1231,6 @@ class DiSPIMMicroscope(Microscope):
                 "use_claude_review": use_claude_review,
                 "min_confidence": min_confidence,
                 "brightness_percentile": brightness_percentile,
-                "min_relative_peak": min_relative_peak,
                 "use_last_frame": use_last_frame,
                 "capture_only": capture_only,
             }
@@ -1240,6 +1240,8 @@ class DiSPIMMicroscope(Microscope):
                 payload["min_area"] = min_area
             if max_area is not None:
                 payload["max_area"] = max_area
+            if min_relative_peak is not None:
+                payload["min_relative_peak"] = min_relative_peak
 
             assert self._session is not None
             async with self._session.post(
