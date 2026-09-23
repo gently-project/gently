@@ -122,6 +122,21 @@
                     </div>
                 </div>
 
+                {# The lock is only useful if you can see it from where you are
+                   standing. It lived on the Devices map, so locking it and
+                   walking away left nothing to say the joystick was dead —
+                   which is the confusion the lock exists to prevent. #}
+                <div class="rig-sec" id="rig-js-sec" hidden>
+                    <div class="rig-sec-head">
+                        <span class="rig-sec-label">Joystick</span>
+                        <span class="rig-sec-meta" id="rig-js-state">—</span>
+                        <button type="button" class="rig-switch" id="rig-js-toggle"
+                                role="switch" aria-checked="false" aria-label="Physical XY joystick">
+                            <span class="rig-switch-knob"></span>
+                        </button>
+                    </div>
+                </div>
+
                 <div class="rig-sec rig-sec-quiet">
                     <div class="rig-sec-head">
                         <span class="rig-sec-label">Gently</span>

@@ -2467,68 +2467,32 @@ const DevicesManager = (function () {
     function setupJoystickLock() {
         const btn = document.getElementById('devices-js-toggle');
         const note = document.getElementById('devices-js-note');
-        if (!btn || !note) return;
+        if (!btn || !note || typeof JoystickState === 'undefined') return;
 
-        const show = enabled => {
-            btn.disabled = false;
-            btn.setAttribute('aria-pressed', enabled ? 'false' : 'true');
-            btn.textContent = enabled ? 'Joystick enabled' : 'Joystick LOCKED';
-            note.textContent = enabled
-                ? 'The physical XY joystick can move the stage. Click to lock it.'
-                : 'Only Gently can move the stage. Click to unlock.';
-        };
-        const unavailable = msg => {
-            btn.disabled = true;
-            btn.textContent = 'Joystick —';
-            btn.setAttribute('aria-pressed', 'false');
-            note.textContent = msg;
-        };
-
-        async function read() {
-            try {
-                const r = await fetch('/api/devices/stage/joystick');
-                const d = await r.json().catch(() => ({}));
-                if (r.ok && d && d.success !== false) show(!!d.enabled);
-                else unavailable('Microscope not connected');
-            } catch (e) { unavailable('Microscope not connected'); }
-        }
-
-        btn.addEventListener('click', async () => {
-            // aria-pressed is "is it locked", so the target is the opposite.
-            const enabled = btn.getAttribute('aria-pressed') === 'true';
-            btn.disabled = true;
-            note.textContent = 'Writing to the controller…';
-            try {
-                const r = await fetch('/api/devices/stage/joystick', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled }),
-                });
-                const d = await r.json().catch(() => ({}));
-                if (r.ok) {
-                    show(!!d.enabled);
-                } else if (r.status === 403) {
-                    unavailable('Sign in to change the joystick');
-                    read();
-                } else {
-                    // The write failed; re-read rather than assume either state.
-                    note.textContent = d.detail || `Failed (${r.status})`;
-                    read();
-                }
-            } catch (e) {
-                note.textContent = `Failed: ${e.message}`;
-                read();
+        JoystickState.subscribe(s => {
+            if (s.enabled === null) {
+                btn.disabled = true;
+                btn.textContent = 'Joystick —';
+                btn.setAttribute('aria-pressed', 'false');
+                note.textContent = s.reason || 'reading…';
+                return;
             }
+            btn.disabled = !!s.busy;
+            btn.setAttribute('aria-pressed', s.enabled ? 'false' : 'true');
+            btn.textContent = s.enabled ? 'Joystick enabled' : 'Joystick LOCKED';
+            note.textContent = s.busy
+                ? 'Writing to the controller…'
+                : (s.reason || (s.enabled
+                    ? 'The physical XY joystick can move the stage. Click to lock it.'
+                    : 'Only Gently can move the stage. Click to unlock.'));
         });
 
-        read();
-        // The device layer coming or going changes the answer.
-        if (typeof ClientEventBus !== 'undefined') {
-            ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', d => {
-                if (d && d.available === false) unavailable('Device layer stopped');
-                else read();
-            });
-        }
+        btn.addEventListener('click', () => {
+            // aria-pressed is "is it locked", so the target is the opposite.
+            JoystickState.write(btn.getAttribute('aria-pressed') === 'true');
+        });
+
+        JoystickState.read();
     }
 
     // =====================================================================

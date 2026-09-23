@@ -41,23 +41,23 @@ def test_the_control_is_on_the_map() -> None:
     assert "setupJoystickLock();" in js, "the control is never wired up"
 
 
-def test_what_is_shown_is_read_back_not_commanded() -> None:
+def test_what_is_shown_comes_from_the_shared_store() -> None:
+    """Read-back now lives in JoystickState, which the rig menu shares.
+
+    The assertion that the rendered value is the one the CONTROLLER reported
+    moved with it — see tests/test_joystick_state_is_shared.py. What belongs
+    here is that this surface renders from the store rather than growing its
+    own copy, because a second copy is how two surfaces start disagreeing.
+    """
     body = _setup()
-    # The rendered state comes from the response, not from the request.
-    assert "show(!!d.enabled)" in body, (
-        "the button renders the value it sent instead of the one the controller "
-        "reported — a lock the hardware refused would look applied"
-    )
-    assert "read()" in body, "the control never reads the controller at all"
+    assert "JoystickState.subscribe(" in body, "the map no longer renders from the store"
+    assert "/api/devices/stage/joystick" not in body, "the map fetches the endpoint directly again"
 
 
-def test_a_failed_write_re_reads_rather_than_guessing() -> None:
+def test_the_write_goes_through_the_store() -> None:
+    """Failure handling moved with the write; the button just asks."""
     body = _setup()
-    failure_paths = body.count("read();")
-    assert failure_paths >= 3, (
-        "a failed or forbidden write leaves the button in a state nobody "
-        "confirmed; every failure path must re-read"
-    )
+    assert "JoystickState.write(" in body, "the map writes to the controller itself again"
 
 
 def test_the_locked_state_is_visible_as_a_state() -> None:
@@ -70,8 +70,14 @@ def test_the_locked_state_is_visible_as_a_state() -> None:
     )
 
 
-def test_settings_and_the_map_drive_the_same_endpoint() -> None:
-    """Two controls for one hardware flag must not diverge."""
+def test_every_control_for_one_flag_reaches_one_endpoint() -> None:
+    """Three surfaces now: Settings, the map, the rig menu.
+
+    Settings is a separate page with its own script and still calls the
+    endpoint directly; the two inside the app go through the shared store.
+    What must hold is that there is exactly one endpoint between them.
+    """
     settings = (WEB / "templates" / "settings.html").read_text(encoding="utf-8")
+    store = (WEB / "static" / "js" / "joystick-state.js").read_text(encoding="utf-8")
     assert "/api/devices/stage/joystick" in settings
-    assert "/api/devices/stage/joystick" in _setup()
+    assert "/api/devices/stage/joystick" in store

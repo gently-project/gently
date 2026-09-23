@@ -275,6 +275,25 @@ const RigMenu = (function () {
         });
         _el.lightToggle.addEventListener('click', toggleLight);
 
+        // The joystick, from the shared store — the Devices map renders the
+        // same state, so the two cannot disagree about whether the stage can
+        // be moved by hand.
+        const jsSec = document.getElementById('rig-js-sec');
+        const jsState = document.getElementById('rig-js-state');
+        const jsToggle = document.getElementById('rig-js-toggle');
+        if (jsSec && jsState && jsToggle && typeof JoystickState !== 'undefined') {
+            JoystickState.subscribe(s => {
+                // Rule 6: nothing to say about a joystick nobody can reach.
+                jsSec.hidden = s.enabled === null;
+                jsState.textContent = s.busy ? 'writing…' : (s.enabled ? 'enabled' : 'LOCKED');
+                jsToggle.setAttribute('aria-checked', s.enabled ? 'true' : 'false');
+                jsToggle.disabled = !!s.busy;
+            });
+            jsToggle.addEventListener('click', () => {
+                JoystickState.write(jsToggle.getAttribute('aria-checked') !== 'true');
+            });
+        }
+
         // boot-banner.js owns the global device-layer poll; ride its signal.
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('DEVICE_LAYER_STATE', (s) => renderDeviceLayer(s));
