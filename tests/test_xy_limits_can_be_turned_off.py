@@ -24,8 +24,9 @@ always holds.
 
 What must stay true:
 
-* off means the stage's FULL TRAVEL, because the controller always holds some
-  box — there is no "no limits" to write;
+* off means the CONTROLLER'S OWN DEFAULTS (`SL/SU -`), not a box of ours —
+  for a while it wrote the inset constants as though they were the stage's
+  travel, and the joystick stopped ~850 µm short of everywhere;
 * the region still binds Gently when the controller is left open, or turning
   enforcement off would quietly unbound every move Gently makes;
 * the operator's region survives being switched off; and
@@ -65,7 +66,7 @@ def _apply() -> str:
 
 
 def _boot() -> str:
-    return _block(DEVICE_LAYER, 'enforced = env.get("enforced") is True', 1600)
+    return _block(DEVICE_LAYER, 'enforced = env.get("enforced") is True', 2200)
 
 
 # ---------------------------------------------------------------------------
@@ -73,14 +74,21 @@ def _boot() -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_off_writes_the_full_travel() -> None:
-    """The Tiger always holds some box; full travel is what "off" means."""
+def test_off_restores_the_controllers_own_defaults() -> None:
+    """Not a box of ours. `SL/SU -` gives the axis its default limit back.
+
+    "greater freedom of movement, but still not able to cover the full
+    extent" — because off wrote XY_STAGE_*_UM, which the comment above them
+    says are inset ~850 µm from the measured safe area.
+    """
     body = _switch()
-    assert "self._full_travel()" in body, (
-        "turning limits off no longer writes the stage's full range, so the "
-        "controller keeps fencing whatever it last had"
+    assert "restore_firmware_limit_defaults" in body, (
+        "turning limits off writes some box of ours again, and the joystick "
+        "stops short of wherever that box ends"
     )
-    assert "set_firmware_limits" in body, "the switch does not reach the firmware"
+    assert "set_firmware_limits" in body, "the switch does not reach the firmware when ON"
+    assert "def restore_firmware_limit_defaults" in STAGE
+    assert '"SL X- Y-"' in STAGE and '"SU X- Y-"' in STAGE
 
 
 def test_turning_them_on_needs_a_region_someone_walked() -> None:
@@ -124,12 +132,28 @@ def test_switching_off_does_not_unbound_gently() -> None:
 
 
 def test_the_controller_is_left_alone_unless_enforcement_is_asked_for() -> None:
-    """Off is the default now, not merely a state that survives."""
+    """Off is the default now, and off writes NOTHING at boot.
+
+    The Tiger remembers its limits through a power cycle; whatever it holds
+    was put there by someone. The one exception is our own leftover — a
+    controller still holding the inset box an earlier build wrote as "off"
+    is given its defaults back, once.
+    """
     assert 'enforced = env.get("enforced") is True' in DEVICE_LAYER, (
         "boot decides enforcement some other way; unless it is opt-in, a saved "
         "region silently fences every client at the next restart"
     )
-    assert "box = region if enforced else self._full_travel()" in _boot()
+    boot = _boot()
+    assert "_settle_firmware_limits_at_boot" in boot
+    assert "self._full_travel()" not in boot.split("_settle_firmware_limits_at_boot")[0], (
+        "boot writes the constants to the controller again"
+    )
+    settle = _block(DEVICE_LAYER, "def _settle_firmware_limits_at_boot", 2200)
+    assert "read_firmware_limits" in settle
+    assert settle.index("read_firmware_limits") < settle.index("restore_firmware_limit_defaults")
+    assert "return" in settle.split("restore_firmware_limit_defaults")[0], (
+        "boot restores defaults unconditionally rather than only over its own leftover"
+    )
 
 
 def test_boot_still_binds_gently_to_the_region() -> None:
@@ -193,11 +217,19 @@ def test_the_software_fence_keeps_the_107_refusal() -> None:
 
 
 def test_enforced_is_read_back_not_remembered() -> None:
-    """A flag in a config file would say what we meant, not what is."""
-    body = _block(DEVICE_LAYER, "def _envelope_payload(self, xy_stage) -> dict:")
-    assert '"enforced": not self._is_full_travel(box)' in body, (
-        "the payload reports a stored flag rather than what the controller "
-        "actually holds — a write that did not take would read as applied"
+    """A flag in a config file would say what we meant, not what is.
+
+    And "read back" means asked of the controller: the adapter's limit
+    properties answer from a cache, and comparing against the constants —
+    as this once did — called a software-only region "enforced".
+    """
+    body = _block(DEVICE_LAYER, "def _envelope_payload(self, xy_stage) -> dict:", 3500)
+    assert "xy_stage.read_firmware_limits()" in body, (
+        "the payload reports the software fence as the controller's"
+    )
+    assert '"enforced": self._same_box(firmware, region)' in body, (
+        "the payload reports a stored flag, or the wrong comparison, rather "
+        "than whether the controller holds the region"
     )
 
 

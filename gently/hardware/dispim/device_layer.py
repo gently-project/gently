@@ -407,23 +407,27 @@ class DeviceLayerServer(Service):
             # On a rig driven by trained operators that is a deliberate
             # choice, not a default.
             enforced = env.get("enforced") is True
-            box = region if enforced else self._full_travel()
-            if not enforced:
-                logger.info(
-                    "XY firmware limits: full travel (the region is enforced in "
-                    "software; switch it on to bind the controller too)"
-                )
             try:
-                xy_stage.set_firmware_limits(
-                    x_min_mm=box["x_min"] / 1000.0,
-                    x_max_mm=box["x_max"] / 1000.0,
-                    y_min_mm=box["y_min"] / 1000.0,
-                    y_max_mm=box["y_max"] / 1000.0,
-                )
-                # AFTER the firmware write, which sets the envelope from its
-                # own numbers. The region is the narrower of the two whenever
-                # the controller is left at full travel, and it is what Gently
-                # is held to either way.
+                if enforced:
+                    xy_stage.set_firmware_limits(
+                        x_min_mm=region["x_min"] / 1000.0,
+                        x_max_mm=region["x_max"] / 1000.0,
+                        y_min_mm=region["y_min"] / 1000.0,
+                        y_max_mm=region["y_max"] / 1000.0,
+                    )
+                    logger.info(
+                        "ASI Tiger firmware soft limits applied (operator region): "
+                        "X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
+                        region["x_min"],
+                        region["x_max"],
+                        region["y_min"],
+                        region["y_max"],
+                    )
+                else:
+                    # Off writes nothing — with one cleanup, explained there.
+                    self._settle_firmware_limits_at_boot(xy_stage, env, region)
+                # AFTER any firmware write, which sets the envelope from its
+                # own numbers. The region is what Gently is held to either way.
                 # require_inside=False: a stage parked outside a saved region
                 # must not stop the device layer from starting. The region
                 # still binds every move after this.
@@ -433,15 +437,6 @@ class DeviceLayerServer(Service):
                     region["y_min"],
                     region["y_max"],
                     require_inside=False,
-                )
-                logger.info(
-                    "ASI Tiger firmware soft limits applied (%s): "
-                    "X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
-                    "operator region" if env else "defaults",
-                    box["x_min"],
-                    box["x_max"],
-                    box["y_min"],
-                    box["y_max"],
                 )
             except ValueError as exc:
                 # Current position is outside the envelope — refuse to start
@@ -2314,7 +2309,16 @@ class DeviceLayerServer(Service):
     def _write_sidecar(self, key: str, value: dict) -> None:
         """Persist one top-level block to config/config.local.yml (merged over
         config.yml at boot). Best-effort; 0600 perms since the temperature block
-        may hold the MQTT password. Keeps config.yml (and its comments) untouched."""
+        may hold the MQTT password. Keeps config.yml (and its comments) untouched.
+
+        The in-memory config is refreshed too, and first. Every route that
+        reads `self.config["xy_envelope"]` after a write used to see the value
+        from boot: apply a region, then switch limits ON in the same session,
+        and the switch answered "No saved region to enforce" until a restart.
+        """
+        cfg = getattr(self, "config", None)
+        if isinstance(cfg, dict):
+            cfg[key] = dict(value)
         try:
             import os
 
@@ -2925,7 +2929,10 @@ class DeviceLayerServer(Service):
     # Tiger always holds some box, so the only way to stop fencing people is to
     # hand it back the full range.
     def _full_travel(self) -> dict:
-        """The stage's physical travel, imported the way this file imports it.
+        """Gently's DEFAULT envelope — what it commands within when no region
+        has been walked. Not the stage's travel, whatever the name says: the
+        constants are inset ~850 µm from a hand-measured safe area, and for a
+        while "off" wrote them to the controller as if they were the stage.
 
         The constants live behind a deferred import inside `initialize`, so
         this cannot be a class attribute without dragging the devices package
@@ -2946,42 +2953,119 @@ class DeviceLayerServer(Service):
         }
 
     def _is_full_travel(self, box: dict, tol_um: float = 1.0) -> bool:
-        return all(abs(float(box[k]) - float(v)) <= tol_um for k, v in self._full_travel().items())
+        return self._same_box(box, self._full_travel(), tol_um)
+
+    @staticmethod
+    def _same_box(a: dict | None, b: dict | None, tol_um: float = 1.0) -> bool:
+        if not a or not b:
+            return False
+        return all(
+            abs(float(a[k]) - float(b[k])) <= tol_um for k in ("x_min", "x_max", "y_min", "y_max")
+        )
+
+    def _settle_firmware_limits_at_boot(self, xy_stage, env: dict, region: dict) -> None:
+        """What boot does to the controller when enforcement is off: nothing.
+
+        The Tiger remembers its limits through a power cycle, and whatever it
+        holds now was put there by someone — an earlier "off", or a hand in
+        Micro-Manager. A boot that rewrote them would be the version of this
+        bug nobody connects to Gently.
+
+        One exception, and it is our own mess. For a while "off" wrote the
+        inset constants as though they were the stage's travel, and the
+        joystick stopped ~850 µm short of everywhere. A controller still
+        holding exactly that box is given its defaults back, once, and the
+        log says so.
+        """
+        try:
+            held = xy_stage.read_firmware_limits()
+        except Exception as exc:
+            logger.warning("Could not read the controller's XY limits at boot: %s", exc)
+            return
+        if not self._same_box(held, self._full_travel()):
+            logger.info(
+                "XY firmware limits: left as the controller holds them "
+                "(X=[%.1f, %.1f] Y=[%.1f, %.1f] µm); the region binds Gently in software",
+                held["x_min"],
+                held["x_max"],
+                held["y_min"],
+                held["y_max"],
+            )
+            return
+        logger.warning(
+            "XY firmware limits: the controller still holds the inset envelope an "
+            "earlier build wrote as 'off' — restoring its own defaults"
+        )
+        # A cleanup, not a precondition: a controller that refuses `SL X-`
+        # (firmware older than 2.8) keeps the inset box and the rig still
+        # comes up. The switch in the UI will say the same thing when pressed.
+        try:
+            defaults = xy_stage.restore_firmware_limit_defaults()
+        except Exception as exc:
+            logger.warning(
+                "Could not restore the controller's default XY limits at boot: %s "
+                "— leaving them as they are",
+                exc,
+            )
+            return
+        self._write_sidecar(
+            "xy_envelope", {**env, "enforced": False, "controller_defaults": defaults}
+        )
 
     def _envelope_payload(self, xy_stage) -> dict:
+        keys = ("x_min", "x_max", "y_min", "y_max")
         (x_lo, x_hi), (y_lo, y_hi) = xy_stage.x_limits, xy_stage.y_limits
-        box = {"x_min": x_lo, "x_max": x_hi, "y_min": y_lo, "y_max": y_hi}
+        software = {"x_min": x_lo, "x_max": x_hi, "y_min": y_lo, "y_max": y_hi}
+
+        # What the controller holds, asked directly. The adapter's limit
+        # properties answer from a cache, and this is the one number that
+        # must not be stale. When the controller cannot be asked, the last
+        # thing read or written is better than the software box, which is a
+        # different fence and used to be passed off as this one.
+        try:
+            firmware = xy_stage.read_firmware_limits()
+        except Exception as exc:
+            logger.debug("firmware limit read failed, using last known: %s", exc)
+            firmware = getattr(xy_stage, "firmware_box", None) or dict(software)
+
         # getattr: the envelope is readable before `initialize` has loaded the
         # config — and a payload that raises is worse than one without a region.
         saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
-        keys = ("x_min", "x_max", "y_min", "y_max")
-        out: dict = {
-            "success": True,
-            "x_min": x_lo,
-            "x_max": x_hi,
-            "y_min": y_lo,
-            "y_max": y_hi,
-            # Read back, not remembered: "enforced" is whether the controller is
-            # currently holding anything narrower than the stage's full travel.
-            # A flag in a config file would say what we meant, not what is.
-            "enforced": not self._is_full_travel(box),
-            "full_travel": self._full_travel(),
-            # The box to restore when limits go back on. Kept while they are
-            # off, so nobody has to walk the corners again.
-            "region": ({k: saved[k] for k in keys} if all(k in saved for k in keys) else None),
-            "history": [],
-            "position": None,
-        }
+        region = {k: float(saved[k]) for k in keys} if all(k in saved for k in keys) else None
+        applied_at = None
+        history: list = []
         try:
             from gently.core import xy_region
 
             record = xy_region.load()
-            out["history"] = [h.to_dict() for h in reversed(record.history)]
+            history = [h.to_dict() for h in reversed(record.history)]
             if record.current is not None:
-                out["region"] = record.current.box
-                out["applied_at"] = record.current.applied_at
+                region = record.current.box
+                applied_at = record.current.applied_at
         except Exception:
             logger.debug("region history unavailable", exc_info=True)
+
+        defaults = saved.get("controller_defaults")
+        out: dict = {
+            "success": True,
+            **{k: float(firmware[k]) for k in keys},
+            # Read back, not remembered: "enforced" is whether the controller is
+            # holding the operator's region right now. Comparing it to the
+            # constants instead — as this once did — called a controller at
+            # its own defaults "off" and a software-only region "enforced".
+            "enforced": self._same_box(firmware, region),
+            "software": software,
+            # The controller's own limits, as last restored by "off". None
+            # until that has happened once; nothing here guesses at them.
+            "full_travel": dict(defaults) if isinstance(defaults, dict) else None,
+            # The box to restore when limits go back on. Kept while they are
+            # off, so nobody has to walk the corners again.
+            "region": region,
+            "history": history,
+            "position": None,
+        }
+        if applied_at:
+            out["applied_at"] = applied_at
         try:
             cur = xy_stage.read()[xy_stage.name]["value"]
             out["position"] = {"x": float(cur[0]), "y": float(cur[1])}
@@ -3062,9 +3146,13 @@ class DeviceLayerServer(Service):
         whatever we last wrote, with nothing on their screen to explain why it
         stops short. This is the switch that gives them the stage back.
 
-        Off writes the full physical travel — the controller always holds some
-        box, so that is what "no limits" means here. The region is kept, so
-        switching back on restores it without walking the corners again.
+        Off restores the controller's OWN default limits (`SL/SU -`): after
+        it, the hardware limit switches are the only thing stopping the
+        joystick, and the holder can reach the optics. For a while off wrote
+        Gently's inset constants instead, and the stage stopped ~850 µm short
+        on every side of an area a human had verified — "greater freedom of
+        movement, but still not able to cover the full extent". The region is
+        kept, so switching back on restores it without walking the corners.
 
         Persisted, including the OFF state. A boot that silently re-applied the
         region would re-fence the Micro-Manager user days later, which is the
@@ -3085,37 +3173,40 @@ class DeviceLayerServer(Service):
 
         saved = (getattr(self, "config", None) or {}).get("xy_envelope") or {}
         keys = ("x_min", "x_max", "y_min", "y_max")
-        if enforced:
-            if not all(k in saved for k in keys):
-                return web.json_response(
-                    {
-                        "success": False,
-                        "error": "No saved region to enforce — set one with Edit region first",
-                    },
-                    status=409,
-                )
-            box = {k: float(saved[k]) for k in keys}
-        else:
-            box = self._full_travel()
+        if enforced and not all(k in saved for k in keys):
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": "No saved region to enforce — set one with Edit region first",
+                },
+                status=409,
+            )
 
         # The region Gently is held to, whichever way the switch goes. Without
-        # this, turning enforcement OFF writes full travel to the controller
-        # AND — because set_firmware_limits sets the software envelope from
-        # its own numbers — quietly unbounds every move Gently makes.
+        # this, turning enforcement OFF opens the controller AND — because
+        # set_firmware_limits sets the software envelope from its own numbers —
+        # would quietly unbound every move Gently makes.
         region = (
             {k: float(saved[k]) for k in keys}
             if all(k in saved for k in keys)
             else self._full_travel()
         )
+        defaults = None
         try:
             async with self.pause_state_updates():
-                await asyncio.to_thread(
-                    xy_stage.set_firmware_limits,
-                    box["x_min"] / 1000.0,
-                    box["x_max"] / 1000.0,
-                    box["y_min"] / 1000.0,
-                    box["y_max"] / 1000.0,
-                )
+                if enforced:
+                    await asyncio.to_thread(
+                        xy_stage.set_firmware_limits,
+                        region["x_min"] / 1000.0,
+                        region["x_max"] / 1000.0,
+                        region["y_min"] / 1000.0,
+                        region["y_max"] / 1000.0,
+                    )
+                else:
+                    # Not a box of ours. The controller's own defaults, read
+                    # back and checked — see restore_firmware_limit_defaults
+                    # for what it refuses to call "off".
+                    defaults = await asyncio.to_thread(xy_stage.restore_firmware_limit_defaults)
                 await asyncio.to_thread(
                     xy_stage.set_software_limits,
                     region["x_min"],
@@ -3129,12 +3220,16 @@ class DeviceLayerServer(Service):
             logger.exception("Envelope enforcement write failed")
             return web.json_response({"success": False, "error": str(exc)}, status=502)
 
-        # Keep the region, record only the switch.
-        self._write_sidecar("xy_envelope", {**saved, "enforced": enforced})
+        # Keep the region, record only the switch — and, once known, what the
+        # controller calls its defaults, so the map can draw them.
+        record = {**saved, "enforced": enforced}
+        if defaults is not None:
+            record["controller_defaults"] = defaults
+        self._write_sidecar("xy_envelope", record)
         logger.warning(
             "XY firmware limits %s by operator — this controller fences every "
             "client, Micro-Manager included",
-            "ENFORCED" if enforced else "REMOVED (full travel)",
+            "ENFORCED" if enforced else "OFF (controller defaults; hardware limit switches only)",
         )
         return web.json_response(self._envelope_payload(xy_stage))
 

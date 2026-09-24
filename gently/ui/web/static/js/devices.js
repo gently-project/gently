@@ -542,16 +542,17 @@ const DevicesManager = (function () {
                 yMin = Math.min(yMin, xy.y); yMax = Math.max(yMax, xy.y);
             });
         }
-        // While a region is being edited, frame everything the stage can reach.
-        // The view otherwise fits the region as applied, so the moment you push
-        // an edge outward it leaves the sheet — and an edge you cannot see is
-        // an edge you cannot click.
+        // While a region is being walked, frame the box taking shape. Not
+        // the controller's travel: with limits off that is its factory
+        // default, ±110 mm on a stock Tiger, and a 3 mm region framed inside
+        // it is a dot. The stage position is already in the union above, so
+        // the box follows the joystick onto the sheet on its own.
         if (typeof RegionEditor !== 'undefined' && RegionEditor.isOpen()) {
-            [RegionEditor.travel(), RegionEditor.box()].forEach(b => {
-                if (!b) return;
+            const b = RegionEditor.box();
+            if (b) {
                 xMin = Math.min(xMin, b.x_min); xMax = Math.max(xMax, b.x_max);
                 yMin = Math.min(yMin, b.y_min); yMax = Math.max(yMax, b.y_max);
-            });
+            }
         }
         if (!isFinite(xMin) || !isFinite(yMin)) {
             xMin = -100; xMax = 100; yMin = -100; yMax = 100;
@@ -2525,7 +2526,7 @@ const DevicesManager = (function () {
                 ? 'Writing to the controller…'
                 : (s.reason || (s.enforced
                     ? 'The controller stops the stage at this region — for every client, Micro-Manager included.'
-                    : 'Full travel. Nothing is fencing the stage, in Gently or anywhere else.'));
+                    : 'Controller defaults. Only the limit switches stop the joystick now — the holder can reach the optics.'));
         });
 
         btn.addEventListener('click', () => {

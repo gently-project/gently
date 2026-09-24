@@ -142,15 +142,20 @@ def test_the_walk_can_always_be_stepped_back():
     assert "region-back" in HTML
 
 
-def test_the_sheet_frames_the_travel_while_editing():
-    """An edge you cannot see is an edge you cannot click.
+def test_the_sheet_frames_the_walk_not_the_controllers_travel():
+    """The box taking shape stays on the sheet; the controller's travel does not.
 
-    The map otherwise fits the region as applied, so pushing a bound outward
-    puts it off the sheet — and the whole gesture is clicking the edge.
+    With limits off the controller reports its factory default, ±110 mm on a
+    stock Tiger. Framing that put a 3 mm region in the middle of the map as
+    a dot. The stage position is already part of the extent, so the box
+    follows the joystick onto the sheet on its own.
     """
     block = DEVICES.split("function computeViewBox()", 1)[1][:2000]
     assert "RegionEditor.isOpen()" in block
-    assert "RegionEditor.travel()" in block
+    assert "RegionEditor.box()" in block
+    assert "RegionEditor.travel()" not in block, (
+        "the map frames the controller's travel again, and the region becomes a dot"
+    )
 
 
 def test_the_old_wizard_is_gone_from_every_layer():
