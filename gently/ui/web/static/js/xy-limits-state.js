@@ -10,11 +10,15 @@
  * short on Friday, with nothing on their screen to explain it. This store
  * backs the switch that gives them the stage back.
  *
- * "OFF" MEANS FULL TRAVEL
+ * "OFF" MEANS THE CONTROLLER'S OWN DEFAULTS
  *
- * The controller always holds some box, so there is no "no limits" — off is
- * the stage's whole physical range. The operator's region is kept while it is
- * off, so switching back on restores it without walking the corners again.
+ * Off restores the Tiger's factory limits (`SL/SU -`), which sit past the
+ * physical travel; after it only the hardware limit switches stop the
+ * joystick. For a while off wrote Gently's inset constants instead, and the
+ * stage stopped ~850 µm short of an area a human had verified. The
+ * operator's region is kept while off, so switching back on restores it
+ * without walking the corners again. `travel` below is those defaults as
+ * last read back, or null until off has been pressed once.
  *
  * ENFORCED IS READ, NOT REMEMBERED
  *

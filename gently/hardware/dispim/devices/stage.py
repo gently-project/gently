@@ -3,6 +3,7 @@ DiSPIM stage positioner devices (Z-stage and XY-stage).
 """
 
 import logging
+import re
 import time
 from collections import OrderedDict
 
@@ -36,8 +37,16 @@ logger = logging.getLogger(__name__)
 # ~840–860 µm. The inset absorbs the joystick's deceleration-overshoot
 # (we measured ~13 µm at slow joystick, up to ~683 µm at fast). With this
 # inset, even a fast-joystick overshoot still lands inside the true safe
-# travel envelope the operator measured by hand. The wizard offers the same
-# inset as a field.
+# travel envelope the operator measured by hand.
+#
+# THESE ARE NOT THE STAGE'S TRAVEL. For a while "XY limits OFF" wrote these
+# four numbers into the controller as if they were, and the joystick stopped
+# ~850 µm short on every side of an area a human had verified as clear —
+# reported from the rig as "greater freedom of movement, but still not able
+# to cover the full extent". Off now restores the controller's own default
+# limits (`SL/SU -`, see restore_firmware_limit_defaults). These constants
+# bound what GENTLY commands when no region has been walked, and nothing
+# else.
 XY_STAGE_X_MIN_UM: float = -2252.1
 XY_STAGE_X_MAX_UM: float = 983.0
 XY_STAGE_Y_MIN_UM: float = -1677.0
@@ -149,6 +158,8 @@ class DiSPIMXYStage:
         # verifies the read-back, so software and firmware never disagree.
         self._x_limits: tuple[float, float] = (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
         self._y_limits: tuple[float, float] = (XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM)
+        # What the controller holds, as last read or written. None until asked.
+        self._firmware_box: dict[str, float] | None = None
 
     @property
     def x_limits(self) -> tuple[float, float]:
@@ -346,6 +357,163 @@ class DiSPIMXYStage:
         # envelope follow. A partial failure above leaves it where it was.
         self._x_limits = (x_min_mm * 1000.0, x_max_mm * 1000.0)
         self._y_limits = (y_min_mm * 1000.0, y_max_mm * 1000.0)
+        self._firmware_box = {
+            "x_min": x_min_mm * 1000.0,
+            "x_max": x_max_mm * 1000.0,
+            "y_min": y_min_mm * 1000.0,
+            "y_max": y_max_mm * 1000.0,
+        }
+
+    @property
+    def firmware_box(self) -> dict[str, float] | None:
+        """The last limits read from or written to the controller, µm."""
+        return dict(self._firmware_box) if self._firmware_box else None
+
+    # ------------------------------------------------------------------
+    # Raw serial to the Tiger
+    # ------------------------------------------------------------------
+    # The ASITiger adapter's limit properties take a number and nothing
+    # else, so "restore the default" — which the controller spells `SL X-` —
+    # cannot be said through them. The hub device carries a passthrough:
+    # write a string to `SerialCommand`, read the controller's reply from
+    # `SerialResponse`. Two things about it, both from the adapter source:
+    #
+    # * `OnlySendSerialCommandOnChange` defaults to Yes and remembers the
+    #   last string in a function-static, so the same command sent twice is
+    #   silently dropped the second time. It is switched off before every
+    #   send.
+    # * The adapter does not look at the reply. A rejected command leaves
+    #   `:N -4` in SerialResponse and nothing raised, so the reply is checked
+    #   here.
+    #
+    # SL/SU are axis-specific commands: the COMM card routes them to the card
+    # owning X and Y by itself, and ASI's own notes say NOT to prefix them
+    # with a card address. The strings below are exactly what the adapter
+    # sends for its own reads (`SL X?`).
+    _TIGER_HUB_FALLBACK = "TigerCommHub"
+
+    def _tiger_hub(self) -> str:
+        try:
+            hub = str(self.core.getParentLabel(self.name)).strip()
+        except Exception:
+            hub = ""
+        return hub or self._TIGER_HUB_FALLBACK
+
+    def _tiger(self, command: str) -> str:
+        """Send one command to the controller and return its `:A …` reply.
+
+        Raises HardwareError on a `:N` reply or anything else that is not an
+        acknowledgement — the adapter would have swallowed it.
+        """
+        hub = self._tiger_hub()
+        try:
+            self.core.setProperty(hub, "OnlySendSerialCommandOnChange", "No")
+            self.core.setProperty(hub, "SerialCommand", command)
+            reply = str(self.core.getProperty(hub, "SerialResponse")).strip()
+        except RuntimeError as exc:
+            raise HardwareError(f"Tiger serial passthrough failed for {command!r}: {exc}") from exc
+        if not reply.startswith(":A"):
+            raise HardwareError(f"Tiger rejected {command!r}: {reply or '(no reply)'}")
+        return reply
+
+    _LIMIT_REPLY = re.compile(r"([XY])=(-?\d+(?:\.\d+)?)")
+
+    def _limits_from_replies(self, lower: str, upper: str) -> dict[str, float]:
+        lo = {a: float(v) for a, v in self._LIMIT_REPLY.findall(lower)}
+        hi = {a: float(v) for a, v in self._LIMIT_REPLY.findall(upper)}
+        try:
+            return {
+                "x_min": lo["X"] * 1000.0,
+                "x_max": hi["X"] * 1000.0,
+                "y_min": lo["Y"] * 1000.0,
+                "y_max": hi["Y"] * 1000.0,
+            }
+        except KeyError as exc:
+            raise HardwareError(
+                f"Could not read both axes' limits from the controller: {lower!r} / {upper!r}"
+            ) from exc
+
+    def read_firmware_limits(self) -> dict[str, float]:
+        """What the controller is holding right now, in µm — asked directly.
+
+        Not through `LowerLimX(mm)` and friends: the adapter answers those from
+        its own cache unless RefreshPropertyValues is on, so after anything
+        that changed the limits behind its back — including `SL X-` — the
+        property would still report the old number. The serial query is the
+        only reading that cannot be stale.
+        """
+        box = self._limits_from_replies(self._tiger("SL X? Y?"), self._tiger("SU X? Y?"))
+        self._firmware_box = dict(box)
+        return box
+
+    def restore_firmware_limit_defaults(self) -> dict[str, float]:
+        """Give the stage back to the controller: `SL X- Y-`, `SU X- Y-`.
+
+        This is what "XY limits OFF" means. The Tiger keeps its own default
+        limit for every axis — factory-set, remembered through power cycles,
+        and for a stock controller reported as ±110 mm, which is past the
+        physical travel — and `-` restores it (Tiger firmware ≥ 2.8). After
+        this the hardware limit switches are the only thing that stops the
+        joystick.
+
+        Said plainly: the holder can reach the optics. The measured envelope
+        exists because of that; this deliberately sets it aside, for people
+        who asked to.
+
+        Everything is read back and checked before this returns:
+
+        * the controller acknowledged both commands;
+        * the restored box is a box, and the stage is inside it;
+        * it is not NARROWER than what was there before, on any side — an
+          "off" that fences tighter is a fault, not a feature.
+
+        The software envelope — what Gently itself will command — is left
+        exactly as it was. That is the device layer's decision, not this one.
+        """
+        before = None
+        try:
+            before = self.read_firmware_limits()
+        except HardwareError as exc:
+            logger.warning("Could not read the limits before restoring defaults: %s", exc)
+
+        self._tiger("SL X- Y-")
+        self._tiger("SU X- Y-")
+        after = self.read_firmware_limits()
+
+        if after["x_min"] >= after["x_max"] or after["y_min"] >= after["y_max"]:
+            raise HardwareError(f"Controller default limits are not a box: {after}")
+        try:
+            cur = self.read()[self.name]["value"]
+            cx, cy = float(cur[0]), float(cur[1])
+        except Exception as exc:
+            raise HardwareError(f"Could not read XY after restoring limits: {exc}") from exc
+        if not (after["x_min"] <= cx <= after["x_max"] and after["y_min"] <= cy <= after["y_max"]):
+            raise HardwareError(
+                f"Stage at ({cx:.1f}, {cy:.1f}) µm is outside the controller's "
+                f"default limits {after} — undefined controller behaviour"
+            )
+        if before is not None:
+            tol = 1.0
+            narrower = (
+                after["x_min"] > before["x_min"] + tol
+                or after["x_max"] < before["x_max"] - tol
+                or after["y_min"] > before["y_min"] + tol
+                or after["y_max"] < before["y_max"] - tol
+            )
+            if narrower:
+                raise HardwareError(
+                    f"Controller defaults {after} are narrower than the limits it "
+                    f"held {before}; refusing to call that 'off'"
+                )
+        logger.warning(
+            "XY firmware limits restored to controller defaults: "
+            "X=[%.1f, %.1f] Y=[%.1f, %.1f] µm — hardware limit switches only",
+            after["x_min"],
+            after["x_max"],
+            after["y_min"],
+            after["y_max"],
+        )
+        return after
 
     def set_software_limits(
         self,

@@ -134,7 +134,13 @@ def test_a_region_binds_gently_without_touching_the_controller(tmp_path):
     assert isinstance(_fence_error(st.set([950.0, 0.0])), ValueError)
     # ...and the controller was left alone, so a Micro-Manager user on this
     # Tiger still has the whole stage.
-    assert core.props == {}, f"the controller was written without being asked: {core.props}"
+    # The payload asks the controller what it holds (SL X? / SU X?) — a read.
+    # Anything that SETS a limit, by property or by serial, is a write.
+    written = {k: v for k, v in core.props.items() if k.endswith("(mm)")}
+    sent = core.props.get("SerialCommand", "")
+    assert not written and "=" not in sent and "-" not in sent.split(" ", 1)[-1], (
+        f"the controller was written without being asked: {core.props}"
+    )
     sidecar = tmp_path / "config.local.yml"
     assert sidecar.exists() and "xy_envelope" in sidecar.read_text()
 
