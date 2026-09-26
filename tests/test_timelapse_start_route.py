@@ -37,6 +37,9 @@ def _app(orchestrator=None):
     server.agent_bridge.agent.timelapse_orchestrator = orchestrator
     # Satisfy other routes that call _resolve_client() or store
     server.agent_bridge.agent.client = MagicMock()
+    # The start route sets the run's laser preset on the controller when the
+    # plan names one; the fake has to be awaitable for that.
+    server.agent_bridge.agent.client.set_laser_config = AsyncMock(return_value={"success": True})
     server.agent_bridge.agent.lightsheet_monitor = None
     app = FastAPI()
     app.include_router(create_router(server))
@@ -449,3 +452,54 @@ def test_modify_needs_a_stop_condition():
     r = _app(orch).post("/api/devices/timelapse/embryo/embryo_1/modify", json={})
     assert r.status_code == 400
     orch.modify_embryo.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# The laser preset is set for the run, not merely recorded
+# ---------------------------------------------------------------------------
+
+
+def _app_with_client(orch, set_laser_config):
+    """Like _app, but hands back the controller mock so the preset call can be asserted."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    server = MagicMock()
+    server.agent_bridge.agent.timelapse_orchestrator = orch
+    server.agent_bridge.agent.client = MagicMock()
+    server.agent_bridge.agent.client.set_laser_config = set_laser_config
+    server.agent_bridge.agent.lightsheet_monitor = None
+    app = FastAPI()
+    app.include_router(create_router(server))
+    app.dependency_overrides[auth.require_control] = lambda: True
+    return TestClient(app), server.agent_bridge.agent.client
+
+
+def test_the_plans_laser_preset_is_set_on_the_controller_before_the_run():
+    orch = _make_orchestrator()
+    client_app, client = _app_with_client(orch, AsyncMock(return_value={"success": True}))
+    r = client_app.post("/api/devices/timelapse/start", json={"laser_config": "488 and 561"})
+    assert r.status_code == 200, r.text
+    client.set_laser_config.assert_awaited_once_with("488 and 561")
+    orch.start.assert_awaited_once()
+
+
+def test_no_preset_means_the_controller_is_not_touched():
+    orch = _make_orchestrator()
+    client_app, client = _app_with_client(orch, AsyncMock(return_value={"success": True}))
+    r = client_app.post("/api/devices/timelapse/start", json={"interval_seconds": 60})
+    assert r.status_code == 200, r.text
+    client.set_laser_config.assert_not_awaited()
+
+
+def test_a_preset_the_controller_refuses_stops_the_start():
+    """Every timepoint would otherwise image with the wrong lasers."""
+    orch = _make_orchestrator()
+    client_app, client = _app_with_client(
+        orch, AsyncMock(side_effect=RuntimeError("no such preset"))
+    )
+    r = client_app.post("/api/devices/timelapse/start", json={"laser_config": "nope"})
+    assert r.status_code == 502
+    assert "no such preset" in r.json()["detail"]
+    orch.start.assert_not_awaited()
+    client.set_laser_config.assert_awaited_once_with("nope")

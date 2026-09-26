@@ -32,6 +32,34 @@ def _roster(agent) -> list[dict]:
     return roster
 
 
+async def _apply_plan_settings(agent, structure: dict, embryo_ids: list[str]) -> None:
+    """The SPIM channel's settings, applied to exactly the embryos the run will image.
+
+    Slices and exposure are per-embryo settings the orchestrator reads off the
+    EmbryoState; the laser preset is set on the controller once for the run.
+    Mirrors what the Operate start route does, so a plan runs the same from
+    the pane, from the library and from the agent.
+    """
+    experiment = getattr(agent, "experiment", None)
+    embryos = getattr(experiment, "embryos", None) or {}
+    slices = structure.get("num_slices")
+    exposure = structure.get("exposure_ms")
+    for eid in embryo_ids:
+        emb = embryos.get(eid)
+        if emb is None:
+            continue
+        if slices is not None:
+            emb.num_slices = int(slices)
+        if exposure is not None:
+            emb.exposure_ms = float(exposure)
+    preset = structure.get("laser_config")
+    client = getattr(agent, "client", None)
+    if preset and client is not None and hasattr(client, "set_laser_config"):
+        # Refused rather than shrugged off: a run that starts on the wrong
+        # lasers images every timepoint with them.
+        await client.set_laser_config(str(preset))
+
+
 def _num(v, default=None):
     try:
         return float(v)
@@ -68,12 +96,23 @@ async def execute_tactic(agent, tactic: dict) -> dict:
     try:
         if kind == "standing_timelapse":
             interval = _num(structure.get("cadence_s"), _num(structure.get("interval"), 120.0))
-            message = await orchestrator.start(
-                embryo_ids=embryo_ids,
-                stop_condition=str(structure.get("stop_condition", "manual")),
-                base_interval_seconds=interval,
-                condition_value=structure.get("condition_value"),
-            )
+            # The whole plan, not just its cadence. A saved plan that lost its
+            # channels and endings on the way to the orchestrator would run as
+            # something other than what its sentence says.
+            await _apply_plan_settings(agent, structure, embryo_ids)
+            start_kwargs: dict = {
+                "embryo_ids": embryo_ids,
+                "stop_condition": str(structure.get("stop_condition", "manual")),
+                "base_interval_seconds": interval,
+                "condition_value": structure.get("condition_value"),
+            }
+            dic = structure.get("dic")
+            if isinstance(dic, dict) and dic.get("enabled"):
+                start_kwargs["dic"] = dic
+            overrides = structure.get("stop_conditions")
+            if isinstance(overrides, dict) and overrides:
+                start_kwargs["stop_conditions"] = overrides
+            message = await orchestrator.start(**start_kwargs)
             mode = structure.get("monitoring_mode")
             if mode and mode != "idle":
                 try:

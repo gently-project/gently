@@ -1748,6 +1748,8 @@ const OperateManager = (function () {
         if (m === 'adaptive') { loadLaserPresets(); renderPlan(); }
         const say = $('op-plan-say');
         if (say) say.hidden = m !== 'adaptive';
+        const save = $('op-plan-save');
+        if (save) save.hidden = m !== 'adaptive';
         renderRunButton();
         renderSingle();
     }
@@ -1772,10 +1774,18 @@ const OperateManager = (function () {
             const d = await getJSON('/api/tactic_library');
             const items = (d && d.tactics) || [];
             if (!items.length) { host.innerHTML = '<div class="op-empty">No saved tactics</div>'; return; }
-            host.innerHTML = items.map(t =>
-                `<button class="op-libitem${t.id === _selectedLib ? ' is-sel' : ''}" type="button" ` +
-                `data-lib="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}` +
-                `<small>${escapeHtml(t.kind || '')}</small></button>`).join('');
+            // A saved plan is listed as its sentence, said for the embryos
+            // marked NOW — the template holds the plan, the roster is today's.
+            const subjects = planSubjects();
+            host.innerHTML = items.map(t => {
+                const isPlan = t.kind === 'standing_timelapse' && t.structure;
+                const sub = isPlan
+                    ? AcquisitionPlan.describe(AcquisitionPlan.fromStructure(t.structure), subjects)
+                    : (t.kind || '');
+                return `<button class="op-libitem${t.id === _selectedLib ? ' is-sel' : ''}" type="button" ` +
+                    `data-lib="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}` +
+                    `<small class="${isPlan ? 'op-lib-say' : ''}">${escapeHtml(sub)}</small></button>`;
+            }).join('');
         } catch (_) { host.innerHTML = '<div class="op-empty">Library unavailable</div>'; }
     }
 
@@ -2018,6 +2028,27 @@ const OperateManager = (function () {
                 configs.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
             _laserPresetsLoaded = true;
         } catch (_) { /* offline: "current preset" stands */ }
+    }
+
+    /** The plan as a template, under a name the operator gives it. */
+    async function savePlan() {
+        const plan = readPlan();
+        const problems = AcquisitionPlan.validate(plan, subjectIds().length ? subjectIds() : ['_']);
+        const real = problems.filter(p => !/No embryos/.test(p));
+        if (real.length) { toastFail(real[0]); return; }
+        const name = window.prompt('Save this plan as…', '');
+        if (!name || !name.trim()) return;
+        try {
+            const d = await postJSON('/api/tactic_library', {
+                name: name.trim(),
+                kind: 'standing_timelapse',
+                structure: AcquisitionPlan.toStructure(plan),
+                scope: { mode: 'global' },
+                rationale: AcquisitionPlan.describe(plan, planSubjects()),
+                source: 'operate',
+            });
+            toast(`Saved “${d.name || name.trim()}” — it is under Saved tactic`);
+        } catch (e) { toastFail(`Save failed (${why(e)})`); }
     }
 
     /**
@@ -2611,6 +2642,8 @@ const OperateManager = (function () {
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
+        const saveBtn = $('op-plan-save');
+        if (saveBtn) saveBtn.addEventListener('click', savePlan);
         // Per-embryo steering lives on rows the run renders, so it is bound
         // on the spine once and delegated.
         const spine = $('op-runspine');
