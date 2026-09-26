@@ -1,5 +1,6 @@
 """Data routes - calibration, snapshots, embryos, sequence, status, events."""
 
+import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,42 @@ def _json_safe(obj):
     if isinstance(obj, (list, tuple)):
         return [_json_safe(v) for v in obj]
     return obj
+
+
+class CalibrationAborted(Exception):
+    """The operator pressed Abort while a calibration was running."""
+
+
+async def _run_cancellable_calibration(agent, coro, what: str):
+    """Run a calibration as a task that POST /calibrate/abort can cancel.
+
+    The routine runs here, agent-side — Claude-vision edge search, adaptive
+    focus sweeps — as a long series of SHORT device-layer plans (a snap, a
+    move, a snap). There is nothing on the device layer to abort: each plan
+    is over in a fraction of a second. What has to stop is this coroutine,
+    and cancelling its task stops it at its next await; the plan in flight
+    completes on its own and the halt that follows stops any motion.
+
+    A CancelledError that is OURS — the HTTP client went away — is re-raised
+    unchanged, so a closed tab still cancels the way it always did.
+    """
+    task = asyncio.create_task(coro)
+    agent._calibration_task = task
+    agent._calibration_what = what
+    try:
+        return await task
+    except asyncio.CancelledError:
+        # Task.cancelling() is 3.11+; the deps-less mypy run types against an
+        # older stdlib, so it is reached for by name.
+        current = asyncio.current_task()
+        cancelling = getattr(current, "cancelling", None)
+        if callable(cancelling) and cancelling():
+            raise
+        raise CalibrationAborted(what) from None
+    finally:
+        if getattr(agent, "_calibration_task", None) is task:
+            agent._calibration_task = None
+            agent._calibration_what = None
 
 
 def _parse_dic_config(raw) -> dict | None:
@@ -1442,11 +1479,17 @@ def create_router(server) -> APIRouter:
 
         registry = get_tool_registry()
         try:
-            message = await registry.execute(
-                "calibrate_embryo",
-                args,
-                {"agent": agent, "client": client},
+            message = await _run_cancellable_calibration(
+                agent,
+                registry.execute("calibrate_embryo", args, {"agent": agent, "client": client}),
+                embryo_id,
             )
+        except CalibrationAborted:
+            # 409, like the pre-flight refusal: nothing is broken, the operator
+            # chose this. The detail says which 409 it is.
+            raise HTTPException(
+                status_code=409, detail=f"Calibration of {embryo_id} aborted by operator"
+            ) from None
         except Exception as exc:
             logger.exception("Calibration failed for %s", embryo_id)
             raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
@@ -1546,6 +1589,30 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="no alignment with that timestamp")
         return record.to_dict()
 
+    @router.post("/api/devices/calibrate/abort", dependencies=[Depends(require_control)])
+    async def calibrate_abort():
+        """Stop the calibration that is running, and any motion with it.
+
+        Cancels the task the calibrate route registered, then halts every
+        positioner. Answers {aborted: false} when nothing is running rather
+        than erroring: an Abort pressed a moment too late is not a fault.
+        """
+        agent = _require_agent_with_experiment()
+        task = getattr(agent, "_calibration_task", None)
+        what = getattr(agent, "_calibration_what", None)
+        if task is None or task.done():
+            return {"success": True, "aborted": False, "detail": "No calibration running"}
+        task.cancel()
+        halted = None
+        client = _resolve_client()
+        if client is not None:
+            try:
+                halted = await client.halt_motion()
+            except Exception as exc:
+                halted = {"success": False, "error": str(exc)}
+        logger.warning("Calibration of %s aborted by operator (halt: %s)", what, halted)
+        return {"success": True, "aborted": True, "what": what, "halted": halted}
+
     @router.post("/api/devices/calibrate/all", dependencies=[Depends(require_control)])
     async def calibrate_all_route(payload: dict = Body(default={})):  # noqa: B008
         """Calibrate several embryos in one go. Body: {scope, ...cal settings}.
@@ -1592,9 +1659,13 @@ def create_router(server) -> APIRouter:
         args = {"embryo_ids": targets, **_calibration_args(payload)}
         registry = get_tool_registry()
         try:
-            message = await registry.execute(
-                "calibrate_all_embryos", args, {"agent": agent, "client": client}
+            message = await _run_cancellable_calibration(
+                agent,
+                registry.execute("calibrate_all_embryos", args, {"agent": agent, "client": client}),
+                "all",
             )
+        except CalibrationAborted:
+            raise HTTPException(status_code=409, detail="Calibration aborted by operator") from None
         except Exception as exc:
             logger.exception("Batch calibration failed")
             raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc

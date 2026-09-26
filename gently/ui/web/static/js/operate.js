@@ -1329,6 +1329,8 @@ const OperateManager = (function () {
             if (b) b.textContent = `Calibrating… ${Math.round((Date.now() - t0) / 1000)}s`;
         }, 1000);
         if (b) { b.disabled = true; b.textContent = 'Calibrating… 0s'; }
+        const ab = $('op-cal-abort');
+        if (ab) { ab.hidden = false; ab.disabled = false; ab.textContent = 'Abort'; }
         if (out) out.textContent = 'sweeping…';
         // The frames this run is about to take are already broadcast; the
         // progress panel shows them as they land.
@@ -1359,7 +1361,13 @@ const OperateManager = (function () {
             // 409 is the pre-flight check declining, not a crash: nothing was
             // spent past one frame and the operator can say "anyway". Anything
             // else is a failure and reads as one.
-            if (e && e.status === 409) {
+            const detail = String((e && e.data && e.data.detail) || '');
+            if (e && e.status === 409 && /aborted/i.test(detail)) {
+                // The operator's own doing: not a failure, not a refusal.
+                if (out) out.textContent = 'aborted';
+                if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, 'aborted by operator');
+                toast('Calibration aborted');
+            } else if (e && e.status === 409) {
                 if (out) out.textContent = 'nothing there';
                 _refusedFor = _selected;
                 showRefusal(e);
@@ -1376,7 +1384,21 @@ const OperateManager = (function () {
         } finally {
             clearInterval(tick);
             if (b) b.disabled = false;
+            if (ab) ab.hidden = true;
             renderCalTarget();   // restores the verb: Calibrate / Recalibrate
+        }
+    }
+
+    /** Stop the running calibration. The calibrate request then answers 409 "aborted". */
+    async function abortCalibration() {
+        const ab = $('op-cal-abort');
+        if (ab) { ab.disabled = true; ab.textContent = 'Aborting…'; }
+        try {
+            const d = await postJSON('/api/devices/calibrate/abort', {});
+            if (!d.aborted) toast('Nothing to abort — the calibration had already finished');
+        } catch (e) {
+            toastFail(`Abort failed (${why(e)})`);
+            if (ab) { ab.disabled = false; ab.textContent = 'Abort'; }
         }
     }
 
@@ -2565,6 +2587,7 @@ const OperateManager = (function () {
         // back-off button. Restored, and pinned by a test that counts them.
         const sp = $('op-spim-toggle'); if (sp) sp.addEventListener('click', toggleSpim);
         const cal = $('op-calibrate'); if (cal) cal.addEventListener('click', calibrateSelected);
+        const abort = $('op-cal-abort'); if (abort) abort.addEventListener('click', abortCalibration);
         const borrow = $('op-cal-borrow');
         if (borrow) borrow.addEventListener('click', borrowCalibration);
         const all = $('op-cal-all');

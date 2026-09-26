@@ -3334,7 +3334,9 @@ class DeviceLayerServer(Service):
         """
         halted: list[str] = []
         errors: dict[str, str] = {}
-        for key in ("fdrive", "xy_stage", "z_stage"):
+        # The piezo is a stage to MMCore too, and an aborted calibration can
+        # leave it mid-sweep. The galvo is not a positioner and has no stop.
+        for key in ("fdrive", "xy_stage", "z_stage", "piezo"):
             dev = self.devices.get(key)
             if dev is None:
                 continue
