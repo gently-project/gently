@@ -686,6 +686,10 @@
                              need a halt button." Always enabled: halting a still
                              axis costs nothing, and a stop that is greyed out when
                              you reach for it is not a stop. -->
+                        <!-- The head fully up, to the F-drive's top limit — the load
+                             height. Beside HALT because that is where the hand goes
+                             when the head must get out of the way. -->
+                        <button class="op-btn op-btn-raise" id="op-fd-raise" type="button" title="Raise the SPIM head fully, to 25000 µm (load height)">Raise head</button>
                         <button class="op-btn op-btn-halt" id="op-halt" type="button" title="Stop all stage motion now">HALT</button>
                         <span class="op-gauge-read"><b class="op-num" id="op-fd-pos">—</b><i>µm</i></span>
                       </div>
