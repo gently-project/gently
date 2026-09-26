@@ -2120,6 +2120,20 @@ def create_router(server) -> APIRouter:
             logger.exception("fdrive nudge failed")
             raise HTTPException(status_code=502, detail=f"fdrive nudge failed: {exc}") from exc
 
+    @router.post("/api/devices/spim/fdrive/raise", dependencies=[Depends(require_control)])
+    async def raise_fdrive():
+        """The SPIM head fully up, to the F-drive's top limit. "along with the
+        HALT button, we also need a button to raise the spim head to 25000".
+        """
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.raise_fdrive()
+        except Exception as exc:
+            logger.exception("fdrive raise failed")
+            raise HTTPException(status_code=502, detail=f"fdrive raise failed: {exc}") from exc
+
     # ------------------------------------------------------------------
     # Acquisition
     # ------------------------------------------------------------------

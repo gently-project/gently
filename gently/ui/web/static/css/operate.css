@@ -552,6 +552,8 @@
 .op-btn-ghost { background: transparent; }
 .op-btn-warn { background: var(--op-warn); border-color: var(--op-warn); color: #1a1204; font-weight: 600; }
 .op-btn-halt { background: var(--op-bad); border-color: var(--op-bad); color: #fff; font-weight: 700; letter-spacing: 0.08em; }
+.op-btn-raise { margin-right: 6px; }
+.op-btn-raise:disabled { opacity: 0.7; cursor: progress; }
 .op-btn-toggle[aria-pressed="true"], .op-btn.is-on {
     border-color: var(--op-live);
     color: var(--op-live);

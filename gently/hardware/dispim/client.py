@@ -1163,6 +1163,10 @@ class DiSPIMMicroscope(Microscope):
         """Fenced relative move of the SPIM-head F-drive by ``delta`` µm."""
         return await self._api_post("/api/spim/fdrive/nudge", {"delta": float(delta)})
 
+    async def raise_fdrive(self) -> dict:
+        """The SPIM head fully up, to the F-drive's top limit (load height)."""
+        return await self._api_post("/api/spim/fdrive/raise", {})
+
     async def capture_bottom_image(
         self, use_led: bool = False, exposure_ms: float | None = None
     ) -> dict:

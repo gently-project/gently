@@ -3367,6 +3367,39 @@ class DeviceLayerServer(Service):
         """POST /api/spim/fdrive/nudge — fenced relative move of the SPIM-head F-drive."""
         return await self._handle_axis_nudge(request, "fdrive", "F-drive")
 
+    async def handle_raise_fdrive(self, request):
+        """POST /api/spim/fdrive/raise — the SPIM head fully up, to the F-drive's
+        own top limit (25000 µm, the "Load Sample" height). Takes no number
+        from the caller: the top is the device's, not the request's."""
+        device = self.devices.get("fdrive")
+        if device is None:
+            return web.json_response(
+                {"success": False, "error": "F-drive device not found"}, status=503
+            )
+        lo, hi = device.limits
+        try:
+            cur = float(device.read()[device.name]["value"])
+        except Exception as exc:
+            return web.json_response(
+                {"success": False, "error": f"position read failed: {exc}"}, status=502
+            )
+        target = float(hi)
+        try:
+            async with self.pause_state_updates():
+                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+        except Exception as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+        return web.json_response(
+            {
+                "success": True,
+                "position": new_pos,
+                "from": cur,
+                "min": float(lo),
+                "max": float(hi),
+                "distance_to_floor": new_pos - float(lo),
+            }
+        )
+
     async def handle_get_plan_log(self, request):
         """GET /api/plan_log - Get recent plan execution log with timing"""
         try:
@@ -4430,6 +4463,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/stage/bottom_z/nudge", self.handle_nudge_bottom_z)
         self._app.router.add_get("/api/spim/fdrive", self.handle_get_fdrive)
         self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
+        self._app.router.add_post("/api/spim/fdrive/raise", self.handle_raise_fdrive)
         self._app.router.add_post("/api/motion/halt", self.handle_halt_motion)
         self._app.router.add_get("/api/stage/envelope", self.handle_get_envelope)
         self._app.router.add_post("/api/stage/envelope", self.handle_set_envelope)

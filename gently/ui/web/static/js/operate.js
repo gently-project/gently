@@ -488,6 +488,26 @@ const OperateManager = (function () {
     // stayed locked forever with no escape short of clearing sessionStorage.
     // #109. One request, no client-side gate, no busy check: the whole point
     // is that it works while a nudge is in flight. Both axes re-read after.
+    /**
+     * The SPIM head fully up, to the F-drive's top limit. A long move — the
+     * button says so while it travels, and HALT stays live beside it.
+     */
+    async function raiseHead() {
+        const b = $('op-fd-raise');
+        if (b) { b.disabled = true; b.textContent = 'Raising…'; }
+        try {
+            const r = await postJSON('/api/devices/spim/fdrive/raise', {});
+            const at = r && r.position != null ? Math.round(r.position) : null;
+            toast(at != null ? `SPIM head raised to ${at} µm` : 'SPIM head raised');
+            setHeadLowered(false);
+        } catch (e) {
+            toastFail(`Raise failed (${why(e)})`);
+        } finally {
+            if (b) { b.disabled = false; b.textContent = 'Raise head'; }
+            fd.refresh();
+        }
+    }
+
     async function haltMotion() {
         try {
             const r = await postJSON('/api/devices/motion/halt', {});
@@ -2703,6 +2723,8 @@ const OperateManager = (function () {
             b.addEventListener('click', backOff));
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
+        const raise = $('op-fd-raise');
+        if (raise) raise.addEventListener('click', raiseHead);
 
         const modes = $('op-modes');
         if (modes) {
