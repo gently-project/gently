@@ -155,6 +155,26 @@ class SessionManager:
             logger.error(f"Failed to save session: {e}")
             return False
 
+    # The snapshot used to be written only after a conversation turn, so a
+    # run driven from the pane with nobody talking to the agent left it
+    # where the last chat ended — on the rig, at t1 while the run was at
+    # t15. Volumes land every few minutes, and the snapshot is one JSON write
+    # of the whole conversation, so it follows them on a leash.
+    AUTO_SAVE_MIN_INTERVAL_S = 60.0
+
+    def auto_save_if_due(self, experiment, conversation_history, system_prompt) -> bool:
+        """auto_save, at most once per AUTO_SAVE_MIN_INTERVAL_S. Returns
+        whether it saved."""
+        import time
+
+        now = time.monotonic()
+        last = getattr(self, "_last_auto_save_at", None)
+        if last is not None and (now - last) < self.AUTO_SAVE_MIN_INTERVAL_S:
+            return False
+        self._last_auto_save_at = now
+        self.auto_save(experiment, conversation_history, system_prompt)
+        return True
+
     def auto_save(self, experiment, conversation_history, system_prompt):
         """Auto-save session to FileStore (non-blocking, silent on error)."""
         if not self._session_id:

@@ -542,6 +542,12 @@ class MicroscopyAgent:
             self.experiment, self.conversation.conversation_history, self.system_prompt
         )
 
+    def _auto_save_if_due(self) -> bool:
+        """Auto-save, throttled: what a landing volume calls."""
+        return self.sessions.auto_save_if_due(
+            self.experiment, self.conversation.conversation_history, self.system_prompt
+        )
+
     def _auto_save(self):
         """Auto-save session (non-blocking, silent on error)."""
         self.sessions.auto_save(
@@ -1674,6 +1680,14 @@ class MicroscopyAgent:
                 "shape": list(volume.shape),
             },
         )
+
+        # The snapshot follows the run: its embryo counts were only ever as
+        # fresh as the last conversation turn. Off the loop — it is one JSON
+        # write of the whole conversation — and throttled inside.
+        try:
+            await asyncio.to_thread(self._auto_save_if_due)
+        except Exception:
+            logger.debug("auto-save after volume failed", exc_info=True)
 
         return {
             "volume_uid": volume_uid,
