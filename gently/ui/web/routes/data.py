@@ -1920,6 +1920,7 @@ def create_router(server) -> APIRouter:
             tactic = cs.apply_tactic(lib_id)
             if tactic is None:
                 raise HTTPException(status_code=404, detail=f"tactic '{lib_id}' not found")
+            tactic["library_id"] = lib_id  # which saved tactic ran, for resume
         if not isinstance(tactic, dict):
             raise HTTPException(status_code=400, detail="tactic or library_id required")
 
@@ -1939,6 +1940,18 @@ def create_router(server) -> APIRouter:
         except Exception as exc:
             logger.exception("run-tactic execution failed")
             raise HTTPException(status_code=502, detail=f"tactic execution failed: {exc}") from exc
+        # The pane's "what to run" set, onto the plan the executor kept.
+        if result.get("ok") and payload.get("scope") in ("all", "selected"):
+            store = getattr(agent, "store", None)
+            sid = getattr(agent, "session_id", None)
+            try:
+                if store is not None and sid:
+                    kept = store.get_acquisition_plan(sid)
+                    if isinstance(kept, dict) and kept.get("tactic_id") == stored.get("id"):
+                        kept["scope"] = payload["scope"]
+                        store.save_acquisition_plan(sid, kept)
+            except Exception:
+                logger.debug("could not stamp the plan's scope", exc_info=True)
         return {"success": bool(result.get("ok")), "tactic_id": stored.get("id"), "result": result}
 
     @router.get("/api/operation_plan")
@@ -2403,6 +2416,10 @@ def create_router(server) -> APIRouter:
                     "dic": dic_cfg,
                     "stop_conditions": stop_overrides or None,
                     "embryo_ids": list(embryo_ids or []),
+                    # "What to run": the pane's set and mode, so a resumed
+                    # session comes back on them and not on the defaults.
+                    "mode": "adaptive",
+                    "scope": "selected" if payload.get("scope") == "selected" else "all",
                 },
             )
 

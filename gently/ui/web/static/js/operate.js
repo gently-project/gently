@@ -1942,7 +1942,9 @@ const OperateManager = (function () {
                 if (problems.length) { toastFail(problems[0]); return; }
                 // One object: the sentence the operator just read is exactly
                 // what goes on the wire, and what the run view says back.
-                await postJSON('/api/devices/timelapse/start', AcquisitionPlan.toPayload(plan, ids));
+                const payload = AcquisitionPlan.toPayload(plan, ids);
+                payload.scope = _targetScope;   // "what to run", kept with the plan
+                await postJSON('/api/devices/timelapse/start', payload);
                 toast('Timelapse started');
                 landOnRun(AcquisitionPlan.describe(plan, planSubjects()));
                 return;
@@ -1951,7 +1953,7 @@ const OperateManager = (function () {
                 if (!_selectedLib) { toastFail('Pick a saved tactic'); return; }
                 if (!haveSubjects()) return;
                 const d = await postJSON('/api/operate/run-tactic',
-                    { library_id: _selectedLib, embryo_ids: subjectIds() });
+                    { library_id: _selectedLib, embryo_ids: subjectIds(), scope: _targetScope });
                 if (d.success) { toast('Tactic started'); renderRun(); }
                 else toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`);
                 return;
@@ -2042,6 +2044,7 @@ const OperateManager = (function () {
         if (!d || !d.plan || _planDirty) return;
         await loadLaserPresets();
         fillPlan(AcquisitionPlan.fromStructure(d.plan));
+        restoreWhatToRun(d.plan);
         const from = $('op-plan-from');
         if (from) {
             from.textContent = d.source === 'saved'
@@ -2050,6 +2053,32 @@ const OperateManager = (function () {
             from.hidden = false;
         }
         renderPlan();
+    }
+
+    /**
+     * "What to run" as the session last ran it: the set and the mode. The
+     * pane used to come back on Single volume / All subjects whatever the
+     * session had been doing — "not the ones i had selected for that session".
+     */
+    function restoreWhatToRun(plan) {
+        const known = new Set(_embryos.map(e => e.id));
+        const ids = (plan.embryo_ids || []).filter(id => known.has(id));
+        if (plan.scope === 'selected' && ids.length) {
+            _targets = ids.slice();
+            _selected = ids[0];
+            SharedState.set('selectedEmbryoIds', _targets.slice());
+            SharedState.set('selectedEmbryoId', _selected);
+            publishRoster(); renderSpimTarget(); renderCalTarget();
+            setTargetScope('selected');
+        } else {
+            setTargetScope('all');
+        }
+        if (plan.mode === 'library' && plan.library_id) {
+            _selectedLib = plan.library_id;
+            setMode('library');
+        } else {
+            setMode('adaptive');
+        }
     }
 
     function readPlan() {

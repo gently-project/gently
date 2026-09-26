@@ -60,9 +60,12 @@ async def _apply_plan_settings(agent, structure: dict, embryo_ids: list[str]) ->
         await client.set_laser_config(str(preset))
 
 
-def _keep_plan(agent, structure: dict, embryo_ids: list[str], message) -> None:
+def _keep_plan(
+    agent, structure: dict, embryo_ids: list[str], message, tactic: dict | None = None
+) -> None:
     """The plan a run was started with, kept in the session as acquisition.yaml
-    so the pane reads it back on resume. Best-effort; the run is already going."""
+    so the pane reads it back on resume. Best-effort; the run is already going.
+    With the tactic: which saved tactic it was, so the pane comes back on it."""
     if isinstance(message, str) and message.startswith("Timelapse already running"):
         return
     store = getattr(agent, "store", None)
@@ -72,6 +75,12 @@ def _keep_plan(agent, structure: dict, embryo_ids: list[str], message) -> None:
     try:
         plan = dict(structure)
         plan["embryo_ids"] = list(embryo_ids)
+        t = tactic or {}
+        plan["tactic_id"] = t.get("id")
+        plan["name"] = t.get("name")
+        plan["library_id"] = t.get("library_id")
+        plan["mode"] = "library" if t.get("library_id") else "tactic"
+        plan.setdefault("scope", "selected")
         store.save_acquisition_plan(sid, plan)
     except Exception:
         logger.warning("could not keep the acquisition plan", exc_info=True)
@@ -130,7 +139,7 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             if isinstance(overrides, dict) and overrides:
                 start_kwargs["stop_conditions"] = overrides
             message = await orchestrator.start(**start_kwargs)
-            _keep_plan(agent, structure, embryo_ids, message)
+            _keep_plan(agent, structure, embryo_ids, message, tactic)
             mode = structure.get("monitoring_mode")
             if mode and mode != "idle":
                 try:
