@@ -11430,7 +11430,42 @@ body.modal-open {
 .dic-strip-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
 .dic-strip-title { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
 .dic-strip-count { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; opacity: 0.75; }
+.dic-strip-hint { margin-left: auto; font-size: 0.66rem; opacity: 0.55; }
 .dic-strip-frames { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
-.dic-frame { margin: 0; flex: 0 0 auto; }
-.dic-frame img { height: 72px; width: auto; display: block; border-radius: 3px; background: #000; }
-.dic-frame figcaption { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; opacity: 0.7; text-align: center; margin-top: 2px; }
+/* A frame on the strip is a button to the full frame, and looks like one:
+   tall enough to read as a picture, with a hover the eye can find. */
+.dic-frame {
+    flex: 0 0 auto;
+    display: grid;
+    gap: 2px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+}
+.dic-frame:hover, .dic-frame:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
+.dic-frame img, .dic-frame-blank { height: 110px; width: auto; min-width: 110px; display: block; border-radius: 3px; background: #000; }
+.dic-frame-cap { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; opacity: 0.7; text-align: center; }
+
+.dic-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    align-items: center;
+    background: rgba(0, 0, 0, 0.82);
+}
+.dic-viewer[hidden] { display: none; }
+.dic-viewer-fig { margin: 0; display: grid; justify-items: center; gap: 8px; }
+.dic-viewer-fig img { max-width: 100%; max-height: 86vh; object-fit: contain; background: #000; border-radius: 4px; }
+.dic-viewer-fig figcaption { font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; color: #e6e8ec; }
+.dic-viewer-nav, .dic-viewer-close {
+    font: inherit; font-size: 1.6rem; line-height: 1;
+    background: none; border: 0; color: #e6e8ec; cursor: pointer; opacity: 0.8;
+}
+.dic-viewer-nav:disabled { opacity: 0.2; cursor: default; }
+.dic-viewer-close { position: fixed; top: 12px; right: 16px; }
