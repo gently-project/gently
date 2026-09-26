@@ -294,6 +294,11 @@ class MicroscopyAgent:
 
         # Initialize timelapse orchestrator (if microscope connected)
         self._init_timelapse_orchestrator()
+        # A resumed session gets its run's state back: cadence, the DIC
+        # channel, each embryo's ending and timepoint count. The checkpoint
+        # was written every round and, until now, never read.
+        if session_id:
+            self._restore_acquisition_state()
 
         # Initialize timeline manager (subscribes to event bus)
         self._init_timeline_manager()
@@ -549,9 +554,20 @@ class MicroscopyAgent:
 
     def resume_session(self, session_id: str) -> bool:
         """Resume a session (public interface for CLI)."""
-        return self.sessions.resume_session(
+        ok = self.sessions.resume_session(
             session_id, self.experiment, self.conversation, self._update_system_prompt
         )
+        if ok:
+            self._restore_acquisition_state()
+        return ok
+
+    def _restore_acquisition_state(self) -> None:
+        from gently.app.orchestration.resume import restore_acquisition_state
+
+        try:
+            restore_acquisition_state(self)
+        except Exception:
+            logging.getLogger(__name__).warning("acquisition state restore failed", exc_info=True)
 
     # ===== Init Helpers =====
 

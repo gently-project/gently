@@ -60,6 +60,23 @@ async def _apply_plan_settings(agent, structure: dict, embryo_ids: list[str]) ->
         await client.set_laser_config(str(preset))
 
 
+def _keep_plan(agent, structure: dict, embryo_ids: list[str], message) -> None:
+    """The plan a run was started with, kept in the session as acquisition.yaml
+    so the pane reads it back on resume. Best-effort; the run is already going."""
+    if isinstance(message, str) and message.startswith("Timelapse already running"):
+        return
+    store = getattr(agent, "store", None)
+    sid = getattr(agent, "session_id", None)
+    if store is None or not sid or not hasattr(store, "save_acquisition_plan"):
+        return
+    try:
+        plan = dict(structure)
+        plan["embryo_ids"] = list(embryo_ids)
+        store.save_acquisition_plan(sid, plan)
+    except Exception:
+        logger.warning("could not keep the acquisition plan", exc_info=True)
+
+
 def _num(v, default=None):
     try:
         return float(v)
@@ -113,6 +130,7 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             if isinstance(overrides, dict) and overrides:
                 start_kwargs["stop_conditions"] = overrides
             message = await orchestrator.start(**start_kwargs)
+            _keep_plan(agent, structure, embryo_ids, message)
             mode = structure.get("monitoring_mode")
             if mode and mode != "idle":
                 try:

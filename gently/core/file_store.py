@@ -12,6 +12,7 @@ of SQLite.  All state lives under a single root directory (e.g.
         session.lock                        # PID + hostname while active
         intent.yaml
         timelapse.yaml
+        acquisition.yaml                    # the plan the run was started with
         timeline.jsonl
         interaction_log.jsonl
         conversation.json
@@ -506,6 +507,29 @@ class FileStore:
             return None
         with open(path, encoding="utf-8") as f:
             return json.load(f)
+
+    # ==================================================================
+    # Acquisition plan
+    # ==================================================================
+
+    def save_acquisition_plan(self, session_id: str, plan: dict) -> Path:
+        """Write ``acquisition.yaml``: the plan a run was started with.
+
+        The same structure a saved template and a seeded standing_timelapse
+        tactic carry, so the Acquisition pane can read it back on resume.
+        """
+        sd = self._require_session_dir(session_id)
+        path = sd / "acquisition.yaml"
+        _write_yaml(path, dict(plan))
+        return path
+
+    def get_acquisition_plan(self, session_id: str) -> dict | None:
+        """The plan the session's run was started with, or None."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        doc = _read_yaml(sd / "acquisition.yaml")
+        return doc if isinstance(doc, dict) else None
 
     def append_temperature_sample(self, session_id: str, sample: dict) -> None:
         """Append one temperature reading to the session's temperature.jsonl."""

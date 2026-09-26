@@ -96,6 +96,7 @@ D:/Gently3/
       session.lock                         # PID + hostname (while active)
       intent.yaml                          # planned vs actual
       timelapse.yaml                       # checkpointed timelapse state
+      acquisition.yaml                     # the plan the run was started with
       timeline.jsonl                       # session events
       interaction_log.jsonl                # agent conversation records
       conversation.json                    # Claude API messages (resumption)

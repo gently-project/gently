@@ -196,6 +196,16 @@ const AcquisitionPlan = (() => {
         const s = String(spec || 'manual').trim().toLowerCase().replace(/\+\d+$/, '');
         if (s.startsWith('timepoints:')) return { kind: 'timepoints', value: Number(s.split(':')[1]) || 1 };
         if (s.startsWith('duration:')) return { kind: 'duration', value: Number(s.split(':')[1].replace(/h$/, '')) || 1 };
+        // The agent's stage-based spec, "stages(hatched,hatching)": the pane
+        // offers those endings by name. An unknown stage set stays manual,
+        // and the sentence says "until stopped" rather than inventing an end.
+        const m = s.match(/^stages?\(([^)]*)\)$/);
+        if (m) {
+            const stages = m[1].split(',').map(x => x.trim());
+            if (stages.some(x => x === 'hatching' || x === 'hatched')) return { kind: 'hatching', value: null };
+            if (stages.includes('comma')) return { kind: 'comma', value: null };
+            return { kind: 'manual', value: null };
+        }
         return { kind: STOP_KINDS[s] ? s : 'manual', value: null };
     }
 
