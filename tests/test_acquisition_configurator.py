@@ -121,3 +121,20 @@ def test_the_stop_vocabulary_is_what_the_orchestrator_parses():
     assert kinds
     offered = set(re.findall(r"^\s*(\w+): \{", kinds.group(1), re.M))
     assert offered == {"manual", "timepoints", "duration", "hatching", "comma", "all_test_hatched"}
+
+
+def test_a_detect_clears_the_last_attempts_note_before_it_starts():
+    """Reported: "Automatic detection is unavailable on this rig" sitting under
+    a detect that was, at that moment, succeeding. The note was from a press
+    made in the half-minute between the page connecting and the device layer
+    attaching, and nothing ever cleared it."""
+    fn = OPERATE[OPERATE.index("async function runDetect(") :][:1400]
+    assert fn.index("setDetectNote('')") < fn.index("postJSON('/api/devices/detect_embryos'")
+
+
+def test_the_two_503s_are_told_apart():
+    """ "Not connected" is a wait; "no SAM" is this rig's shape."""
+    branch = OPERATE[OPERATE.index("if (e.status === 503) {") :][:900]
+    assert "/not connected/i.test(detail)" in branch
+    assert "still coming up" in branch
+    assert "unavailable on this rig" in branch

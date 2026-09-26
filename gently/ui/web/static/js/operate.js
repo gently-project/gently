@@ -1047,6 +1047,11 @@ const OperateManager = (function () {
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;
         _detectStartedAt = Date.now();
+        // Whatever the last attempt said is not about this one. A refusal from
+        // a press made while the rig was still coming up used to sit under
+        // the next, succeeding, detect — "unavailable on this rig" beside
+        // four fresh candidates.
+        setDetectNote('');
         publishMarking();
         const busy = $('op-busy-bottom'); if (busy) busy.hidden = false;
         // Detect on the frame already on screen when there is one — the operator
@@ -1098,7 +1103,15 @@ const OperateManager = (function () {
             toast(`Detected ${added} candidate${added === 1 ? '' : 's'}`);
         } catch (e) {
             if (e.status === 503) {
-                setDetectNote('Automatic detection is unavailable on this rig — mark by clicking the image.');
+                // Two different 503s. One is the rig still attaching after a
+                // launch — try again in a moment. The other is a device layer
+                // with no SAM, which is this rig's shape and will not change
+                // by waiting. They were one sentence, and it was the wrong one
+                // for the case people actually hit.
+                const detail = String((e.data && e.data.detail) || '');
+                setDetectNote(/not connected/i.test(detail)
+                    ? 'The microscope is still coming up — try again in a moment, or mark by clicking the image.'
+                    : 'Automatic detection is unavailable on this rig — mark by clicking the image.');
             } else {
                 toastFail(`Detect failed (${why(e)})`);
             }
