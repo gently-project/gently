@@ -18,6 +18,46 @@ const HomeApp = (() => {
     // skip if one is in flight or the strip was loaded within IMAGES_TTL_MS.
     const IMAGES_TTL_MS = 15000;
     let _imgState = { at: 0, inflight: false };
+    let _recent = [];          // the strip as last rendered, for the Lightbox
+    let _liveTimer = null;
+
+    /** Is Home the tab on screen? The strip only redraws live when it is seen. */
+    function homeIsShowing() {
+        const panel = document.getElementById('home-content');
+        return !!(panel && panel.classList.contains('active'));
+    }
+
+    /**
+     * A volume or an overview frame landed. The strip is "latest projection
+     * per embryo", so it is out of date the moment one does. Redrawn now if
+     * Home is on screen, otherwise marked stale so the next entry skips the
+     * throttle — the strip used to refresh only on entry, at most every 15 s,
+     * and never on the event that changes it.
+     */
+    function onImagery() {
+        _imgState.at = 0;
+        if (!homeIsShowing()) return;
+        clearTimeout(_liveTimer);
+        _liveTimer = setTimeout(() => loadImages(true), 1500);
+    }
+    if (typeof ClientEventBus !== 'undefined') {
+        ['VOLUME_ACQUIRED', 'IMAGE_ACQUIRED', 'ACQUISITION_COMPLETED'].forEach(ev => ClientEventBus.on(ev, onImagery));
+    }
+
+    /** Open the strip's images in the Lightbox, starting at the one clicked. */
+    function openRecent(index) {
+        if (typeof Lightbox === 'undefined' || !_recent.length) return;
+        Lightbox.open(_recent.map(s => ({
+            url: s.url,
+            data_type: 'projection',
+            metadata: {
+                embryo_id: s.embryo_id,
+                timepoint: s.timepoint,
+                session_id: s.session_id,
+                session_name: s.session_name,
+            },
+        })), Math.max(0, Math.min(index, _recent.length - 1)), 'home');
+    }
 
     function relTime(iso) {
         if (!iso) return '';
@@ -113,18 +153,30 @@ const HomeApp = (() => {
                 _imgState.at = Date.now();
                 return;
             }
-            el.innerHTML = '<div class="home-image-strip">' + recent.map(s => {
+            _recent = recent.map(s => Object.assign({}, s, {
+                url: `/api/sessions/${encodeURIComponent(s.session_id)}`
+                    + `/projection?embryo=${encodeURIComponent(s.embryo_id)}`
+                    + `&t=${encodeURIComponent(s.timepoint)}`,
+            }));
+            // A tile is a button to the image, and looks like one. It used to
+            // be a div: "thumbnail only … not able to click them really".
+            el.innerHTML = '<div class="home-image-strip">' + _recent.map((s, i) => {
                 const tp = (s.timepoint != null) ? ` · t${s.timepoint}` : '';
                 const label = `${s.embryo_id || ''}${tp}`;
                 const sub = s.session_name && s.session_name !== s.session_id
                     ? ` (${s.session_name})` : '';
-                const src = `/api/sessions/${encodeURIComponent(s.session_id)}`
-                    + `/projection?embryo=${encodeURIComponent(s.embryo_id)}`
-                    + `&t=${encodeURIComponent(s.timepoint)}`;
-                return `<div class="home-image" title="${escapeHtml(label + sub)}">
-                    <img loading="lazy" src="${src}" alt="${escapeHtml(label)}">
-                </div>`;
+                return `<button type="button" class="home-image" data-home-image="${i}" title="${escapeHtml(label + sub)}">
+                    <img loading="lazy" src="${s.url}" alt="${escapeHtml(label)}">
+                    <span class="home-image-cap">${escapeHtml(label)}</span>
+                </button>`;
             }).join('') + '</div>';
+            if (!el._openWired) {
+                el._openWired = true;
+                el.addEventListener('click', e => {
+                    const b = e.target.closest('[data-home-image]');
+                    if (b) openRecent(Number(b.dataset.homeImage));
+                });
+            }
             _imgState.at = Date.now();
         } catch (e) {
             empty(el, 'Could not load images.');

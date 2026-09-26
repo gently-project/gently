@@ -172,10 +172,11 @@ const Lightbox = {
         const img = this.imageList[index];
         if (!img) return;
 
-        // Load image from API by UID
-        if (this.els.image && img.uid) {
+        // Load image from API by UID — or by a URL the caller already has
+        // (Home's projections are served per session, and carry no store uid).
+        if (this.els.image && (img.uid || img.url)) {
             this.els.image.classList.add('transitioning');
-            this.els.image.src = `/api/images/${img.uid}/png`;
+            this.els.image.src = img.url || `/api/images/${img.uid}/png`;
             setTimeout(() => {
                 this.els.image.classList.remove('transitioning');
             }, 150);
@@ -230,9 +231,10 @@ const Lightbox = {
             thumb.className = `lightbox-thumb ${i === this.currentIndex ? 'active' : ''}`;
             thumb.dataset.index = i;
 
-            // Load thumbnail from API
-            if (img.uid) {
-                thumb.innerHTML = `<img src="/api/images/${img.uid}/png" alt="T${img.metadata?.timepoint ?? i}">`;
+            // Load thumbnail from API, or from the caller's URL
+            if (img.uid || img.url) {
+                const src = img.url || `/api/images/${img.uid}/png`;
+                thumb.innerHTML = `<img src="${src}" alt="T${img.metadata?.timepoint ?? i}">`;
             } else {
                 thumb.innerHTML = `<span class="thumb-placeholder">T${img.metadata?.timepoint ?? i}</span>`;
             }
@@ -439,6 +441,8 @@ const Lightbox = {
                     // a 3D volume: show its middle slice, which the API renders
                     const mid = Math.floor(img.num_slices / 2);
                     this.els.image.src = `/api/volumes3d/${img.uid}/slice/${mid}`;
+                } else if (img.url) {
+                    this.els.image.src = img.url;
                 } else if (img.uid) {
                     this.els.image.src = `/api/images/${img.uid}/png`;
                 } else {
@@ -448,13 +452,18 @@ const Lightbox = {
             }, 150);
         }
 
-        // Update info
-        if (this.els.title) this.els.title.textContent = img.data_type || 'Image';
+        // Update info. An item opened by url carries its timepoint in
+        // metadata, and that is its name — "T12", not "Image".
+        const tp = img.metadata?.timepoint;
+        if (this.els.title) this.els.title.textContent = tp !== undefined && tp !== null ? `T${tp}` : (img.data_type || 'Image');
         if (this.els.position) this.els.position.textContent = `${index + 1} of ${this.imageList.length}`;
         if (this.els.infoType) this.els.infoType.textContent = img.data_type || '-';
         if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = img.metadata?.embryo_id || '-';
         if (this.els.infoShape) this.els.infoShape.textContent = img.shape ? img.shape.join(' x ') : '-';
-        if (this.els.infoTime) this.els.infoTime.textContent = img.timestamp ? new Date(img.timestamp).toLocaleTimeString() : '-';
+        if (this.els.infoTime) {
+            this.els.infoTime.textContent = img.timestamp ? new Date(img.timestamp).toLocaleTimeString()
+                : (tp !== undefined && tp !== null ? `T${tp}` : '-');
+        }
 
         // Update nav button states
         if (this.els.prevBtn) this.els.prevBtn.disabled = index === 0;
@@ -484,6 +493,8 @@ const Lightbox = {
 
             if (img.base64_png) {
                 thumb.innerHTML = `<img src="data:image/png;base64,${img.base64_png}" alt="${img.data_type || 'Image'}">`;
+            } else if (img.url) {
+                thumb.innerHTML = `<img src="${img.url}" alt="${img.data_type || 'Image'}">`;
             }
 
             thumb.addEventListener('click', () => this.goTo(i));
