@@ -216,8 +216,9 @@ body {
     color: var(--accent-green);
 }
 
-/* Hide copy button when no session ID */
-.session-id-link:empty + .session-copy-btn {
+/* Hide copy and folder buttons when no session ID */
+.session-id-link:empty + .session-copy-btn,
+.session-id-link:empty ~ .session-open-btn {
     display: none;
 }
 

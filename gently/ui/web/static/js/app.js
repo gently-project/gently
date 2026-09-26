@@ -162,6 +162,32 @@ function copySessionId() {
 }
 
 /**
+ * Open the session's folder in the OS file manager. "next to the tag name in
+ * the header showing the session ID there must be a button to open the
+ * folder where all the images are stored."
+ */
+async function openSessionFolder() {
+    const sessionLink = document.getElementById('session-id-link');
+    const sessionId = sessionLink ? sessionLink.textContent.trim() : '';
+    if (!sessionId) return;
+    const say = (msg, level) => {
+        if (typeof showGentlyToast === 'function') showGentlyToast(msg, null, null, 5000, level || 'success');
+    };
+    try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/open-folder`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || data.error || `${res.status}`);
+        say(`Opened ${data.path}`);
+    } catch (err) {
+        say(`Could not open the session folder (${err.message})`, 'error');
+    }
+}
+
+/**
  * Tooltip System - Shows helpful hints on hover
  */
 const Tooltips = {
