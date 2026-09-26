@@ -42,6 +42,74 @@ def _json_safe(obj):
     return obj
 
 
+def _parse_dic_config(raw) -> dict | None:
+    """The DIC overview block of a plan, validated. None when absent or off."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="dic must be an object")
+    if not raw.get("enabled"):
+        return None
+    out: dict = {"enabled": True, "use_led": bool(raw.get("use_led", True))}
+    every = raw.get("every_seconds")
+    if every is not None:
+        try:
+            every = float(every)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="dic.every_seconds must be a number"
+            ) from None
+        if every <= 0:
+            raise HTTPException(status_code=400, detail="dic.every_seconds must be > 0")
+    out["every_seconds"] = every
+    pos = raw.get("position")
+    if pos is not None:
+        try:
+            out["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
+        except (TypeError, KeyError, ValueError):
+            raise HTTPException(status_code=400, detail="dic.position must be {x, y}") from None
+    else:
+        out["position"] = None
+    exposure = raw.get("exposure_ms")
+    if exposure is not None:
+        try:
+            exposure = float(exposure)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400, detail="dic.exposure_ms must be a number"
+            ) from None
+        if not (0 < exposure <= 10000):
+            raise HTTPException(status_code=400, detail="dic.exposure_ms must be in (0, 10000]")
+    out["exposure_ms"] = exposure
+    return out
+
+
+def _parse_stop_overrides(raw) -> dict:
+    """Per-embryo termination overrides: {embryo_id: spec}. Empty when absent."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="stop_conditions must be an object")
+    out: dict = {}
+    for eid, spec in raw.items():
+        if isinstance(spec, str) and spec.strip():
+            out[str(eid)] = spec.strip()
+        elif isinstance(spec, dict) and spec.get("stop_condition"):
+            out[str(eid)] = {
+                "stop_condition": str(spec["stop_condition"]),
+                "condition_value": spec.get("condition_value"),
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"stop_conditions[{eid!r}] must be a spec string "
+                    "or {stop_condition, condition_value}"
+                ),
+            )
+    return out
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -2077,10 +2145,20 @@ def create_router(server) -> APIRouter:
           piezo_amplitude  (float, default 25.0)
           piezo_center     (float, default 50.0)
           laser_config     (str | null)
+          dic              (dict | null) — the DIC overview channel:
+                             {enabled: bool, every_seconds: float|null,
+                              position: {x, y}|null, exposure_ms: float|null}
+                             one bottom-camera frame of the whole field per
+                             round, on its own clock; null/absent = off
+          stop_conditions  (dict | null) — per-embryo termination overrides,
+                             {embryo_id: "timepoints:12" | {stop_condition,
+                             condition_value}}; everyone else keeps
+                             stop_condition
 
         Validation:
           - interval_seconds must be > 0
           - num_slices must be >= 1
+          - dic.every_seconds, when given, must be > 0
 
         Orchestrator access: server.agent_bridge.agent.timelapse_orchestrator
         RIG-DEFERRED: the actual acquisition + galvo/piezo motion.
@@ -2116,6 +2194,8 @@ def create_router(server) -> APIRouter:
         _require_calibrated(embryo_ids, payload)
         condition_value = payload.get("condition_value")
         monitoring_mode = payload.get("monitoring_mode") or None
+        dic_cfg = _parse_dic_config(payload.get("dic"))
+        stop_overrides = _parse_stop_overrides(payload.get("stop_conditions"))
 
         # Volume geometry. The galvo/piezo half is context only — the
         # orchestrator derives the scan cuboid from each embryo's own
@@ -2184,13 +2264,20 @@ def create_router(server) -> APIRouter:
         # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
         #       this is intentional — the agent path wires the plan, this route does not.
+        # Only what the plan actually says goes to the orchestrator: a run
+        # without a DIC channel calls start() exactly as it always has.
+        start_kwargs: dict = {
+            "embryo_ids": embryo_ids,
+            "stop_condition": stop_condition,
+            "base_interval_seconds": interval_seconds,
+            "condition_value": condition_value,
+        }
+        if dic_cfg is not None:
+            start_kwargs["dic"] = dic_cfg
+        if stop_overrides:
+            start_kwargs["stop_conditions"] = stop_overrides
         try:
-            result = await orchestrator.start(
-                embryo_ids=embryo_ids,
-                stop_condition=stop_condition,
-                base_interval_seconds=interval_seconds,
-                condition_value=condition_value,
-            )
+            result = await orchestrator.start(**start_kwargs)
         except Exception as exc:
             logger.exception("Timelapse start failed")
             raise HTTPException(status_code=502, detail=f"timelapse start failed: {exc}") from exc
@@ -2238,6 +2325,8 @@ def create_router(server) -> APIRouter:
                             "stop_condition": stop_condition,
                             "condition_value": condition_value,
                             "monitoring_mode": monitoring_mode or "idle",
+                            "dic": dic_cfg,
+                            "stop_conditions": stop_overrides or None,
                         },
                         "rationale": "Started from the Operate Run step.",
                         "live_bind": ["cadence"],
@@ -2289,6 +2378,8 @@ def create_router(server) -> APIRouter:
         return {
             "started": True,
             "result": result,
+            "dic": dic_cfg,
+            "stop_conditions": stop_overrides or None,
             "tactics": seeded_tactics,
             "monitoring_mode_result": mode_result,
             "config": {
@@ -2324,6 +2415,93 @@ def create_router(server) -> APIRouter:
                 orch._operate_tactic_ids = []
             except Exception:
                 pass
+
+    def _running_orchestrator():
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        orch = getattr(agent, "timelapse_orchestrator", None) if agent else None
+        if orch is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Timelapse orchestrator not initialised (agent not running or no session)",
+            )
+        return orch
+
+    @router.get("/api/devices/timelapse/status")
+    async def timelapse_status():
+        """The run as it stands: status, cadence, every embryo, the DIC channel.
+
+        What the Acquisition pane draws its embryo-wise rows from. Read-only,
+        so no require_control — it is the same TimelapseState the agent's
+        status command builds, and it answers while idle too.
+        """
+        orch = _running_orchestrator()
+        try:
+            state = orch.get_status()
+            out = state.to_dict() if hasattr(state, "to_dict") else dict(state)
+        except Exception as exc:
+            logger.exception("Timelapse status failed")
+            raise HTTPException(status_code=502, detail=f"timelapse status failed: {exc}") from exc
+        # The per-embryo rows the pane needs, beyond to_dict()'s counts.
+        rows = {}
+        for eid, e in (getattr(state, "embryos", None) or {}).items():
+            sc = getattr(e, "stop_condition", None)
+            nxt = getattr(e, "next_due_at", None)
+            rows[eid] = {
+                "timepoints": getattr(e, "timepoints_acquired", 0),
+                "interval_seconds": getattr(e, "interval_seconds", None),
+                "cadence_phase": getattr(e, "cadence_phase", "normal"),
+                "next_due_at": nxt.isoformat() if nxt else None,
+                "is_complete": bool(getattr(e, "is_complete", False)),
+                "completion_reason": getattr(e, "completion_reason", None),
+                "should_skip": bool(getattr(e, "should_skip", False)),
+                "stop_condition": sc.describe()
+                if sc is not None and hasattr(sc, "describe")
+                else None,
+                "role": getattr(e, "role", None),
+                "last_error": getattr(e, "last_error", None),
+            }
+        out["embryos"] = rows
+        return out
+
+    @router.post(
+        "/api/devices/timelapse/embryo/{embryo_id}/stop",
+        dependencies=[Depends(require_control)],
+    )
+    async def timelapse_stop_embryo(embryo_id: str, payload: dict = Body(default={})):  # noqa: B008
+        """Stop one embryo; the rest of the run carries on."""
+        orch = _running_orchestrator()
+        reason = str((payload or {}).get("reason") or "user_request")
+        try:
+            result = await orch.stop_embryo(embryo_id, reason=reason)
+        except Exception as exc:
+            logger.exception("Stop embryo failed")
+            raise HTTPException(status_code=502, detail=f"stop embryo failed: {exc}") from exc
+        return {"success": True, "embryo_id": embryo_id, "result": result}
+
+    @router.post(
+        "/api/devices/timelapse/embryo/{embryo_id}/modify",
+        dependencies=[Depends(require_control)],
+    )
+    async def timelapse_modify_embryo(embryo_id: str, payload: dict = Body(...)):  # noqa: B008
+        """Change one embryo's termination mid-run.
+
+        Body: {"stop_condition": str, "condition_value": any | null}
+        """
+        orch = _running_orchestrator()
+        stop_condition = payload.get("stop_condition")
+        if not stop_condition or not isinstance(stop_condition, str):
+            raise HTTPException(status_code=400, detail="stop_condition must be a non-empty string")
+        try:
+            result = await orch.modify_embryo(
+                embryo_id,
+                stop_condition=stop_condition,
+                condition_value=payload.get("condition_value"),
+            )
+        except Exception as exc:
+            logger.exception("Modify embryo failed")
+            raise HTTPException(status_code=502, detail=f"modify embryo failed: {exc}") from exc
+        return {"success": True, "embryo_id": embryo_id, "result": result}
 
     @router.post("/api/devices/timelapse/stop", dependencies=[Depends(require_control)])
     async def timelapse_stop(payload: dict = Body(default={})):  # noqa: B008
