@@ -2370,6 +2370,28 @@ def create_router(server) -> APIRouter:
             logger.exception("Timelapse start failed")
             raise HTTPException(status_code=502, detail=f"timelapse start failed: {exc}") from exc
 
+        # The plan, kept with the session. Until now the pane's plan lived in
+        # the form and nowhere else, so a resumed session came back with the
+        # defaults — "i do not have all the acquisition configuration
+        # restoration". Best-effort; the run is already going.
+        if not (isinstance(result, str) and result.startswith("Timelapse already running")):
+            _keep_plan(
+                agent,
+                {
+                    "cadence_s": interval_seconds,
+                    "interval": interval_seconds,
+                    "stop_condition": stop_condition,
+                    "condition_value": condition_value,
+                    "monitoring_mode": monitoring_mode or "idle",
+                    "num_slices": num_slices if sent_slices else None,
+                    "exposure_ms": exposure_ms if sent_exposure else None,
+                    "laser_config": volume_geometry.get("laser_config"),
+                    "dic": dic_cfg,
+                    "stop_conditions": stop_overrides or None,
+                    "embryo_ids": list(embryo_ids or []),
+                },
+            )
+
         # Optionally install a monitoring mode at startup (mirrors start_adaptive_timelapse)
         mode_result = None
         if monitoring_mode and monitoring_mode != "idle":
@@ -2504,6 +2526,17 @@ def create_router(server) -> APIRouter:
             except Exception:
                 pass
 
+    def _keep_plan(agent, plan: dict) -> None:
+        """Write the run's plan to the session. Best-effort."""
+        store = getattr(agent, "store", None)
+        sid = getattr(agent, "session_id", None)
+        if store is None or not sid or not hasattr(store, "save_acquisition_plan"):
+            return
+        try:
+            store.save_acquisition_plan(sid, plan)
+        except Exception:
+            logger.warning("could not keep the acquisition plan", exc_info=True)
+
     def _running_orchestrator():
         bridge = getattr(server, "agent_bridge", None)
         agent = bridge.agent if bridge is not None else None
@@ -2514,6 +2547,25 @@ def create_router(server) -> APIRouter:
                 detail="Timelapse orchestrator not initialised (agent not running or no session)",
             )
         return orch
+
+    @router.get("/api/devices/timelapse/plan")
+    async def timelapse_plan():
+        """The plan this session's run was started with, for the pane to
+        fill itself from on resume. {plan: structure|null, source:
+        "saved"|"run"|null} — "run" when read off the checkpoint of a
+        session that predates acquisition.yaml. Never errors."""
+        from gently.app.orchestration.resume import plan_from_session
+
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        store = getattr(agent, "store", None) if agent else None
+        sid = getattr(agent, "session_id", None) if agent else None
+        try:
+            plan, source = plan_from_session(store, sid)
+        except Exception:
+            logger.debug("timelapse plan read failed", exc_info=True)
+            plan, source = None, None
+        return {"plan": plan, "source": source, "session_id": sid}
 
     @router.get("/api/devices/timelapse/status")
     async def timelapse_status():

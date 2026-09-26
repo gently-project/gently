@@ -160,3 +160,12 @@ test('a DIC interval that is not a whole number of rounds rounds to one', () => 
     const plan = P.fromStructure({ cadence_s: 300, dic: { enabled: true, every_seconds: 700 } });
     assert.equal(plan.dic.everyRounds, 2);
 });
+
+test('the agent’s stage-based ending reads back as the pane’s own', () => {
+    // A resumed session written by the agent ends at "stages(hatched,hatching)";
+    // the pane has that ending, by name. It used to read back as "until stopped".
+    assert.deepEqual(P.parseStopSpec('stages(hatched,hatching)'), { kind: 'hatching', value: null });
+    assert.deepEqual(P.parseStopSpec('stages(comma)'), { kind: 'comma', value: null });
+    assert.deepEqual(P.parseStopSpec('stages(twofold)'), { kind: 'manual', value: null });
+    assert.equal(P.fromStructure({ stop_condition: 'stages(hatched,hatching)' }).stop.kind, 'hatching');
+});

@@ -1969,6 +1969,69 @@ const OperateManager = (function () {
         return _embryos.filter(e => ids.has(e.id)).map(e => ({ id: e.id, label: labelFor(e) }));
     }
 
+    // The plan as the session last ran it. Filled once per page life, and
+    // never over something the operator has already typed.
+    let _planRestored = false;
+    let _planDirty = false;
+
+    /** Put a plan into the form. The inverse of readPlan(). */
+    function fillPlan(plan) {
+        const set = (id, v) => { const el = $(id); if (el && v != null) el.value = v; };
+        const secs = plan.intervalSeconds;
+        if (secs % 60 === 0 && secs >= 60) { set('op-tl-interval', secs / 60); set('op-plan-unit', 'min'); }
+        else { set('op-tl-interval', secs); set('op-plan-unit', 's'); }
+        set('op-plan-slices', plan.spim.slices);
+        set('op-plan-exposure', plan.spim.exposureMs);
+        const laser = $('op-plan-laser');
+        if (laser) {
+            const want = plan.spim.laserConfig || '';
+            if (want && ![...laser.options].some(o => o.value === want)) {
+                laser.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(want)}">${escapeHtml(want)}</option>`);
+            }
+            laser.value = want;
+        }
+        const dic = $('op-plan-dic');
+        if (dic) dic.checked = !!plan.dic.enabled;
+        set('op-plan-dic-every', plan.dic.everyRounds);
+        _dicPin = plan.dic.position === 'here' && plan.dic.pin ? plan.dic.pin : null;
+        set('op-plan-dic-pos', _dicPin ? 'here' : 'centroid');
+        set('op-plan-dic-exposure', plan.dic.exposureMs);
+        set('op-tl-stop', plan.stop.kind);
+        set('op-tl-condval', plan.stop.value);
+        set('op-tl-monitor', plan.monitoringMode || 'idle');
+        renderOverrideRows();
+        plan.overrides.forEach(o => {
+            const row = document.querySelector(`#op-plan-overrides [data-embryo="${CSS.escape(o.embryoId)}"]`);
+            if (!row) return;
+            const sel = row.querySelector('select'), inp = row.querySelector('input');
+            if (sel) sel.value = o.kind;
+            if (inp && o.value != null) inp.value = o.value;
+        });
+    }
+
+    /**
+     * The session's last plan, back in the form. A resumed session used to
+     * come back with the pane's defaults — five minutes, fifty slices, no
+     * DIC, manual — whatever it had been running.
+     */
+    async function restorePlan() {
+        if (_planRestored) return;
+        _planRestored = true;
+        let d = null;
+        try { d = await getJSON('/api/devices/timelapse/plan'); } catch (_) { return; }
+        if (!d || !d.plan || _planDirty) return;
+        await loadLaserPresets();
+        fillPlan(AcquisitionPlan.fromStructure(d.plan));
+        const from = $('op-plan-from');
+        if (from) {
+            from.textContent = d.source === 'saved'
+                ? 'The plan as this session last started it.'
+                : 'The plan as read from this session\u2019s last run.';
+            from.hidden = false;
+        }
+        renderPlan();
+    }
+
     function readPlan() {
         const v = id => { const el = $(id); return el ? el.value : undefined; };
         const overrides = [];
@@ -2281,7 +2344,7 @@ const OperateManager = (function () {
             // The run is watched while this pane is open: a poll for the
             // clocks, and the events for the moments. Nothing polls when it
             // is not.
-            onEnter() { renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
+            onEnter() { restorePlan(); renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
             onLeave() { clearInterval(_runPoll); _runPoll = null; },
             render() { publishRoster(); renderSingle(); renderTargetScope(); renderPlan(); },
         },
@@ -2646,8 +2709,9 @@ const OperateManager = (function () {
         if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('manual', false);
         const planPanel = $('op-panel-adaptive');
         if (planPanel) {
-            planPanel.addEventListener('input', () => renderPlan());
+            planPanel.addEventListener('input', () => { _planDirty = true; renderPlan(); });
             planPanel.addEventListener('change', e => {
+                _planDirty = true;
                 // "Taken from here" means the stage position at the moment it
                 // was chosen, not at Start: the operator drove there and said so.
                 const pos = e.target.closest('#op-plan-dic-pos');

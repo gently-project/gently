@@ -74,7 +74,7 @@ def _wire_body() -> str:
 def test_every_input_re_says_the_plan():
     wiring = _wire_body()
     assert "$('op-panel-adaptive')" in wiring, "the plan's listeners are not attached in wire()"
-    assert "addEventListener('input', () => renderPlan())" in wiring
+    assert "addEventListener('input', () => { _planDirty = true; renderPlan(); })" in wiring
     assert "addEventListener('change'" in wiring
 
 
