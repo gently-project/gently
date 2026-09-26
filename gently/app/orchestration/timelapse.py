@@ -36,6 +36,7 @@ from gently.settings import settings
 # Re-export models for backward compatibility
 from .timelapse_models import (
     BurstRule,
+    DicOverview,
     IntervalRule,
     PowerRule,
     StopCondition,
@@ -139,6 +140,13 @@ class TimelapseOrchestrator:
         self._acquisition_task: asyncio.Task | None = None
         self._stop_requested = False
 
+        # The DIC overview channel (see DicOverview). A subject of its own in
+        # the due-loop: one frame of the whole field on its own clock.
+        self._dic: DicOverview | None = None
+        self._dic_next_due_at: datetime | None = None
+        self._dic_frames = 0
+        self._dic_last_at: datetime | None = None
+
         # In-flight perception tasks. Acquisition fires perception tasks
         # as create_task() and moves on to the next embryo immediately, so
         # round-to-round throughput is bounded by volume acquisition time,
@@ -205,6 +213,8 @@ class TimelapseOrchestrator:
         stop_condition: str = "manual",
         base_interval_seconds: float = 120.0,
         condition_value: Any = None,
+        dic: "DicOverview | dict | None" = None,
+        stop_conditions: dict[str, Any] | None = None,
     ) -> str:
         """
         Start timelapse in background
@@ -222,6 +232,14 @@ class TimelapseOrchestrator:
             Default interval between acquisitions
         condition_value : any, optional
             Value for stop condition (e.g., number of timepoints)
+        dic : DicOverview or dict, optional
+            The DIC overview channel: one bottom-camera frame of the whole
+            field per round, on its own clock. Off when omitted.
+        stop_conditions : dict, optional
+            Per-embryo overrides of ``stop_condition``, keyed by embryo id.
+            Each value is a spec string ("timepoints:12", "hatching") or a
+            dict ``{"stop_condition": ..., "condition_value": ...}``. Every
+            other embryo keeps the run's default.
 
         Returns
         -------
@@ -288,12 +306,45 @@ class TimelapseOrchestrator:
             embryo.next_due_at = now  # image immediately on first tick
             self._embryo_states[eid] = embryo
 
+        # Per-embryo termination. The run has one default; an embryo that
+        # should end differently — "embryo 2 at hatching, the rest at 12 h" —
+        # gets its own. Unknown ids are reported, not silently dropped: a stop
+        # rule that never attached is an experiment that never ends.
+        unknown_overrides = []
+        for eid, spec in (stop_conditions or {}).items():
+            estate = self._embryo_states.get(eid)
+            if estate is None:
+                unknown_overrides.append(eid)
+                continue
+            if isinstance(spec, dict):
+                estate.stop_condition = self._parse_stop_condition(
+                    str(spec.get("stop_condition") or "manual"), spec.get("condition_value")
+                )
+            else:
+                estate.stop_condition = self._parse_stop_condition(str(spec))
+        if unknown_overrides:
+            logger.warning(
+                "Stop-condition overrides for embryos not in this run ignored: %s",
+                unknown_overrides,
+            )
+
+        # The DIC overview. Its first frame is due now, ahead of the first
+        # embryo, so the series starts at t0 like the volumes do.
+        self._dic = DicOverview.from_dict(dic) if dic is not None else None
+        self._dic_frames = 0
+        self._dic_last_at = None
+        self._dic_next_due_at = None
+        if self._dic and self._dic.enabled:
+            if self._dic.position is None:
+                self._dic.position = self._subject_centroid(list(self._embryo_states))
+            self._dic_next_due_at = now
+
         # Burst state is per-session; clear at start.
         self._burst_in_progress = None
 
         # Initialize trace directory for file-based persistence
         if self._session_id:
-            self._trace_dir = TRACE_BASE_PATH / self._session_id
+            self._trace_dir = settings.storage.traces_dir / self._session_id
             self._trace_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Trace file storage enabled: {self._trace_dir}")
 
@@ -339,6 +390,7 @@ class TimelapseOrchestrator:
                 "embryo_ids": embryo_ids,
                 "stop_condition": stop_condition,
                 "interval_seconds": base_interval_seconds,
+                "dic": self._dic.to_dict() if self._dic else None,
             },
         )
 
@@ -360,7 +412,12 @@ class TimelapseOrchestrator:
             condition = "hatching"
         elif condition in ("until_comma",):
             condition = "comma"
-        elif condition == "fixed_timepoints" and value is not None:
+        elif condition in ("fixed_timepoints", "timepoints") and value is not None:
+            # "timepoints" with a separate value is the form the start route
+            # documents and the per-embryo overrides use. Only the combined
+            # "timepoints:N" used to parse; the bare word fell through to the
+            # organism's stage names, matched nothing, and became "manual" —
+            # a run that never ends, from a request that named its end.
             return StopCondition.fixed_timepoints(int(value))
         elif condition == "duration" and value is not None:
             return StopCondition.duration_hours(float(value))
@@ -499,6 +556,117 @@ class TimelapseOrchestrator:
 
         wait_s = (soonest.next_due_at - now).total_seconds()
         return None, min(wait_s, 5.0)
+
+    # ------------------------------------------------------------------
+    # The DIC overview channel
+    # ------------------------------------------------------------------
+
+    def _subject_centroid(self, embryo_ids: list[str]) -> dict[str, float] | None:
+        """Where the stage goes for an overview frame, absent a pinned spot.
+
+        The bottom camera's field covers every embryo, so the frame just has
+        to be taken from the same place each round to be a series. The
+        centroid of the subjects is that place by default.
+        """
+        xs, ys = [], []
+        for eid in embryo_ids:
+            emb = self.experiment.embryos.get(eid)
+            pos = getattr(emb, "stage_position", None) if emb else None
+            if pos and pos.get("x") is not None and pos.get("y") is not None:
+                xs.append(float(pos["x"]))
+                ys.append(float(pos["y"]))
+        if not xs:
+            return None
+        return {"x": sum(xs) / len(xs), "y": sum(ys) / len(ys)}
+
+    def _dic_every_seconds(self) -> float:
+        every = self._dic.every_seconds if self._dic else None
+        return float(every) if every else float(self._base_interval_seconds or 120.0)
+
+    def _dic_due(self) -> bool:
+        return bool(
+            self._dic
+            and self._dic.enabled
+            and self._dic_next_due_at is not None
+            and self._dic_next_due_at <= datetime.now()
+        )
+
+    def _dic_wait_seconds(self) -> float:
+        """How long until the overview is due — so an idle loop does not sleep past it."""
+        if not (self._dic and self._dic.enabled and self._dic_next_due_at):
+            return 5.0
+        return max(0.0, (self._dic_next_due_at - datetime.now()).total_seconds())
+
+    async def _capture_dic_overview(self) -> None:
+        """Take one overview frame and file it beside the session's snapshots.
+
+        A failed frame is logged and the next one is still scheduled — the
+        volumes are the experiment; the overview must never take them down.
+        """
+        dic = self._dic
+        if dic is None:
+            return
+        frame = self._dic_frames + 1
+        pos = dic.position
+        try:
+            if pos:
+                await self.client.move_to_position(float(pos["x"]), float(pos["y"]))
+            result = await self.client.capture_bottom_image(
+                use_led=dic.use_led, exposure_ms=dic.exposure_ms
+            )
+            captured_at = datetime.now()
+            image_path = (result or {}).get("image_path")
+            stored: Path | None = None
+            if image_path and self._store is not None and self._session_id:
+                try:
+                    stored = self._store.register_snapshot(
+                        self._session_id,
+                        "dic",
+                        Path(image_path),
+                        metadata={
+                            "channel": "dic",
+                            "frame": frame,
+                            "round": self._current_round,
+                            "position": pos,
+                            "exposure_ms": dic.exposure_ms,
+                            "captured_at": captured_at.isoformat(),
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("DIC overview frame %d captured but not filed: %s", frame, exc)
+            self._dic_frames = frame
+            self._dic_last_at = captured_at
+            self._emit_event(
+                EventType.IMAGE_ACQUIRED,
+                {
+                    "source": "dic",
+                    "channel": "dic",
+                    "embryo_id": None,
+                    "frame": frame,
+                    "image_path": str(stored or image_path or ""),
+                    "position": pos,
+                    "timestamp": captured_at.isoformat(),
+                },
+            )
+            logger.info("DIC overview frame %d acquired", frame)
+        except Exception as exc:
+            logger.warning("DIC overview frame %d failed: %s", frame, exc)
+        finally:
+            self._dic_next_due_at = datetime.now() + timedelta(seconds=self._dic_every_seconds())
+
+    def _dic_status(self) -> dict[str, Any] | None:
+        if self._dic is None:
+            return None
+        nxt = self._dic_next_due_at
+        return {
+            **self._dic.to_dict(),
+            "frames": self._dic_frames,
+            "last_at": self._dic_last_at.isoformat() if self._dic_last_at else None,
+            "next_due_at": nxt.isoformat() if nxt else None,
+            "seconds_until_next": (
+                max(0.0, (nxt - datetime.now()).total_seconds()) if nxt else None
+            ),
+        }
 
     def _reschedule(self, embryo, *, from_now: bool = True) -> None:
         """Set ``embryo.next_due_at`` to now + interval_seconds.
@@ -700,9 +868,16 @@ class TimelapseOrchestrator:
                     break
 
                 # Pick the next due embryo (or wait if none ready)
+                # The overview is a subject too, and it goes ahead of whichever
+                # embryo is due: one frame of the whole field on its own clock,
+                # so no embryo's cadence decides how often the field is seen.
+                if self._dic_due():
+                    await self._capture_dic_overview()
+                    continue
+
                 embryo, wait_s = self._pick_next_due()
                 if embryo is None:
-                    await asyncio.sleep(max(0.1, wait_s))
+                    await asyncio.sleep(max(0.1, min(wait_s, self._dic_wait_seconds())))
                     continue
 
                 # Acquire this embryo. Each acquisition is awaited here —
@@ -1143,6 +1318,7 @@ class TimelapseOrchestrator:
             next_round_time=next_round_time,
             seconds_until_next_round=seconds_until_next,
             error_message=self._error_message,
+            dic=self._dic_status(),
         )
 
     async def add_embryo(
@@ -1902,6 +2078,10 @@ class TimelapseOrchestrator:
             "applied_rules": {eid: sorted(s) for eid, s in self._applied_rules.items()},
             "active_monitoring_modes": [m.name for m in self._active_monitoring_modes],
             "embryos": embryos,
+            "dic": self._dic.to_dict() if self._dic else None,
+            "dic_frames": self._dic_frames,
+            "dic_last_at": _iso(self._dic_last_at),
+            "dic_next_due_at": _iso(self._dic_next_due_at),
         }
 
     def _apply_runtime_state(self, doc: dict[str, Any]) -> None:
@@ -1926,6 +2106,11 @@ class TimelapseOrchestrator:
         self._dose_budget_exceeded = set(doc.get("dose_budget_exceeded") or [])
         self._burst_applied = set(doc.get("burst_applied") or [])
         self._burst_in_progress = doc.get("burst_in_progress")
+        dic_doc = doc.get("dic")
+        self._dic = DicOverview.from_dict(dic_doc) if isinstance(dic_doc, dict) else None
+        self._dic_frames = int(doc.get("dic_frames") or 0)
+        self._dic_last_at = _parse_dt(doc.get("dic_last_at"))
+        self._dic_next_due_at = _parse_dt(doc.get("dic_next_due_at"))
         if started := _parse_dt(doc.get("started_at")):
             self._started_at = started
 

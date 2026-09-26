@@ -341,6 +341,63 @@ class StopCondition:
 # direct references to the agent's EmbryoState instances — one source of truth.
 
 
+@dataclass
+class DicOverview:
+    """One bottom-camera (DIC) frame of the whole field, per round.
+
+    The second channel of a Gently timelapse. Not a per-embryo thing: the
+    bottom camera's field covers every embryo on the coverslip, so one frame
+    a round records all of them, and taking one per embryo would multiply the
+    LED dose for nothing.
+
+    It is scheduled as a subject of its own — its own ``next_due_at`` on its
+    own interval — because the embryo cadences are independent and adaptive:
+    once a rule speeds one embryo up, "a timepoint" is no longer a global
+    thing, and a frame taken "every timepoint" would follow the fastest
+    embryo. ``every_seconds`` of None means the base interval.
+
+    ``position`` is where the stage goes for the frame. A frame series is
+    only a series if it is taken from the same place each time, so None
+    resolves to the centroid of the subjects at start, and the operator can
+    pin it to wherever the stage is.
+    """
+
+    enabled: bool = False
+    every_seconds: float | None = None
+    position: dict[str, float] | None = None
+    exposure_ms: float | None = None
+    use_led: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": bool(self.enabled),
+            "every_seconds": self.every_seconds,
+            "position": dict(self.position) if self.position else None,
+            "exposure_ms": self.exposure_ms,
+            "use_led": bool(self.use_led),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Any) -> "DicOverview":
+        if isinstance(d, DicOverview):
+            return d
+        if not isinstance(d, dict):
+            return cls()
+        pos = d.get("position")
+        position = None
+        if isinstance(pos, dict) and pos.get("x") is not None and pos.get("y") is not None:
+            position = {"x": float(pos["x"]), "y": float(pos["y"])}
+        every = d.get("every_seconds")
+        exposure = d.get("exposure_ms")
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            every_seconds=float(every) if every is not None else None,
+            position=position,
+            exposure_ms=float(exposure) if exposure is not None else None,
+            use_led=bool(d.get("use_led", True)),
+        )
+
+
 class TimelapseStatus(Enum):
     """Overall timelapse status"""
 
@@ -366,6 +423,8 @@ class TimelapseState:
     next_round_time: datetime | None = None
     seconds_until_next_round: float | None = None
     error_message: str | None = None
+    # The DIC overview channel, when the run has one: frames taken, next due.
+    dic: dict[str, Any] | None = None
 
     def to_dict(self) -> dict:
         """Serialize for display"""
@@ -394,4 +453,5 @@ class TimelapseState:
                 for eid, e in self.embryos.items()
             },
             "error": self.error_message,
+            "dic": self.dic,
         }

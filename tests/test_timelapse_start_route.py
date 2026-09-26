@@ -280,3 +280,172 @@ def test_timelapse_start_requires_control():
         json={"interval_seconds": 120},
     )
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# The plan's two new axes: the DIC channel, and per-embryo termination
+# ---------------------------------------------------------------------------
+
+
+def test_a_plan_without_dic_calls_start_exactly_as_before():
+    """A run with no DIC channel must not grow a `dic=` kwarg — the old
+    assertions above are the contract, and this keeps them honest."""
+    orch = _make_orchestrator()
+    _app(orch).post("/api/devices/timelapse/start", json={"interval_seconds": 60})
+    kwargs = orch.start.await_args.kwargs
+    assert "dic" not in kwargs and "stop_conditions" not in kwargs
+
+
+def test_dic_channel_is_forwarded_validated():
+    orch = _make_orchestrator()
+    r = _app(orch).post(
+        "/api/devices/timelapse/start",
+        json={
+            "interval_seconds": 300,
+            "dic": {
+                "enabled": True,
+                "every_seconds": 600,
+                "position": {"x": -500, "y": -400},
+                "exposure_ms": 8,
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    dic = orch.start.await_args.kwargs["dic"]
+    assert dic == {
+        "enabled": True,
+        "every_seconds": 600.0,
+        "position": {"x": -500.0, "y": -400.0},
+        "exposure_ms": 8.0,
+        "use_led": True,
+    }
+    assert r.json()["dic"] == dic
+
+
+def test_dic_disabled_is_the_same_as_absent():
+    orch = _make_orchestrator()
+    _app(orch).post(
+        "/api/devices/timelapse/start", json={"dic": {"enabled": False, "every_seconds": 5}}
+    )
+    assert "dic" not in orch.start.await_args.kwargs
+
+
+def test_dic_interval_must_be_positive():
+    orch = _make_orchestrator()
+    r = _app(orch).post(
+        "/api/devices/timelapse/start", json={"dic": {"enabled": True, "every_seconds": 0}}
+    )
+    assert r.status_code == 400
+    assert "every_seconds" in r.json()["detail"]
+    orch.start.assert_not_awaited()
+
+
+def test_dic_position_must_be_xy():
+    orch = _make_orchestrator()
+    r = _app(orch).post(
+        "/api/devices/timelapse/start", json={"dic": {"enabled": True, "position": {"x": 1}}}
+    )
+    assert r.status_code == 400
+    orch.start.assert_not_awaited()
+
+
+def test_per_embryo_stop_conditions_are_forwarded():
+    orch = _make_orchestrator()
+    r = _app(orch).post(
+        "/api/devices/timelapse/start",
+        json={
+            "stop_condition": "duration:12h",
+            "stop_conditions": {
+                "embryo_2": "hatching",
+                "embryo_3": {"stop_condition": "timepoints", "condition_value": 3},
+            },
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert orch.start.await_args.kwargs["stop_conditions"] == {
+        "embryo_2": "hatching",
+        "embryo_3": {"stop_condition": "timepoints", "condition_value": 3},
+    }
+
+
+def test_a_malformed_stop_override_is_refused():
+    orch = _make_orchestrator()
+    r = _app(orch).post("/api/devices/timelapse/start", json={"stop_conditions": {"embryo_2": 7}})
+    assert r.status_code == 400
+    orch.start.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# The run surface: status, and per-embryo control
+# ---------------------------------------------------------------------------
+
+
+def _running(orch):
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    sc = SimpleNamespace(describe=lambda: "timepoints:12")
+    e1 = SimpleNamespace(
+        timepoints_acquired=4,
+        interval_seconds=300.0,
+        cadence_phase="normal",
+        next_due_at=datetime(2026, 9, 25, 12, 0, 0),
+        is_complete=False,
+        completion_reason=None,
+        should_skip=False,
+        stop_condition=sc,
+        role="test",
+        last_error=None,
+    )
+    state = SimpleNamespace(
+        embryos={"embryo_1": e1}, to_dict=lambda: {"status": "running", "dic": {"frames": 2}}
+    )
+    orch.get_status = MagicMock(return_value=state)
+    orch.stop_embryo = AsyncMock(return_value="Stopped imaging embryo_1 (reason: user_request)")
+    orch.modify_embryo = AsyncMock(return_value="Modified embryo_1")
+    return orch
+
+
+def test_status_gives_the_pane_its_embryo_rows():
+    orch = _running(_make_orchestrator())
+    r = _app(orch).get("/api/devices/timelapse/status")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "running" and body["dic"] == {"frames": 2}
+    row = body["embryos"]["embryo_1"]
+    assert row["timepoints"] == 4
+    assert row["stop_condition"] == "timepoints:12"
+    assert row["next_due_at"].startswith("2026-09-25T12:00:00")
+
+
+def test_status_without_an_orchestrator_is_503():
+    r = _app(None).get("/api/devices/timelapse/status")
+    assert r.status_code == 503
+
+
+def test_one_embryo_can_be_stopped_while_the_run_carries_on():
+    orch = _running(_make_orchestrator())
+    r = _app(orch).post(
+        "/api/devices/timelapse/embryo/embryo_1/stop", json={"reason": "done with it"}
+    )
+    assert r.status_code == 200, r.text
+    orch.stop_embryo.assert_awaited_once_with("embryo_1", reason="done with it")
+
+
+def test_one_embryos_termination_can_change_mid_run():
+    orch = _running(_make_orchestrator())
+    r = _app(orch).post(
+        "/api/devices/timelapse/embryo/embryo_1/modify",
+        json={"stop_condition": "timepoints", "condition_value": 20},
+    )
+    assert r.status_code == 200, r.text
+    orch.modify_embryo.assert_awaited_once_with(
+        "embryo_1", stop_condition="timepoints", condition_value=20
+    )
+
+
+def test_modify_needs_a_stop_condition():
+    orch = _running(_make_orchestrator())
+    r = _app(orch).post("/api/devices/timelapse/embryo/embryo_1/modify", json={})
+    assert r.status_code == 400
+    orch.modify_embryo.assert_not_awaited()
