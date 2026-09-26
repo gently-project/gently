@@ -193,6 +193,37 @@ const EmbryosManager = {
         ClientEventBus.on('VERIFICATION_PROGRESS', (data) => this.handleVerificationProgress(data));
         ClientEventBus.on('VERIFICATION_COMPLETED', (data) => this.handleVerificationCompleted(data));
         ClientEventBus.on('TIMELAPSE_STATE', (data) => this.reconcileWithServerState(data));
+        // The DIC overview channel: a frame of the whole field, per round.
+        ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data));
+    },
+
+    /**
+     * A DIC overview frame landed. Not an embryo's — the field's — so it has
+     * its own strip above the embryo cards rather than a card of its own.
+     * The last dozen are kept on screen; every frame is on disk.
+     */
+    handleDicFrame(data) {
+        if (!data || data.source !== 'dic') return;
+        const strip = document.getElementById('dic-strip');
+        const frames = document.getElementById('dic-strip-frames');
+        const count = document.getElementById('dic-strip-count');
+        if (!strip || !frames) return;
+        strip.hidden = false;
+        const n = Number(data.frame) || (frames.children.length + 1);
+        if (count) count.textContent = `${n} frame${n === 1 ? '' : 's'}`;
+        if (!data.image_b64) return;
+        const fig = document.createElement('figure');
+        fig.className = 'dic-frame';
+        const img = document.createElement('img');
+        img.src = `data:image/png;base64,${data.image_b64}`;
+        img.alt = `DIC overview, frame ${n}`;
+        const cap = document.createElement('figcaption');
+        const when = data.timestamp ? new Date(data.timestamp) : new Date();
+        cap.textContent = `${n} · ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        fig.appendChild(img); fig.appendChild(cap);
+        frames.appendChild(fig);
+        while (frames.children.length > 12) frames.removeChild(frames.firstChild);
+        frames.scrollLeft = frames.scrollWidth;
     },
 
     // ==========================================

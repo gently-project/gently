@@ -2033,24 +2033,124 @@ const OperateManager = (function () {
         if (col && col.scrollIntoView) col.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
+    // ══ THE RUN ═══════════════════════════════════════════════════════════════
+    // Start lands here, and this is where the run is watched and steered:
+    // embryo by embryo, because the acquisition is — each embryo has its own
+    // clock, its own ending, and can be stopped on its own.
+    let _runPoll = null;
+    let _runRenderTimer = null;
+
+    function scheduleRenderRun() {
+        clearTimeout(_runRenderTimer);
+        _runRenderTimer = setTimeout(renderRun, 250);
+    }
+
+    function fmtWhen(seconds) {
+        if (seconds == null || !Number.isFinite(seconds)) return '—';
+        if (seconds < 1) return 'now';
+        if (seconds < 90) return `${Math.round(seconds)} s`;
+        const m = Math.round(seconds / 60);
+        return m < 90 ? `${m} min` : `${(seconds / 3600).toFixed(1)} h`;
+    }
+
+    function runRow(id, r) {
+        const emb = _embryos.find(e => e.id === id);
+        const label = emb ? labelFor(emb) : id;
+        const due = r.next_due_at ? (new Date(r.next_due_at) - Date.now()) / 1000 : null;
+        const state = r.is_complete ? (r.completion_reason || 'done')
+            : r.should_skip ? 'skipped'
+            : r.cadence_phase === 'paused' ? 'paused'
+            : r.last_error ? 'error' : 'running';
+        const cls = r.is_complete ? 'is-done' : r.last_error ? 'is-error' : 'is-live';
+        const ending = r.stop_condition || 'manual';
+        return `<div class="op-runrow ${cls}" data-run-id="${escapeHtml(id)}">` +
+            `<span class="op-runrow-who">embryo ${escapeHtml(label)}</span>` +
+            `<span class="op-runrow-n">t${r.timepoints}</span>` +
+            `<span class="op-runrow-next">${r.is_complete ? '' : `next ${fmtWhen(due)}`}</span>` +
+            `<span class="op-runrow-int">${r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : ''}</span>` +
+            `<span class="op-runrow-state">${escapeHtml(state)}</span>` +
+            (r.is_complete ? '<span></span><span></span>' :
+                `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends">` +
+                    runStopOptions(ending) + '</select>' +
+                `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" title="Stop this embryo; the rest carry on">Stop</button>`) +
+            '</div>';
+    }
+
+    /** The ending select for a running embryo, preselecting what it has. */
+    function runStopOptions(spec) {
+        const kinds = AcquisitionPlan.STOP_KINDS;
+        const kind = String(spec).split(':')[0].replace(/\+\d+$/, '');
+        return Object.keys(kinds).map(k =>
+            `<option value="${k}"${k === kind ? ' selected' : ''}>${escapeHtml(kinds[k].label)}</option>`).join('') +
+            (kinds[kind] ? '' : `<option value="${escapeHtml(spec)}" selected>${escapeHtml(spec)}</option>`);
+    }
+
     async function renderRun() {
         const host = $('op-runspine'), actions = $('op-run-actions');
         if (!host) return;
+        let st = null;
+        try { st = await getJSON('/api/devices/timelapse/status'); } catch (_) { st = null; }
         let tactics = [];
         try {
             const d = await getJSON('/api/operation_plan');
             tactics = (d && d.plan && d.plan.tactics) || [];
         } catch (_) { /* leave empty */ }
+
+        const running = st && (st.status === 'running' || st.status === 'paused');
+        const rows = (st && st.embryos) || {};
+        const ids = Object.keys(rows);
         const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');
-        if (actions) actions.hidden = live.length === 0;
-        if (!tactics.length) {
-            host.innerHTML = '<div class="op-empty">Nothing running.</div>';
-            return;
-        }
-        host.innerHTML = tactics.map(tacticCard).join('');
-        _runPaused = live.some(t => t.state === 'paused');
+        if (actions) actions.hidden = !running && live.length === 0;
+        _runPaused = running ? st.status === 'paused' : live.some(t => t.state === 'paused');
         const p = $('op-run-pause');
         if (p) p.textContent = _runPaused ? 'Resume' : 'Pause';
+
+        const parts = [];
+        if (running || ids.length) {
+            const bits = [st.status];
+            if (st.current_round != null && st.current_round >= 0) bits.push(`${st.total_timepoints || 0} volumes`);
+            if (st.seconds_until_next_round != null) bits.push(`next ${fmtWhen(st.seconds_until_next_round)}`);
+            if (st.duration_minutes) bits.push(`${Math.round(st.duration_minutes)} min in`);
+            if (st.dic) {
+                bits.push(`DIC ${st.dic.frames || 0} frame${st.dic.frames === 1 ? '' : 's'}` +
+                    (st.dic.seconds_until_next != null && running ? `, next ${fmtWhen(st.dic.seconds_until_next)}` : ''));
+            }
+            parts.push(`<div class="op-run-status">${escapeHtml(bits.join(' · '))}</div>`);
+            parts.push(`<div class="op-runrows">${ids.map(id => runRow(id, rows[id])).join('')}</div>`);
+        }
+        if (tactics.length) parts.push(tactics.map(tacticCard).join(''));
+        host.innerHTML = parts.length ? parts.join('') : '<div class="op-empty">Nothing running.</div>';
+        const head = $('op-run-plan');
+        if (head && !running && !ids.length) head.hidden = true;
+    }
+
+    async function stopEmbryo(id) {
+        const emb = _embryos.find(e => e.id === id);
+        if (!window.confirm(`Stop imaging embryo ${emb ? labelFor(emb) : id}? The rest carry on.`)) return;
+        try {
+            await postJSON(`/api/devices/timelapse/embryo/${encodeURIComponent(id)}/stop`, { reason: 'operator' });
+            toast(`Stopped embryo ${emb ? labelFor(emb) : id}`);
+        } catch (e) { toastFail(`Stop failed (${why(e)})`); }
+        renderRun();
+    }
+
+    async function changeEmbryoEnding(id, kind) {
+        // A kind that needs a number asks for it here; the row is too small
+        // to hold a second field for something set once in a night.
+        const needs = (AcquisitionPlan.STOP_KINDS[kind] || {}).needs;
+        let value = null;
+        if (needs) {
+            const ask = window.prompt(needs === 'count' ? 'Stop after how many timepoints?' : 'Stop after how many hours?');
+            if (ask == null) { renderRun(); return; }
+            value = Number(ask);
+            if (!(value > 0)) { toastFail('That is not a number'); renderRun(); return; }
+        }
+        try {
+            await postJSON(`/api/devices/timelapse/embryo/${encodeURIComponent(id)}/modify`,
+                { stop_condition: AcquisitionPlan.stopSpec(kind, value) });
+            toast('Ending changed');
+        } catch (e) { toastFail(`Change failed (${why(e)})`); }
+        renderRun();
     }
     function tacticCard(t) {
         const state = t.state || 'planned';
@@ -2112,8 +2212,11 @@ const OperateManager = (function () {
             render() { renderCalTarget(); },
         },
         acquire: {
-            onEnter() { renderRun(); },
-            onLeave() {},
+            // The run is watched while this pane is open: a poll for the
+            // clocks, and the events for the moments. Nothing polls when it
+            // is not.
+            onEnter() { renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
+            onLeave() { clearInterval(_runPoll); _runPoll = null; },
             render() { publishRoster(); renderSingle(); renderTargetScope(); renderPlan(); },
         },
     };
@@ -2508,6 +2611,19 @@ const OperateManager = (function () {
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
+        // Per-embryo steering lives on rows the run renders, so it is bound
+        // on the spine once and delegated.
+        const spine = $('op-runspine');
+        if (spine) {
+            spine.addEventListener('click', e => {
+                const b = e.target.closest('[data-run-halt]');
+                if (b) stopEmbryo(b.dataset.runHalt);
+            });
+            spine.addEventListener('change', e => {
+                const sel = e.target.closest('[data-run-stop]');
+                if (sel) changeEmbryoEnding(sel.dataset.runStop, sel.value);
+            });
+        }
 
         window.addEventListener('resize', () => { if (_active && _pane === 'bottom') drawMarkers(); });
         // The viewport also changes size without a window resize — revealing the
@@ -2543,6 +2659,10 @@ const OperateManager = (function () {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
             ClientEventBus.on('EMBRYOS_UPDATE', onEmbryosUpdate);
+            // The moments of a run, on top of the poll.
+            ['ACQUISITION_STARTED', 'ACQUISITION_COMPLETED', 'ACQUISITION_STOPPED',
+             'ACQUISITION_FAILED', 'TIMELAPSE_STATE', 'VOLUME_ACQUIRED', 'IMAGE_ACQUIRED',
+             'EMBRYO_TERMINATED'].forEach(ev => ClientEventBus.on(ev, () => { if (_pane === 'acquire') scheduleRenderRun(); }));
             // Server-pushed stills (focus montages today). websocket.js emits
             // this for every image; onPushedImage takes the kinds this pane owns.
             ClientEventBus.on('IMAGE_RECEIVED', onPushedImage);
