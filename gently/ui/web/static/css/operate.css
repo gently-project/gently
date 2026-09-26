@@ -1571,3 +1571,46 @@
 .cal-adv[hidden] { display: none; }
 .op-adv[hidden] { display: none; }
 .al-history[hidden] { display: none; }
+
+/* ── The acquisition plan ─────────────────────────────────────────────── */
+/* The sentence is the plan. It is the one thing on the pane set in prose,
+   because it is the one thing the operator reads rather than fills in. */
+.op-plan-say {
+    margin: 0 0 var(--op-3);
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-size: 0.92rem;
+    line-height: 1.4;
+    color: var(--op-ink);
+}
+.op-plan-say[data-bad="1"] { color: var(--op-warn); }
+.op-plan-say[hidden] { display: none; }
+.op-run-plan { font-size: 0.82rem; color: var(--op-ink-dim); }
+.op-plan-sec {
+    margin-top: var(--op-3);
+    font-size: 0.62rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+.op-plan-pair { display: inline-flex; align-items: center; gap: var(--op-2); }
+.op-plan-pair .op-num-in { width: 64px; }
+/* "centroid of the embryos", "after N timepoints": the words are the control,
+   so they are not clipped to fit a column sized for numbers. */
+.op-plan-pair .op-sel, .op-plan-ovr-row .op-sel, #op-plan-laser { min-width: 190px; }
+.op-plan-say + .op-btn { margin-top: var(--op-2); }
+.op-plan-chan {
+    margin-top: var(--op-2);
+    padding: var(--op-2) var(--op-3);
+    border: 1px solid var(--op-rule);
+    border-radius: 6px;
+    display: grid;
+    gap: var(--op-1);
+}
+.op-plan-chan-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--op-2); }
+.op-plan-chan-name { font-size: 0.74rem; font-weight: 600; }
+.op-plan-check { display: inline-flex; align-items: center; gap: var(--op-2); cursor: pointer; }
+.op-plan-dic-body { display: grid; gap: var(--op-1); }
+.op-plan-dic-body[hidden] { display: none; }
+.op-plan-ovr { display: grid; gap: var(--op-1); margin-top: var(--op-1); }
+.op-plan-ovr-row .op-label { font-family: var(--op-mono); }

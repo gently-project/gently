@@ -1745,6 +1745,9 @@ const OperateManager = (function () {
             if (p) p.hidden = k !== m;
         });
         if (m === 'library') loadLibrary();
+        if (m === 'adaptive') { loadLaserPresets(); renderPlan(); }
+        const say = $('op-plan-say');
+        if (say) say.hidden = m !== 'adaptive';
         renderRunButton();
         renderSingle();
     }
@@ -1868,23 +1871,15 @@ const OperateManager = (function () {
             }
             if (_mode === 'adaptive') {
                 if (!haveSubjects()) return;
-                const interval = Math.max(1, Number(($('op-tl-interval') || {}).value) || 120);
-                const sel = ($('op-tl-stop') || {}).value || 'manual';
-                const val = Math.max(1, Number(($('op-tl-condval') || {}).value) || 1);
-                // The orchestrator parses the COMBINED form ('timepoints:N' /
-                // 'duration:Xh'). A bare 'timepoints' silently degrades to manual,
-                // i.e. a timelapse that never stops.
-                let stop_condition = sel;
-                if (sel === 'timepoints') stop_condition = `timepoints:${val}`;
-                else if (sel === 'duration') stop_condition = `duration:${val}h`;
-                await postJSON('/api/devices/timelapse/start', {
-                    embryo_ids: subjectIds(),
-                    interval_seconds: interval,
-                    stop_condition,
-                    monitoring_mode: ($('op-tl-monitor') || {}).value || 'idle',
-                });
-                toast('Adaptive timelapse started');
-                renderRun();
+                const plan = readPlan();
+                const ids = subjectIds();
+                const problems = AcquisitionPlan.validate(plan, ids);
+                if (problems.length) { toastFail(problems[0]); return; }
+                // One object: the sentence the operator just read is exactly
+                // what goes on the wire, and what the run view says back.
+                await postJSON('/api/devices/timelapse/start', AcquisitionPlan.toPayload(plan, ids));
+                toast('Timelapse started');
+                landOnRun(AcquisitionPlan.describe(plan, planSubjects()));
                 return;
             }
             if (_mode === 'library') {
@@ -1917,6 +1912,127 @@ const OperateManager = (function () {
     // Run presence is DERIVED from the server, not from a client flag. The old
     // design kept it in memory, so F5 during a running timelapse lost the whole
     // panel — and left a client state machine that could re-grow into steps.
+    // ══ THE ACQUISITION PLAN ══════════════════════════════════════════════
+    // The Adaptive pane is a form for one object (acquisition-plan.js). Every
+    // input re-reads it and re-says it; Start sends exactly what was said.
+    let _dicPin = null;          // the stage position captured for "taken from here"
+    let _laserPresetsLoaded = false;
+
+    /** The embryos this run will image, with the labels the sentence uses. */
+    function planSubjects() {
+        const ids = new Set(subjectIds());
+        return _embryos.filter(e => ids.has(e.id)).map(e => ({ id: e.id, label: labelFor(e) }));
+    }
+
+    function readPlan() {
+        const v = id => { const el = $(id); return el ? el.value : undefined; };
+        const overrides = [];
+        document.querySelectorAll('#op-plan-overrides [data-embryo]').forEach(row => {
+            const kind = (row.querySelector('select') || {}).value || 'default';
+            const val = (row.querySelector('input') || {}).value;
+            overrides.push({ embryoId: row.dataset.embryo, kind, value: val });
+        });
+        return AcquisitionPlan.fromForm({
+            interval: v('op-tl-interval'),
+            intervalUnit: v('op-plan-unit'),
+            slices: v('op-plan-slices'),
+            exposureMs: v('op-plan-exposure'),
+            laserConfig: v('op-plan-laser'),
+            dic: !!($('op-plan-dic') && $('op-plan-dic').checked),
+            dicEveryRounds: v('op-plan-dic-every'),
+            dicPosition: v('op-plan-dic-pos'),
+            dicPin: _dicPin,
+            dicExposureMs: v('op-plan-dic-exposure'),
+            stopKind: v('op-tl-stop'),
+            stopValue: v('op-tl-condval'),
+            overrides,
+            monitoringMode: v('op-tl-monitor'),
+        });
+    }
+
+    function stopOptions(selected, withDefault) {
+        const kinds = AcquisitionPlan.STOP_KINDS;
+        const opts = withDefault ? [`<option value="default"${selected === 'default' ? ' selected' : ''}>as the run</option>`] : [];
+        Object.keys(kinds).forEach(k => {
+            opts.push(`<option value="${k}"${selected === k ? ' selected' : ''}>${escapeHtml(kinds[k].label)}</option>`);
+        });
+        return opts.join('');
+    }
+
+    /** Rows for per-embryo endings, kept in step with the roster. */
+    function renderOverrideRows() {
+        const host = $('op-plan-overrides');
+        if (!host) return;
+        const current = {};
+        host.querySelectorAll('[data-embryo]').forEach(row => {
+            current[row.dataset.embryo] = {
+                kind: (row.querySelector('select') || {}).value,
+                value: (row.querySelector('input') || {}).value,
+            };
+        });
+        const subjects = planSubjects();
+        if (!subjects.length) { host.innerHTML = ''; return; }
+        host.innerHTML = subjects.map(sub => {
+            const c = current[sub.id] || { kind: 'default', value: '' };
+            const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+            return `<div class="op-field op-plan-ovr-row" data-embryo="${escapeHtml(sub.id)}">` +
+                `<span class="op-label">embryo ${escapeHtml(sub.label)}</span>` +
+                `<span class="op-plan-pair"><select class="op-sel">${stopOptions(c.kind, true)}</select>` +
+                `<input class="op-num-in" type="number" min="1" value="${escapeHtml(c.value || '')}"${needs ? '' : ' hidden'}></span></div>`;
+        }).join('');
+    }
+
+    function renderPlan() {
+        const say = $('op-plan-say');
+        if (!say) return;
+        renderOverrideRows();
+        const plan = readPlan();
+        const condval = $('op-tl-condval');
+        if (condval) condval.hidden = !(AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
+        const dicBody = $('op-plan-dic-body');
+        if (dicBody) dicBody.hidden = !plan.dic.enabled;
+        const pin = $('op-plan-dic-pin');
+        if (pin) {
+            const here = plan.dic.position === 'here';
+            pin.hidden = !here;
+            pin.textContent = here
+                ? (_dicPin ? `stage at ${_dicPin.x.toFixed(0)}, ${_dicPin.y.toFixed(0)} µm — captured when chosen`
+                           : 'no stage position known yet')
+                : '';
+        }
+        say.textContent = AcquisitionPlan.describe(plan, planSubjects());
+        const problems = AcquisitionPlan.validate(plan, subjectIds());
+        say.dataset.bad = problems.length ? '1' : '0';
+        say.title = problems.join(' ');
+    }
+
+    async function loadLaserPresets() {
+        if (_laserPresetsLoaded) return;
+        const sel = $('op-plan-laser');
+        if (!sel) return;
+        try {
+            const d = await getJSON('/api/devices/laser/configs');
+            const configs = (d && d.configs) || [];
+            const current = d && d.current && d.current !== 'unknown' ? d.current : '';
+            sel.innerHTML = `<option value="">current preset${current ? ` (${escapeHtml(current)})` : ''}</option>` +
+                configs.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+            _laserPresetsLoaded = true;
+        } catch (_) { /* offline: "current preset" stands */ }
+    }
+
+    /**
+     * Start lands on the run. The sentence the operator pressed Start on
+     * heads the Running column, and the column is brought into view; the
+     * run rows underneath it come from the timelapse status (next PR).
+     */
+    function landOnRun(sentence) {
+        const head = $('op-run-plan');
+        if (head) { head.textContent = sentence; head.hidden = false; }
+        renderRun();
+        const col = $('op-runspine');
+        if (col && col.scrollIntoView) col.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
     async function renderRun() {
         const host = $('op-runspine'), actions = $('op-run-actions');
         if (!host) return;
@@ -1998,7 +2114,7 @@ const OperateManager = (function () {
         acquire: {
             onEnter() { renderRun(); },
             onLeave() {},
-            render() { publishRoster(); renderSingle(); renderTargetScope(); },
+            render() { publishRoster(); renderSingle(); renderTargetScope(); renderPlan(); },
         },
     };
     function stopBottom() {
@@ -2353,12 +2469,29 @@ const OperateManager = (function () {
                 if (b) setMode(b.dataset.mode);
             });
         }
+        // The acquisition plan. One listener on the pane re-says the plan for
+        // every input, including the per-embryo rows that come and go with
+        // the roster; the run's own stop select is populated here, once.
         const stopSel = $('op-tl-stop');
-        if (stopSel) {
-            stopSel.addEventListener('change', () => {
-                const w = $('op-tl-condwrap');
-                if (w) w.hidden = stopSel.value === 'manual';
+        if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('manual', false);
+        const planPanel = $('op-panel-adaptive');
+        if (planPanel) {
+            planPanel.addEventListener('input', () => renderPlan());
+            planPanel.addEventListener('change', e => {
+                // "Taken from here" means the stage position at the moment it
+                // was chosen, not at Start: the operator drove there and said so.
+                const pos = e.target.closest('#op-plan-dic-pos');
+                if (pos) {
+                    if (pos.value === 'here') {
+                        if (_xy) _dicPin = { x: _xy.x, y: _xy.y };
+                        else { toastFail('No stage position known yet'); pos.value = 'centroid'; }
+                    } else {
+                        _dicPin = null;
+                    }
+                }
+                renderPlan();
             });
+            renderPlan();
         }
         const lib = $('op-lib-list');
         if (lib) {
