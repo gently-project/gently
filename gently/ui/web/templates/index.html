@@ -824,6 +824,9 @@
                            the numbers it drops cost ~70 exposures to measure. #}
                         <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
                         <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
+                        {# Shown only while a calibration runs. It cancels the
+                           routine at its next step and halts every positioner. #}
+                        <button class="op-btn op-btn-warn" id="op-cal-abort" type="button" hidden>Abort</button>
                       </div>
                       <p class="op-cap" id="op-cal-borrow-note" hidden></p>
 
