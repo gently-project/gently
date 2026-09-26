@@ -595,9 +595,13 @@
 
 /* ── acquisition pane ───────────────────────────────────────────────────── */
 .op-pane-acquire { grid-template-columns: minmax(0, 1fr); }
+/* Three columns, sized to what they hold: the roster is a short list of
+   names, the plan is a form, the run is rows. Equal thirds gave the list
+   the room and crowded the other two — "the embryos left layout has more
+   space than needed, and the center and right one feels a bit crowded". */
 .op-main-cols {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.55fr) minmax(0, 1.2fr);
     gap: var(--op-4);
     min-height: 0;
 }

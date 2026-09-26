@@ -384,8 +384,20 @@
                     <div class="dic-strip-head">
                         <span class="dic-strip-title">DIC overview</span>
                         <span class="dic-strip-count" id="dic-strip-count"></span>
+                        <span class="dic-strip-hint">click a frame to view it</span>
                     </div>
                     <div class="dic-strip-frames" id="dic-strip-frames"></div>
+                </div>
+                {# The frame, full size, rendered from the TIFF on disk. Arrow
+                   keys walk the series; Esc or a click outside closes. #}
+                <div class="dic-viewer" id="dic-viewer" hidden role="dialog" aria-label="DIC overview frame">
+                    <button class="dic-viewer-nav dic-viewer-prev" id="dic-viewer-prev" type="button" aria-label="Previous frame">‹</button>
+                    <figure class="dic-viewer-fig">
+                        <img id="dic-viewer-img" alt="DIC overview frame">
+                        <figcaption id="dic-viewer-cap"></figcaption>
+                    </figure>
+                    <button class="dic-viewer-nav dic-viewer-next" id="dic-viewer-next" type="button" aria-label="Next frame">›</button>
+                    <button class="dic-viewer-close" id="dic-viewer-close" type="button" aria-label="Close">×</button>
                 </div>
             </div>
 

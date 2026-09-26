@@ -13,6 +13,7 @@ from .chat import create_router as create_chat_router
 from .context import create_router as create_context_router
 from .data import create_router as create_data_router
 from .device_layer import create_router as create_device_layer_router
+from .dic import create_router as create_dic_router
 from .experiments import create_router as create_experiments_router
 from .images import create_router as create_images_router
 from .logs import create_router as create_logs_router
@@ -50,6 +51,7 @@ def register_all_routes(server):
         create_operation_plan_router,
         create_roles_router,
         create_tactic_library_router,
+        create_dic_router,
         create_replay_router,
     ):
         router = factory(server)

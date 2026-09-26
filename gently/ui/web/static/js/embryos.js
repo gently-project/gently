@@ -195,36 +195,132 @@ const EmbryosManager = {
         ClientEventBus.on('TIMELAPSE_STATE', (data) => this.reconcileWithServerState(data));
         // The DIC overview channel: a frame of the whole field, per round.
         ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data));
+        // A run that started before this page did has frames on disk already.
+        ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshDicStrip());
+        this._wireDicStrip();
+        this.refreshDicStrip();
     },
 
-    /**
-     * A DIC overview frame landed. Not an embryo's — the field's — so it has
-     * its own strip above the embryo cards rather than a card of its own.
-     * The last dozen are kept on screen; every frame is on disk.
-     */
+    // ==========================================
+    // The DIC overview strip
+    // ==========================================
+    // The overview channel is the field's, not an embryo's, so its frames
+    // have a strip above the cards rather than a card each. Frames arrive
+    // two ways: live, on IMAGE_ACQUIRED{source: dic} with a thumbnail; and
+    // from disk, through /api/dic/frames, for a page that opened after the
+    // run began. Either way a click opens the full frame, rendered from the
+    // TIFF the orchestrator filed — a thumbnail is for noticing, not looking.
+    _dicFrames: [],          // every frame known, oldest first: {stem, frame, url, thumb, when}
+    _dicViewerAt: -1,
+
+    _dicStemOf(path) {
+        const base = String(path || '').split(/[\\/]/).pop();
+        return base.replace(/\.tiff?$/i, '') || null;
+    },
+
+    _dicRemember(frame) {
+        const i = frame.stem ? this._dicFrames.findIndex(f => f.stem === frame.stem) : -1;
+        if (i >= 0) this._dicFrames[i] = Object.assign(this._dicFrames[i], frame);
+        else this._dicFrames.push(frame);
+        this._dicFrames.sort((a, b) => (a.frame || 0) - (b.frame || 0));
+    },
+
+    async refreshDicStrip() {
+        try {
+            const r = await fetch('/api/dic/frames');
+            if (!r.ok) return;
+            const d = await r.json();
+            (d.frames || []).forEach(f => this._dicRemember({
+                stem: f.stem, frame: f.frame, url: f.url, when: f.captured_at, position: f.position,
+                thumb: `${f.url}?max=256`,
+            }));
+        } catch (_) { /* no session, or no frames yet */ }
+        this.renderDicStrip();
+    },
+
     handleDicFrame(data) {
         if (!data || data.source !== 'dic') return;
+        const stem = this._dicStemOf(data.image_path);
+        this._dicRemember({
+            stem,
+            frame: Number(data.frame) || (this._dicFrames.length + 1),
+            url: stem ? `/api/dic/frames/${stem}.png` : null,
+            thumb: data.image_b64 ? `data:image/png;base64,${data.image_b64}` : (stem ? `/api/dic/frames/${stem}.png?max=256` : null),
+            when: data.timestamp,
+            position: data.position,
+        });
+        this.renderDicStrip();
+    },
+
+    renderDicStrip() {
         const strip = document.getElementById('dic-strip');
         const frames = document.getElementById('dic-strip-frames');
         const count = document.getElementById('dic-strip-count');
         if (!strip || !frames) return;
-        strip.hidden = false;
-        const n = Number(data.frame) || (frames.children.length + 1);
-        if (count) count.textContent = `${n} frame${n === 1 ? '' : 's'}`;
-        if (!data.image_b64) return;
-        const fig = document.createElement('figure');
-        fig.className = 'dic-frame';
-        const img = document.createElement('img');
-        img.src = `data:image/png;base64,${data.image_b64}`;
-        img.alt = `DIC overview, frame ${n}`;
-        const cap = document.createElement('figcaption');
-        const when = data.timestamp ? new Date(data.timestamp) : new Date();
-        cap.textContent = `${n} · ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-        fig.appendChild(img); fig.appendChild(cap);
-        frames.appendChild(fig);
-        while (frames.children.length > 12) frames.removeChild(frames.firstChild);
+        const all = this._dicFrames;
+        strip.hidden = all.length === 0;
+        if (count) count.textContent = `${all.length} frame${all.length === 1 ? '' : 's'}`;
+        // The last dozen on the strip; the viewer walks the whole series.
+        const shown = all.slice(-12);
+        frames.innerHTML = shown.map(f => {
+            const when = f.when ? new Date(f.when) : null;
+            const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const idx = all.indexOf(f);
+            return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Open frame ${f.frame}">` +
+                (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
+                `<span class="dic-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
+        }).join('');
         frames.scrollLeft = frames.scrollWidth;
     },
+
+    openDicViewer(index) {
+        const all = this._dicFrames;
+        if (!all.length) return;
+        this._dicViewerAt = Math.max(0, Math.min(all.length - 1, index));
+        const f = all[this._dicViewerAt];
+        const v = document.getElementById('dic-viewer');
+        const img = document.getElementById('dic-viewer-img');
+        const cap = document.getElementById('dic-viewer-cap');
+        if (!v || !img) return;
+        img.src = f.url || f.thumb || '';
+        const when = f.when ? new Date(f.when) : null;
+        const pos = f.position && f.position.x != null ? ` · ${Math.round(f.position.x)}, ${Math.round(f.position.y)} µm` : '';
+        if (cap) cap.textContent = `DIC overview · frame ${f.frame} of ${all.length}` +
+            (when && !isNaN(when) ? ` · ${when.toLocaleString()}` : '') + pos;
+        v.hidden = false;
+        const prev = document.getElementById('dic-viewer-prev'), next = document.getElementById('dic-viewer-next');
+        if (prev) prev.disabled = this._dicViewerAt === 0;
+        if (next) next.disabled = this._dicViewerAt === all.length - 1;
+    },
+
+    closeDicViewer() {
+        const v = document.getElementById('dic-viewer');
+        if (v) v.hidden = true;
+        this._dicViewerAt = -1;
+    },
+
+    _wireDicStrip() {
+        const frames = document.getElementById('dic-strip-frames');
+        if (frames) frames.addEventListener('click', e => {
+            const b = e.target.closest('[data-dic-index]');
+            if (b) this.openDicViewer(Number(b.dataset.dicIndex));
+        });
+        const v = document.getElementById('dic-viewer');
+        if (!v) return;
+        v.addEventListener('click', e => {
+            if (e.target === v || e.target.id === 'dic-viewer-close') this.closeDicViewer();
+        });
+        const prev = document.getElementById('dic-viewer-prev'), next = document.getElementById('dic-viewer-next');
+        if (prev) prev.addEventListener('click', () => this.openDicViewer(this._dicViewerAt - 1));
+        if (next) next.addEventListener('click', () => this.openDicViewer(this._dicViewerAt + 1));
+        document.addEventListener('keydown', e => {
+            if (v.hidden) return;
+            if (e.key === 'Escape') this.closeDicViewer();
+            else if (e.key === 'ArrowLeft') this.openDicViewer(this._dicViewerAt - 1);
+            else if (e.key === 'ArrowRight') this.openDicViewer(this._dicViewerAt + 1);
+        });
+    },
+
 
     // ==========================================
     // View Switching System
