@@ -1,6 +1,9 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
 import logging
+import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -10,6 +13,18 @@ from fastapi.responses import FileResponse
 from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
+
+
+def _open_in_file_manager(path: Path) -> None:
+    """Show ``path`` in the OS file manager: Explorer, Finder, or the
+    desktop's default. Runs on the machine the backend runs on — under the
+    desktop shell that is the operator's own screen."""
+    if sys.platform.startswith("win"):
+        os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])  # noqa: S603, S607
+    else:
+        subprocess.Popen(["xdg-open", str(path)])  # noqa: S603, S607
 
 
 def create_router(server) -> APIRouter:
@@ -214,6 +229,27 @@ def create_router(server) -> APIRouter:
             "active": True,
             "rehydrated_projections": rehydrated,
         }
+
+    @router.post("/api/sessions/{session_id}/open-folder", dependencies=[Depends(require_control)])
+    async def open_session_folder(session_id: str):
+        """Open the session's folder — where every image it took lives — in
+        the OS file manager. The folder is the store's own for that session;
+        no path comes from the client."""
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="No session store")
+        try:
+            folder = store._session_dir(session_id)
+        except Exception:
+            folder = None
+        if folder is None or not Path(folder).is_dir():
+            raise HTTPException(status_code=404, detail="Session folder not found")
+        try:
+            _open_in_file_manager(Path(folder))
+        except Exception as exc:
+            logger.warning("could not open %s in the file manager: %s", folder, exc)
+            raise HTTPException(status_code=502, detail=f"could not open folder: {exc}") from exc
+        return {"opened": True, "session_id": session_id, "path": str(folder)}
 
     @router.get("/api/sessions/{session_id}/plans")
     async def get_session_plans(session_id: str):
