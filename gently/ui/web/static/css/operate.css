@@ -1655,3 +1655,7 @@
     line-height: 1.35;
     margin-top: 2px;
 }
+
+/* A restored run's rows: there, but nothing is imaging them yet. */
+.op-runrow.is-waiting { opacity: 0.75; }
+.op-runrow.is-waiting .op-runrow-state { color: var(--text-muted, #888); font-style: italic; }

@@ -2182,23 +2182,26 @@ const OperateManager = (function () {
         return m < 90 ? `${m} min` : `${(seconds / 3600).toFixed(1)} h`;
     }
 
-    function runRow(id, r) {
+    function runRow(id, r, live) {
         const emb = _embryos.find(e => e.id === id);
         const label = emb ? labelFor(emb) : id;
         const due = r.next_due_at ? (new Date(r.next_due_at) - Date.now()) / 1000 : null;
+        // A restored run is not running: its rows used to say "running ·
+        // next now" with a Stop each, over a loop that no longer existed.
         const state = r.is_complete ? (r.completion_reason || 'done')
             : r.should_skip ? 'skipped'
+            : !live ? 'waiting'
             : r.cadence_phase === 'paused' ? 'paused'
             : r.last_error ? 'error' : 'running';
-        const cls = r.is_complete ? 'is-done' : r.last_error ? 'is-error' : 'is-live';
+        const cls = r.is_complete ? 'is-done' : r.last_error ? 'is-error' : live ? 'is-live' : 'is-waiting';
         const ending = r.stop_condition || 'manual';
         return `<div class="op-runrow ${cls}" data-run-id="${escapeHtml(id)}">` +
             `<span class="op-runrow-who">embryo ${escapeHtml(label)}</span>` +
             `<span class="op-runrow-n">t${r.timepoints}</span>` +
-            `<span class="op-runrow-next">${r.is_complete ? '' : `next ${fmtWhen(due)}`}</span>` +
+            `<span class="op-runrow-next">${r.is_complete || !live ? '' : `next ${fmtWhen(due)}`}</span>` +
             `<span class="op-runrow-int">${r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : ''}</span>` +
             `<span class="op-runrow-state">${escapeHtml(state)}</span>` +
-            (r.is_complete ? '<span></span><span></span>' :
+            (r.is_complete || !live ? '<span></span><span></span>' :
                 `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends">` +
                     runStopOptions(ending) + '</select>' +
                 `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" title="Stop this embryo; the rest carry on">Stop</button>`) +
@@ -2229,14 +2232,20 @@ const OperateManager = (function () {
         const rows = (st && st.embryos) || {};
         const ids = Object.keys(rows);
         const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');
-        if (actions) actions.hidden = !running && live.length === 0;
-        _runPaused = running ? st.status === 'paused' : live.some(t => t.state === 'paused');
+        // A run restored from its checkpoint after a restart: idle, embryos
+        // still going. The one button it needs is Resume — the same route a
+        // paused run resumes through, which carries this one on instead.
+        const resumable = !!(st && st.resumable) && !running;
+        if (actions) actions.hidden = !running && live.length === 0 && !resumable;
+        _runPaused = running ? st.status === 'paused' : (resumable || live.some(t => t.state === 'paused'));
         const p = $('op-run-pause');
-        if (p) p.textContent = _runPaused ? 'Resume' : 'Pause';
+        if (p) p.textContent = _runPaused ? (resumable ? 'Resume run' : 'Resume') : 'Pause';
+        const stopb = $('op-run-stop');
+        if (stopb) stopb.hidden = !running && live.length === 0;
 
         const parts = [];
         if (running || ids.length) {
-            const bits = [st.status];
+            const bits = [resumable ? 'interrupted — press Resume run to carry on' : st.status];
             if (st.current_round != null && st.current_round >= 0) bits.push(`${st.total_timepoints || 0} volumes`);
             if (st.seconds_until_next_round != null) bits.push(`next ${fmtWhen(st.seconds_until_next_round)}`);
             if (st.duration_minutes) bits.push(`${Math.round(st.duration_minutes)} min in`);
@@ -2245,7 +2254,7 @@ const OperateManager = (function () {
                     (st.dic.seconds_until_next != null && running ? `, next ${fmtWhen(st.dic.seconds_until_next)}` : ''));
             }
             parts.push(`<div class="op-run-status">${escapeHtml(bits.join(' · '))}</div>`);
-            parts.push(`<div class="op-runrows">${ids.map(id => runRow(id, rows[id])).join('')}</div>`);
+            parts.push(`<div class="op-runrows">${ids.map(id => runRow(id, rows[id], running)).join('')}</div>`);
         }
         if (tactics.length) parts.push(tactics.map(tacticCard).join(''));
         host.innerHTML = parts.length ? parts.join('') : '<div class="op-empty">Nothing running.</div>';
@@ -2299,8 +2308,8 @@ const OperateManager = (function () {
     }
     async function pauseRun() {
         try {
-            await postJSON(_runPaused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause', {});
-            toast(_runPaused ? 'Resumed' : 'Paused');
+            const d = await postJSON(_runPaused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause', {});
+            toast(_runPaused ? (d && d.continued ? 'Run carried on from its checkpoint' : 'Resumed') : 'Paused');
         } catch (e) { toastFail(`Pause/resume failed (${why(e)})`); }
         renderRun();
     }
