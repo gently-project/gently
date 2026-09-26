@@ -43,7 +43,10 @@ def _detect_gpus() -> list[GpuInfo]:
                     GpuInfo(
                         device_index=i,
                         name=props.name,
-                        vram_gb=round(props.total_mem / (1024**3), 1),
+                        # torch's attribute is total_memory; total_mem raised
+                        # AttributeError into the blanket except below, so no
+                        # GPU was ever reported for this node.
+                        vram_gb=round(props.total_memory / (1024**3), 1),
                         compute_capability=f"{props.major}.{props.minor}",
                         utilization_pct=util_pct,
                         memory_used_gb=round(mem_used_gb, 2),

@@ -761,6 +761,13 @@ async def main(
                 await mesh.stop()
             except (asyncio.CancelledError, RuntimeError, OSError, Exception):
                 pass
+        # The session snapshot, at the end. Ctrl-C, the desktop shell's quit
+        # and SIGTERM all come through here, and none of them saved it: what
+        # the next resume read was whatever the last conversation turn left.
+        try:
+            agent.save_session()
+        except Exception:
+            pass
         # Cleanup: stop viz server gracefully
         if agent.viz_server is not None:
             try:
