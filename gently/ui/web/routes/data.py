@@ -2252,6 +2252,23 @@ def create_router(server) -> APIRouter:
         targets = embryo_ids or [e.id for e in experiment.embryos.values() if not e.should_skip]
         sent_exposure = payload.get("exposure_ms") is not None
         sent_slices = raw_slices is not None
+        # The laser preset was collected into volume_geometry and never used,
+        # so choosing "488 and 561" on the pane changed nothing about the run.
+        # It is set on the controller once, before the run starts; a preset
+        # the controller refuses stops the start, because every timepoint
+        # would otherwise image with the wrong lasers.
+        preset = volume_geometry.get("laser_config")
+        if preset:
+            client = getattr(agent, "client", None)
+            if client is None or not hasattr(client, "set_laser_config"):
+                raise HTTPException(status_code=503, detail="Microscope not connected")
+            try:
+                await client.set_laser_config(str(preset))
+            except Exception as exc:
+                logger.exception("Laser preset for the run failed")
+                raise HTTPException(
+                    status_code=502, detail=f"laser preset {preset!r} failed: {exc}"
+                ) from exc
         for eid in targets:
             emb = experiment.embryos.get(eid)
             if emb is None:

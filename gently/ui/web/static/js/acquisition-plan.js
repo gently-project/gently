@@ -81,7 +81,7 @@ const AcquisitionPlan = (() => {
         const intervalSeconds = Math.max(1, num(f.interval, 120) * unit);
         const overrides = (f.overrides || [])
             .filter(o => o && o.embryoId && o.kind && o.kind !== 'default')
-            .map(o => ({ embryoId: String(o.embryoId), kind: o.kind, value: o.value }));
+            .map(o => ({ embryoId: String(o.embryoId), kind: o.kind, value: o.value == null ? null : o.value }));
         return {
             intervalSeconds,
             spim: {
@@ -97,7 +97,7 @@ const AcquisitionPlan = (() => {
                     ? { x: f.dicPin.x, y: f.dicPin.y } : null,
                 exposureMs: f.dicExposureMs != null && f.dicExposureMs !== '' ? num(f.dicExposureMs, null) : null,
             },
-            stop: { kind: STOP_KINDS[f.stopKind] ? f.stopKind : 'manual', value: f.stopValue },
+            stop: { kind: STOP_KINDS[f.stopKind] ? f.stopKind : 'manual', value: f.stopValue == null ? null : f.stopValue },
             overrides,
             monitoringMode: f.monitoringMode || 'idle',
         };
@@ -191,7 +191,67 @@ const AcquisitionPlan = (() => {
         return s + '.';
     }
 
-    return { STOP_KINDS, stopSpec, stopWords, fromForm, validate, toPayload, describe, intervalWords };
+    /** "timepoints:12" → {kind, value}; "duration:6h" → {kind, value}; "hatching+3" → {kind}. */
+    function parseStopSpec(spec) {
+        const s = String(spec || 'manual').trim().toLowerCase().replace(/\+\d+$/, '');
+        if (s.startsWith('timepoints:')) return { kind: 'timepoints', value: Number(s.split(':')[1]) || 1 };
+        if (s.startsWith('duration:')) return { kind: 'duration', value: Number(s.split(':')[1].replace(/h$/, '')) || 1 };
+        return { kind: STOP_KINDS[s] ? s : 'manual', value: null };
+    }
+
+    /**
+     * The plan as a saved tactic's `structure` — the same shape the start
+     * route seeds into the operation plan, so a template, a seeded tactic
+     * and what the agent writes are one thing.
+     */
+    function toStructure(plan) {
+        const st = {
+            cadence_s: plan.intervalSeconds,
+            interval: plan.intervalSeconds,
+            stop_condition: stopSpec(plan.stop.kind, plan.stop.value),
+            condition_value: null,
+            monitoring_mode: plan.monitoringMode || 'idle',
+            num_slices: plan.spim.slices,
+            exposure_ms: plan.spim.exposureMs,
+            laser_config: plan.spim.laserConfig || null,
+            dic: null,
+            stop_conditions: null,
+        };
+        const body = toPayload(plan, []);
+        if (body.dic) st.dic = body.dic;
+        if (body.stop_conditions) st.stop_conditions = body.stop_conditions;
+        return st;
+    }
+
+    /** A plan from a saved tactic's `structure`. Anything missing takes the default. */
+    function fromStructure(st) {
+        st = st || {};
+        const interval = Math.max(1, num(st.cadence_s, num(st.interval, 120)));
+        const dic = st.dic && typeof st.dic === 'object' ? st.dic : null;
+        const stop = parseStopSpec(st.stop_condition);
+        const overrides = Object.entries(st.stop_conditions || {}).map(([embryoId, spec]) => {
+            const p = parseStopSpec(typeof spec === 'string' ? spec
+                : stopSpec((spec || {}).stop_condition, (spec || {}).condition_value));
+            return { embryoId, kind: p.kind, value: p.value };
+        });
+        return fromForm({
+            interval, intervalUnit: 's',
+            slices: st.num_slices, exposureMs: st.exposure_ms, laserConfig: st.laser_config,
+            dic: !!(dic && dic.enabled),
+            dicEveryRounds: dic && dic.every_seconds ? Math.max(1, Math.round(dic.every_seconds / interval)) : 1,
+            dicPosition: dic && dic.position ? 'here' : 'centroid',
+            dicPin: dic && dic.position ? dic.position : null,
+            dicExposureMs: dic ? dic.exposure_ms : null,
+            stopKind: stop.kind, stopValue: stop.value,
+            overrides,
+            monitoringMode: st.monitoring_mode,
+        });
+    }
+
+    return {
+        STOP_KINDS, stopSpec, stopWords, parseStopSpec, fromForm, fromStructure, toStructure,
+        validate, toPayload, describe, intervalWords,
+    };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = AcquisitionPlan;

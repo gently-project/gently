@@ -115,3 +115,48 @@ test('one embryo is named, several are counted', () => {
     assert.match(P.describe(P.fromForm({}), [SUBJECTS[1]]), /of embryo 2 ·/);
     assert.match(P.describe(P.fromForm({}), SUBJECTS), /of 4 embryos ·/);
 });
+
+// ── a plan ⇄ a saved tactic's structure ──────────────────────────────────
+
+test('a plan survives being saved and reloaded', () => {
+    const plan = P.fromForm({
+        interval: 5, intervalUnit: 'min', slices: 80, exposureMs: 12, laserConfig: '488 and 561',
+        dic: true, dicEveryRounds: 2, dicPosition: 'here', dicPin: { x: -500, y: -400 }, dicExposureMs: 8,
+        stopKind: 'duration', stopValue: 12,
+        overrides: [{ embryoId: 'embryo_2', kind: 'hatching' }, { embryoId: 'embryo_3', kind: 'timepoints', value: 3 }],
+        monitoringMode: 'expression_monitoring',
+    });
+    const st = P.toStructure(plan);
+    assert.equal(st.cadence_s, 300);
+    assert.equal(st.stop_condition, 'duration:12h');
+    assert.deepEqual(st.dic, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8 });
+    assert.deepEqual(st.stop_conditions, { embryo_2: 'hatching', embryo_3: 'timepoints:3' });
+
+    const back = P.fromStructure(st);
+    assert.deepEqual(back, plan, 'what was saved is what comes back');
+    assert.equal(P.describe(back, SUBJECTS), P.describe(plan, SUBJECTS), 'and says the same sentence');
+});
+
+test('a structure the start route seeded, before any of this, still reads as a plan', () => {
+    // The Adaptive start has always seeded {cadence_s, interval, stop_condition,
+    // condition_value, monitoring_mode}. Nothing else — so nothing else is required.
+    const plan = P.fromStructure({ cadence_s: 120, interval: 120, stop_condition: 'manual',
+                                   condition_value: null, monitoring_mode: 'idle' });
+    assert.equal(plan.intervalSeconds, 120);
+    assert.equal(plan.dic.enabled, false);
+    assert.deepEqual(plan.overrides, []);
+    assert.match(P.describe(plan, SUBJECTS), /^Every 2 min: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · until stopped\.$/);
+});
+
+test('the stop spec parses back to what the pane offers', () => {
+    assert.deepEqual(P.parseStopSpec('timepoints:12'), { kind: 'timepoints', value: 12 });
+    assert.deepEqual(P.parseStopSpec('duration:6h'), { kind: 'duration', value: 6 });
+    assert.deepEqual(P.parseStopSpec('hatching+3'), { kind: 'hatching', value: null });
+    assert.deepEqual(P.parseStopSpec('something_else'), { kind: 'manual', value: null });
+    assert.deepEqual(P.parseStopSpec(undefined), { kind: 'manual', value: null });
+});
+
+test('a DIC interval that is not a whole number of rounds rounds to one', () => {
+    const plan = P.fromStructure({ cadence_s: 300, dic: { enabled: true, every_seconds: 700 } });
+    assert.equal(plan.dic.everyRounds, 2);
+});

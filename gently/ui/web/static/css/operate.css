@@ -1640,3 +1640,14 @@
 .op-runrow-state { text-transform: lowercase; color: var(--op-ink-dim); }
 .op-runrow-stop { min-width: 0; font-size: 0.66rem; }
 .op-runrow-halt { font-size: 0.66rem; }
+
+/* A saved plan, listed as the sentence it will run as. */
+.op-libitem .op-lib-say {
+    display: block;
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-size: 0.78rem;
+    white-space: normal;
+    line-height: 1.35;
+    margin-top: 2px;
+}
