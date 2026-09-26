@@ -376,6 +376,17 @@
                         <!-- Stats rendered dynamically -->
                     </div>
                 </div>
+                {# The DIC overview channel: one frame of the whole field per
+                   round. Frames arrive on IMAGE_ACQUIRED{source: dic} with a
+                   thumbnail; the count comes from the run's status. Hidden
+                   until a run has one. #}
+                <div class="dic-strip" id="dic-strip" hidden>
+                    <div class="dic-strip-head">
+                        <span class="dic-strip-title">DIC overview</span>
+                        <span class="dic-strip-count" id="dic-strip-count"></span>
+                    </div>
+                    <div class="dic-strip-frames" id="dic-strip-frames"></div>
+                </div>
             </div>
 
             <div class="embryos-body" id="embryos-body">

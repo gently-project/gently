@@ -11418,3 +11418,19 @@ body.modal-open {
 }
 .region-corner:hover .region-corner-dot { fill: var(--accent, #3b82f6); }
 @media (prefers-reduced-motion: reduce) { .region-strip { backdrop-filter: none; } }
+
+/* ── Embryos: the DIC overview strip ───────────────────────────────────── */
+.dic-strip {
+    margin: 6px 0 2px;
+    padding: 6px 8px;
+    border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+    border-radius: 6px;
+}
+.dic-strip[hidden] { display: none; }
+.dic-strip-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.dic-strip-title { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+.dic-strip-count { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; opacity: 0.75; }
+.dic-strip-frames { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.dic-frame { margin: 0; flex: 0 0 auto; }
+.dic-frame img { height: 72px; width: auto; display: block; border-radius: 3px; background: #000; }
+.dic-frame figcaption { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; opacity: 0.7; text-align: center; margin-top: 2px; }

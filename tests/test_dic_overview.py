@@ -51,11 +51,17 @@ def _client(tmp_path: Path):
     frames = {"n": 0}
 
     async def capture_bottom_image(use_led=False, exposure_ms=None):
+        import numpy as np
+
         frames["n"] += 1
         p = tmp_path / "incoming" / f"dic{frames['n']}.tif"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"II*\0")  # enough to exist; nothing reads it
-        return {"image": None, "image_path": p}
+        # A frame the size of the real camera's, so the thumbnail path runs.
+        return {
+            "image": (np.arange(2048 * 2048, dtype=np.uint16) % 4096).reshape(2048, 2048),
+            "image_path": p,
+        }
 
     c.capture_bottom_image = AsyncMock(side_effect=capture_bottom_image)
     return c
@@ -281,3 +287,21 @@ def test_dic_overview_round_trips_through_a_dict():
 def test_dic_overview_rejects_a_non_number_interval(bad):
     with pytest.raises((TypeError, ValueError)):
         DicOverview.from_dict(bad)
+
+
+def test_the_frame_event_carries_a_thumbnail_the_tab_can_show(tmp_path):
+    # The Embryos tab shows the frame as it lands. The full frame is filed;
+    # what rides on the event is small enough to send every round.
+    from gently.core import EventType, get_event_bus
+
+    seen = []
+    bus = get_event_bus()
+    bus.subscribe(EventType.IMAGE_ACQUIRED, lambda ev: seen.append(ev))
+    orch = _orchestrator(tmp_path)
+    asyncio.run(_run(orch, 0.3, dic=DicOverview(enabled=True, every_seconds=100)))
+    dic = [e for e in seen if (getattr(e, "data", None) or {}).get("source") == "dic"]
+    assert dic, "no IMAGE_ACQUIRED for the overview"
+    data = dic[0].data
+    assert data["frame"] == 1 and data["embryo_id"] is None
+    assert isinstance(data["image_b64"], str) and len(data["image_b64"]) > 100
+    assert len(data["image_b64"]) < 400_000, "that is not a thumbnail"

@@ -616,6 +616,18 @@ class TimelapseOrchestrator:
             )
             captured_at = datetime.now()
             image_path = (result or {}).get("image_path")
+            # A thumbnail rides on the event so the Embryos tab can show the
+            # frame as it lands, without a round trip for the TIFF. The full
+            # frame is what is filed.
+            image_b64 = None
+            image = (result or {}).get("image")
+            try:
+                if image is not None and getattr(image, "ndim", 0) == 2:
+                    h, w = image.shape[:2]
+                    step = max(1, -(-max(h, w) // 512))
+                    image_b64 = image_to_base64(normalize_to_uint8(image[::step, ::step]))
+            except Exception as exc:
+                logger.debug("DIC thumbnail skipped: %s", exc)
             stored: Path | None = None
             if image_path and self._store is not None and self._session_id:
                 try:
@@ -644,6 +656,7 @@ class TimelapseOrchestrator:
                     "embryo_id": None,
                     "frame": frame,
                     "image_path": str(stored or image_path or ""),
+                    "image_b64": image_b64,
                     "position": pos,
                     "timestamp": captured_at.isoformat(),
                 },
