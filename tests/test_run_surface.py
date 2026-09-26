@@ -35,7 +35,7 @@ def test_each_embryo_gets_a_row_with_its_own_ending_and_stop():
     row = OPERATE[OPERATE.index("function runRow(") :][:2200]
     for field in ("t${r.timepoints}", "next ${fmtWhen(due)}", "data-run-stop=", "data-run-halt="):
         assert field in row, f"a run row lost {field}"
-    assert "is_complete ? '<span></span><span></span>'" in row, (
+    assert "is_complete || !live ? '<span></span><span></span>'" in row, (
         "a finished embryo still offers Stop"
     )
 

@@ -2526,6 +2526,30 @@ def create_router(server) -> APIRouter:
             except Exception:
                 pass
 
+    def _reawaken_operate_tactics(orch, agent) -> None:
+        """A continued run's standing_timelapse tactics back to active.
+
+        The ids the orchestrator kept for them do not survive a restart, so
+        the session's plan is read for tactics of that kind marked done; they
+        are re-adopted so a later stop marks them done again. Best-effort."""
+        cs = getattr(agent, "context_store", None)
+        sid = getattr(agent, "session_id", None)
+        if cs is None or not sid:
+            return
+        try:
+            plan = cs.get_operation_plan(sid) or {}
+            ids = [
+                t.get("id")
+                for t in (plan.get("tactics") or [])
+                if t.get("kind") == "standing_timelapse" and t.get("state") in ("done", "paused")
+            ]
+            for tid in ids:
+                cs.transition_tactic(sid, tid, "active")
+            if ids:
+                orch._operate_tactic_ids = [i for i in ids if i]
+        except Exception:
+            logger.debug("reawaken tactics failed", exc_info=True)
+
     def _keep_plan(agent, plan: dict) -> None:
         """Write the run's plan to the session. Best-effort."""
         store = getattr(agent, "store", None)
@@ -2602,6 +2626,11 @@ def create_router(server) -> APIRouter:
                 "last_error": getattr(e, "last_error", None),
             }
         out["embryos"] = rows
+        # A restored run the operator can carry on — idle, embryos still going.
+        try:
+            out["resumable"] = bool(orch.can_continue())
+        except Exception:
+            out["resumable"] = False
         return out
 
     @router.post(
@@ -2674,11 +2703,18 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/timelapse/resume", dependencies=[Depends(require_control)])
     async def timelapse_resume():
-        """Resume a paused timelapse."""
+        """Resume a paused timelapse — or carry on a run restored from its
+        checkpoint after a restart: "there is no way to resume a timelapse".
+        """
         orch, agent = _resolve_orch_and_agent()
         if orch is None:
             raise HTTPException(status_code=503, detail="No timelapse orchestrator")
         try:
+            can_continue = bool(getattr(orch, "can_continue", lambda: False)())
+            if can_continue:
+                res = await orch.continue_run()
+                _reawaken_operate_tactics(orch, agent)
+                return {"resumed": True, "continued": True, "result": res}
             res = await orch.resume()
             _reconcile_operate_tactics(orch, agent, "active", clear=False)
             return {"resumed": True, "result": res}

@@ -1577,6 +1577,87 @@ class TimelapseOrchestrator:
 
         return f"Stopped imaging {embryo_id} (reason: {reason})"
 
+    def can_continue(self) -> bool:
+        """Is there a restored run to carry on: idle, with embryos still going?"""
+        if self._status != TimelapseStatus.IDLE:
+            return False
+        return any(not e.is_complete and not e.should_skip for e in self._embryo_states.values())
+
+    async def continue_run(self) -> str:
+        """Carry a restored run on from its checkpoint.
+
+        After a backend restart the session's ``timelapse.yaml`` puts every
+        embryo back where it was — its ending, its interval, its count — but
+        the loop that images them is gone, and ``start()`` would begin a new
+        run. This resumes the old one: every embryo still going is due now
+        (the interruption was of unknown length), numbering carries on from
+        the checkpoint (the volumes on disk are never written over), the DIC
+        channel keeps its clock, and the run keeps its started_at so the
+        status still says how long it has been going.
+        """
+        if self._status == TimelapseStatus.RUNNING:
+            return "Timelapse already running."
+        if self._status == TimelapseStatus.PAUSED:
+            return await self.resume()
+        live = {
+            eid: e
+            for eid, e in self._embryo_states.items()
+            if not e.is_complete and not e.should_skip
+        }
+        if not live:
+            return "Nothing to continue: no embryo of the last run is still going."
+
+        now = datetime.now()
+        for embryo in live.values():
+            embryo.error_count = 0
+            embryo.last_error = None
+            if getattr(embryo, "cadence_phase", "normal") == "paused":
+                embryo.cadence_phase = "normal"
+            embryo.next_due_at = now
+        self._embryo_states = live
+        if self._dic and self._dic.enabled:
+            self._dic_next_due_at = now
+        self._burst_in_progress = None
+        if self._session_id:
+            self._trace_dir = settings.storage.traces_dir / self._session_id
+            self._trace_dir.mkdir(parents=True, exist_ok=True)
+        if self._store and self._session_id and self.perceiver:
+            try:
+                self._perception_run_id = self._store.create_perception_run(
+                    session_id=self._session_id,
+                    name=f"timelapse_continued_{now.strftime('%Y%m%d_%H%M%S')}",
+                    method="vlm_stage_classification",
+                    model_name=settings.models.perception,
+                    source="live",
+                    config={"continued_from_round": self._current_round},
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create perception run in store: {e}")
+        if self._started_at is None:
+            self._started_at = now
+        self._pause_start = None
+        self._status = TimelapseStatus.RUNNING
+        self._total_timepoints = sum(e.timepoints_acquired for e in self._embryo_states.values())
+        self._stop_requested = False
+        self._error_message = None
+        self._acquisition_task = asyncio.create_task(self._run_loop())
+        self._emit_event(
+            EventType.ACQUISITION_STARTED,
+            {
+                "embryo_ids": list(live),
+                "stop_condition": "as before",
+                "interval_seconds": self._base_interval_seconds,
+                "dic": self._dic.to_dict() if self._dic else None,
+                "continued": True,
+                "from_round": self._current_round,
+            },
+        )
+        furthest = max(e.timepoints_acquired for e in live.values())
+        return (
+            f"Continued timelapse: {len(live)} embryo(s) from t{furthest}, "
+            f"every {self._base_interval_seconds:.0f}s."
+        )
+
     async def stop(self, reason: str = "user_request") -> str:
         """
         Stop the entire timelapse
