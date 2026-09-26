@@ -863,18 +863,65 @@
                           <input class="op-num-in" id="op-vol-exp" type="number" min="1" max="500" value="10"></div>
                       </div>
 
+                      {# The acquisition plan. A classical MDA asks for positions,
+                         channels, z and time; here positions are the roster and z
+                         is each embryo's calibration, so what is asked is what is
+                         left: cadence, the two channels, and how it ends. Said back
+                         as one sentence before Start — see acquisition-plan.js. #}
                       <div class="op-modepanel" id="op-panel-adaptive" hidden>
-                        <div class="op-field"><label class="op-label" for="op-tl-interval">Interval (s)</label>
-                          <input class="op-num-in" id="op-tl-interval" type="number" min="1" value="120"></div>
-                        <div class="op-field"><label class="op-label" for="op-tl-stop">Stop after</label>
-                          <select class="op-sel" id="op-tl-stop">
-                            <option value="manual">until stopped</option>
-                            <option value="timepoints">timepoints</option>
-                            <option value="duration">hours</option>
-                          </select></div>
-                        <div class="op-field" id="op-tl-condwrap" hidden>
-                          <label class="op-label" for="op-tl-condval">Count</label>
-                          <input class="op-num-in" id="op-tl-condval" type="number" min="1" value="10"></div>
+                        <div class="op-plan-sec">Cadence</div>
+                        <div class="op-field"><label class="op-label" for="op-tl-interval">Every</label>
+                          <span class="op-plan-pair">
+                            <input class="op-num-in" id="op-tl-interval" type="number" min="1" value="5">
+                            <select class="op-sel" id="op-plan-unit">
+                              <option value="min" selected>min</option>
+                              <option value="s">s</option>
+                            </select>
+                          </span></div>
+
+                        <div class="op-plan-sec">Channels</div>
+                        <div class="op-plan-chan">
+                          <div class="op-plan-chan-head"><span class="op-plan-chan-name">SPIM volume</span>
+                            <span class="op-cap">every embryo, every round</span></div>
+                          <div class="op-field"><label class="op-label" for="op-plan-slices">Slices</label>
+                            <input class="op-num-in" id="op-plan-slices" type="number" min="1" max="500" value="50"></div>
+                          <div class="op-field"><label class="op-label" for="op-plan-exposure">Exposure (ms)</label>
+                            <input class="op-num-in" id="op-plan-exposure" type="number" min="1" max="500" value="10"></div>
+                          <div class="op-field"><label class="op-label" for="op-plan-laser">Lasers</label>
+                            <select class="op-sel" id="op-plan-laser"><option value="">current preset</option></select></div>
+                        </div>
+                        <div class="op-plan-chan">
+                          <div class="op-plan-chan-head">
+                            <label class="op-plan-chan-name op-plan-check">
+                              <input type="checkbox" id="op-plan-dic"> DIC overview</label>
+                            <span class="op-cap">one bottom-camera frame of the whole field</span></div>
+                          <div class="op-plan-dic-body" id="op-plan-dic-body" hidden>
+                            <div class="op-field"><label class="op-label" for="op-plan-dic-every">Every</label>
+                              <span class="op-plan-pair">
+                                <input class="op-num-in" id="op-plan-dic-every" type="number" min="1" value="1">
+                                <span class="op-cap">round(s)</span></span></div>
+                            <div class="op-field"><label class="op-label" for="op-plan-dic-pos">Taken from</label>
+                              <select class="op-sel" id="op-plan-dic-pos">
+                                <option value="centroid" selected>centroid of the embryos</option>
+                                <option value="here">where the stage is now</option>
+                              </select></div>
+                            <div class="op-cap" id="op-plan-dic-pin" hidden></div>
+                            <div class="op-field"><label class="op-label" for="op-plan-dic-exposure">Exposure (ms)</label>
+                              <input class="op-num-in" id="op-plan-dic-exposure" type="number" min="1" max="2000" placeholder="camera's"></div>
+                          </div>
+                        </div>
+
+                        <div class="op-plan-sec">Ends</div>
+                        <div class="op-field"><label class="op-label" for="op-tl-stop">The run</label>
+                          <span class="op-plan-pair">
+                            <select class="op-sel" id="op-tl-stop"></select>
+                            <input class="op-num-in" id="op-tl-condval" type="number" min="1" value="10" hidden>
+                          </span></div>
+                        {# Per-embryo endings. Rows follow the roster; "as the run"
+                           means no override, which is what most rows say. #}
+                        <div class="op-plan-ovr" id="op-plan-overrides"></div>
+
+                        <div class="op-plan-sec">Watching</div>
                         <div class="op-field"><label class="op-label" for="op-tl-monitor">Monitoring</label>
                           <select class="op-sel" id="op-tl-monitor">
                             <option value="idle">idle</option>
@@ -892,6 +939,10 @@
                           starts an Operation Plan for them.</p>
                       </div>
 
+                      {# The plan, said as one sentence, where the eye is when the
+                         hand is on Start — not at the top of a panel that scrolls.
+                         Adaptive mode's only; the other modes hide it. #}
+                      <p class="op-plan-say" id="op-plan-say" aria-live="polite" hidden></p>
                       <!-- Label is set per mode by renderRunButton(); this is single mode's verb
                            so there is no flash of the wrong one on load. -->
                       <button class="op-btn op-btn-primary op-btn-wide" id="op-run-start"
@@ -900,6 +951,9 @@
 
                     <div class="op-col">
                       <div class="op-block-head">Running</div>
+                      {# The plan as it was started, in the sentence the operator
+                         pressed Start on. Start lands here. #}
+                      <p class="op-plan-say op-run-plan" id="op-run-plan" hidden></p>
                       <div class="op-runspine" id="op-runspine"></div>
                       <div class="op-actions" id="op-run-actions" hidden>
                         <button class="op-btn op-btn-toggle" id="op-run-pause" type="button">Pause</button>
@@ -1640,6 +1694,7 @@
     <script src="/static/js/panels/marking.js"></script>
     <script src="/static/js/panels/calprogress.js"></script>
     <script src="/static/js/panels/light.js"></script>
+    <script src="/static/js/acquisition-plan.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/boot-banner.js"></script>
     <!-- Rig menu: the header chip + the microscope controls behind it. Loads
