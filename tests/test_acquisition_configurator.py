@@ -128,7 +128,7 @@ def test_a_detect_clears_the_last_attempts_note_before_it_starts():
     a detect that was, at that moment, succeeding. The note was from a press
     made in the half-minute between the page connecting and the device layer
     attaching, and nothing ever cleared it."""
-    fn = OPERATE[OPERATE.index("async function runDetect(") :][:1400]
+    fn = OPERATE[OPERATE.index("async function runDetect(") :][:3200]
     assert fn.index("setDetectNote('')") < fn.index("postJSON('/api/devices/detect_embryos'")
 
 
