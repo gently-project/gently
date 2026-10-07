@@ -649,6 +649,9 @@
 .session-name-form-row .hint { font-size: 12px; color: var(--text-muted); }
 .session-name-form .session-resume-btn { margin: 0; }
 .session-name-form .session-edit-btn[disabled] { opacity: .6; cursor: progress; }
+.session-export-dest-row { display: flex; gap: 8px; align-items: center; }
+.session-export-dest-row input { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 400; }
+.session-export-dest-row .session-edit-btn { flex: 0 0 auto; white-space: nowrap; }
 
 /* Development, embryo by embryo */
 .stage-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; margin: 8px 0 2px; background: var(--bg-hover); }
@@ -689,6 +692,10 @@
 
 /* Export */
 .session-export { margin-top: 10px; }
+.session-movies { margin-top: 6px; }
+.session-movie-option { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-muted); }
+/* The form's input rule is for text boxes; a radio or checkbox is not one. */
+.session-movie-option input { width: auto; flex: 0 0 auto; margin: 0; padding: 0; font-size: inherit; }
 .session-export-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .session-export-status { font-size: 13px; color: var(--text-muted); }
 .session-export-status code { font-size: 12px; color: var(--text); word-break: break-all; }

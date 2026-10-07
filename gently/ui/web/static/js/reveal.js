@@ -122,6 +122,33 @@ const Reveal = (() => {
     }
 
     /**
+     * Ask for a folder with the system's own dialog, on the computer Gently
+     * runs on. The path, or null when they cancelled, or when the dialog
+     * would open on another screen (then it says so, and the path is typed).
+     */
+    async function pickFolder(opts) {
+        const o = opts || {};
+        let data;
+        try {
+            const res = await fetch('/api/reveal/pick-folder', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: o.title || 'Choose a folder', initial: o.initial || null }),
+            });
+            data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || String(res.status));
+        } catch (e) {
+            say(`No folder dialog: ${e.message}`, 'error');
+            return null;
+        }
+        if (data.reason === 'remote') {
+            say('The dialog would open on the microscope computer. Type the folder\'s path there instead.', 'error');
+            return null;
+        }
+        return data.path || null;
+    }
+
+    /**
      * What a viewer's image is, from what the viewer knows about it. An image
      * that is only in memory (a live frame, a plot that was never kept) is
      * nothing on disk, and is null.
@@ -197,5 +224,5 @@ const Reveal = (() => {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', about);
     else about();
 
-    return { about, run, probe, describe, button, fill };
+    return { about, run, probe, describe, button, fill, pickFolder };
 })();
