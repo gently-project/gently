@@ -11505,6 +11505,12 @@ body.modal-open {
 }
 .dic-strip-open:hover, .dic-strip-open:focus-visible { border-color: var(--accent); color: var(--text); outline: none; }
 .dic-strip-frames { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+/* Taken from more than one position: a row per field, labelled. */
+.dic-strip-frames.is-fields { flex-direction: column; overflow-x: visible; }
+.dic-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dic-strip-field { flex: none; width: 46px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
+.dic-strip-cells { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; min-width: 0; flex: 1 1 auto; }
+.ov-fields[hidden] { display: none; }
 /* A frame on the strip is a button to the full frame, and looks like one:
    tall enough to read as a picture, with a hover the eye can find. */
 .dic-frame {

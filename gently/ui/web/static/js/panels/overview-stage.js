@@ -31,7 +31,7 @@ const OverviewStage = (() => {
     const SETTLE_MS = 350;
 
     let host = null;
-    let opts = { frames: () => [], references: () => null, onTakeReferences: null, onFold: null };
+    let opts = { frames: () => [], references: () => null, onTakeReferences: null, onFold: null, fields: null, onField: null };
     let cur = -1;               // index into frames(); -1 = none yet
     let follow = true;
     let playing = false;
@@ -102,6 +102,7 @@ const OverviewStage = (() => {
                     </div>
                     <div class="ov-side">
                         <div class="ov-meta" id="ov-meta"></div>
+                        <div class="ov-controls ov-fields" id="ov-fields" hidden></div>
                         <div class="ov-controls">
                             <button type="button" class="op-btn" id="ov-play" title="Space"></button>
                             <select id="ov-fps" class="op-sel" title="Frames per second"><option>2</option><option>5</option><option selected>10</option><option>20</option></select><span class="ov-keys">fps</span>
@@ -129,7 +130,22 @@ const OverviewStage = (() => {
             });
             wire();
         }
-        $('ov-live').textContent = follow ? 'FOLLOWING NEWEST' : `FRAME ${cur + 1} / ${all.length}`;
+        // Taken from more than one position: one field on the stage at a
+        // time, the others a click away.
+        const fl = opts.fields ? opts.fields() : null;
+        const fieldsEl = $('ov-fields');
+        if (fl && fl.list && fl.list.length > 1) {
+            const key = `${fl.list.join(',')}|${fl.current}`;
+            if (fieldsEl.dataset.key !== key) {
+                fieldsEl.dataset.key = key;
+                fieldsEl.innerHTML = '<span class="ov-keys">Field</span>' + fl.list.map(n =>
+                    `<button type="button" class="op-btn${n === fl.current ? ' is-on' : ''}" data-ov-field="${n}" title="The frames taken from position ${n}">${n}</button>`).join('');
+            }
+            fieldsEl.hidden = false;
+        } else {
+            fieldsEl.hidden = true;
+        }
+        $('ov-live').textContent = (follow ? 'FOLLOWING NEWEST' : `FRAME ${cur + 1} / ${all.length}`) + (fl && fl.list && fl.list.length > 1 ? ` · FIELD ${fl.current}` : '');
         $('ov-live').classList.toggle('is-on', follow);
         $('ov-play').textContent = playing ? '❚❚ Pause' : '▶ Play';
         $('ov-loop').classList.toggle('is-on', loop);
@@ -319,6 +335,10 @@ const OverviewStage = (() => {
         $('ov-loop').addEventListener('click', () => { loop = !loop; render(); });
         $('ov-corr').addEventListener('click', toggleCorrected);
         $('ov-cmp').addEventListener('click', () => { compare = !compare; render(); });
+        $('ov-fields').addEventListener('click', ev => {
+            const b = ev.target.closest('[data-ov-field]');
+            if (b && opts.onField) { stop(); opts.onField(Number(b.dataset.ovField)); }
+        });
         $('ov-newest').addEventListener('click', newest);
         const fold = $('ov-fold');
         if (fold) fold.addEventListener('click', () => { stop(); if (typeof opts.onFold === 'function') opts.onFold(); });

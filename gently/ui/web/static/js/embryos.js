@@ -258,6 +258,33 @@ const EmbryosManager = {
     // run began. Either way a click opens the full frame, rendered from the
     // TIFF the orchestrator filed — a thumbnail is for noticing, not looking.
     _dicFrames: [],          // every frame known, oldest first: {stem, frame, url, thumb, when}
+    // The overview taken from more than one position is one series per
+    // field, and they are looked at one at a time: this is the field on the
+    // stage. null until the frames say there are fields.
+    _dicField: null,
+
+    /** The fields the frames come from, when there is more than one. */
+    _dicFields() {
+        const seen = new Set();
+        for (const f of this._dicFrames) if (f.fields > 1 && f.field) seen.add(f.field);
+        return [...seen].sort((a, b) => a - b);
+    },
+
+    /** The frames of the field on the stage: all of them when there is one field. */
+    _dicFramesShown() {
+        const fields = this._dicFields();
+        if (!fields.length) return this._dicFrames;
+        if (this._dicField == null || !fields.includes(this._dicField)) this._dicField = fields[0];
+        return this._dicFrames.filter(f => f.field === this._dicField);
+    },
+
+    /** Look at another field: the strip, the stage and the filmstrip follow. */
+    selectDicField(field) {
+        if (field === this._dicField) return;
+        this._dicField = field;
+        this.renderDicStrip();
+        if (this._stageMounted && typeof OverviewStage !== 'undefined') OverviewStage.framesChanged();
+    },
     _dicViewerAt: -1,
 
     _dicStemOf(path) {
@@ -340,18 +367,28 @@ const EmbryosManager = {
         // drawer to show; the stage takes the body.
         const def = document.getElementById('view-default');
         if (def) def.classList.toggle('is-overview-only', kind === 'brightfield' && Object.keys(this.state.embryos).length === 0);
-        if (count) count.textContent = `${all.length} frame${all.length === 1 ? '' : 's'}`;
+        const fields = this._dicFields();
+        if (count) count.textContent = `${all.length} frame${all.length === 1 ? '' : 's'}${fields.length ? ` · ${fields.length} fields` : ''}`;
         if (inFilm) { this.renderFilmstripView(); return; }
         if (strip.hidden) return;
-        const shown = all.slice(-12);
-        frames.innerHTML = shown.map(f => {
-            const t = f.when ? this.formatTime(f.when) : '';
-            const idx = all.indexOf(f);
-            const fld = f.fields > 1 ? ` · field ${f.field}` : '';
-            return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${fld}${t ? `, ${t}` : ''} — open">` +
-                (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
-                `<span class="dic-frame-cap">${f.frame}${fld}${t ? ` · ${t}` : ''}</span></button>`;
+        // Taken from more than one position: a row per field, so a field
+        // reads as the series it is, not every other thumbnail.
+        const groups = fields.length ? fields.map(n => [n, all.filter(f => f.field === n)]) : [[null, all]];
+        frames.classList.toggle('is-fields', fields.length > 0);
+        frames.innerHTML = groups.map(([n, list]) => {
+            const cells = list.slice(-12).map(f => {
+                const t = f.when ? this.formatTime(f.when) : '';
+                const idx = all.indexOf(f);
+                const fld = n ? ` · field ${n}` : '';
+                return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${fld}${t ? `, ${t}` : ''} — open">` +
+                    (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
+                    `<span class="dic-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
+            }).join('');
+            return n
+                ? `<div class="dic-strip-row"><span class="dic-strip-field">field ${n}</span><div class="dic-strip-cells">${cells}</div></div>`
+                : cells;
         }).join('');
+        frames.querySelectorAll('.dic-strip-cells').forEach(el => { el.scrollLeft = el.scrollWidth; });
         frames.scrollLeft = frames.scrollWidth;
     },
 
@@ -359,7 +396,9 @@ const EmbryosManager = {
         if (typeof OverviewStage === 'undefined') return;
         if (!this._stageMounted) {
             OverviewStage.mount('embryos-overview', {
-                frames: () => this._dicFrames,
+                frames: () => this._dicFramesShown(),
+                fields: () => ({ list: this._dicFields(), current: this._dicField }),
+                onField: n => this.selectDicField(n),
                 references: () => (this.run && this.run.dic && this.run.dic.references) || null,
                 onFold: this.runKind() === 'brightfield' ? null : () => this.closeOverview(),
                 onTakeReferences: () => {
@@ -376,8 +415,18 @@ const EmbryosManager = {
     /** A frame on the folded strip was chosen: open the stage on it. */
     openDicViewer(index) {
         this._overviewOpen = true;
+        index = this._dicPlaceOnStage(index);
         this.renderDicStrip();
         if (typeof OverviewStage !== 'undefined') OverviewStage.go(index, true);
+    },
+
+    /** The stage shows one field at a time: put the frame's field on it,
+     *  and say where the frame is within that field. */
+    _dicPlaceOnStage(index) {
+        const f = this._dicFrames[index];
+        if (f && f.fields > 1 && f.field) this._dicField = f.field;
+        const shown = this._dicFramesShown();
+        return f ? Math.max(0, shown.indexOf(f)) : shown.length - 1;
     },
 
     closeOverview() {
@@ -840,19 +889,27 @@ const EmbryosManager = {
     _filmDicRow(thumbSize, config) {
         const all = this._dicFrames;
         if (!all.length) return '';
+        // Taken from more than one position: a row per field.
+        const fields = this._dicFields();
+        const groups = fields.length ? fields.map(n => [n, all.filter(f => f.field === n)]) : [[null, all]];
+        return groups.map(([n, list]) => this._filmDicFieldRow(list, n, thumbSize, config)).join('');
+    },
+
+    _filmDicFieldRow(all, fieldNo, thumbSize, config) {
+        const every = this._dicFrames;
         const skip = (config && config.skipInterval) || 1;
         const shown = skip > 1 ? all.filter((_, i) => i % skip === 0 || i === all.length - 1) : all;
         let html = '<div class="filmstrip-row filmstrip-dic-row">';
         html += `<div class="filmstrip-label">
                 <span class="filmstrip-name">DIC</span>
-                <span class="filmstrip-stage">overview</span>
+                <span class="filmstrip-stage">${fieldNo ? `field ${fieldNo}` : 'overview'}</span>
                 <span class="filmstrip-count">${all.length} frame${all.length === 1 ? '' : 's'}</span>
             </div>`;
         html += '<div class="filmstrip-thumbs">';
         for (const f of shown) {
             const when = f.when ? new Date(f.when) : null;
             const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-            const idx = all.indexOf(f);
+            const idx = every.indexOf(f);
             html += `<div class="filmstrip-cell filmstrip-dic-cell" data-dic-index="${idx}" title="DIC overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
             if (f.thumb) {
                 html += `<img class="filmstrip-thumb filmstrip-dic-thumb" src="${f.thumb}" loading="lazy" width="${thumbSize}" height="${thumbSize}" alt="DIC overview, frame ${f.frame}"/>`;
