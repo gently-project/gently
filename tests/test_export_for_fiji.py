@@ -605,10 +605,13 @@ class TestMovieButton:
             ({"kind": "gif", "folder": "C:/x"}, 400),
             ({"kind": "dic"}, 400),
             ({"kind": "dic", "folder": "relative/here"}, 400),
-            ({"kind": "spim", "folder": "C:/surely/not/here"}, 404),
+            ({"kind": "spim", "folder": "<missing>"}, 404),
         ],
     )
-    def test_what_cannot_be_a_movie(self, store, body, status):
+    def test_what_cannot_be_a_movie(self, store, tmp_path, body, status):
+        # An absolute path on every platform, to a folder that is not there.
+        if body.get("folder") == "<missing>":
+            body = dict(body, folder=str(tmp_path / "surely" / "not" / "here"))
         assert _client(store).post("/api/movies", json=body).status_code == status
 
     def test_a_folder_without_the_right_files(self, store, tmp_path):
