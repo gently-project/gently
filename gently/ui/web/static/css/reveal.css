@@ -35,6 +35,11 @@
 .reveal-fiji { display: none; }
 html[data-reveal-fiji="1"] .reveal-fiji { display: inline-flex; }
 
+/* A button that opens a dialog here (choose a folder…): only where "here"
+   is the screen the dialog would open on. */
+.reveal-local { display: none; }
+html[data-reveal-local="1"] .reveal-local { display: inline-flex; }
+
 /* In the viewers, over an image: on dark. */
 .lightbox-reveal {
     display: inline-flex;

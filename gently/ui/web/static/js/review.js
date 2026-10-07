@@ -423,6 +423,7 @@ const ReviewApp = {
                 </div>
                 ${this.renderRun(this.runOf(s))}
                 <div class="session-export" id="session-export"></div>
+                <div class="session-movies" id="session-movies"></div>
             </div>
 
             ${this.renderPlan(s.acquisition)}
@@ -454,6 +455,7 @@ const ReviewApp = {
         this.setupTabHandlers();
         this.wireScrub();
         this.pollExport(true);
+        this.pollMovie(true);
         void frames;
     },
 
@@ -470,6 +472,7 @@ const ReviewApp = {
         } catch (_) { /* leave the button */ }
         if (!job || job.session_id !== s.session_id) return;
         this._exportDefault = job.default_dest || '';
+        this._exportPath = job.state === 'done' && job.path ? job.path : (this._exportPath || '');
         this.renderExport(job);
         if (job.state === 'running' && !once) {
             clearTimeout(this._exportTimer);
@@ -511,7 +514,11 @@ const ReviewApp = {
         if (!host) return;
         host.innerHTML = `
             <form class="session-name-form" onsubmit="event.preventDefault(); ReviewApp.startExport()">
-                <input id="session-export-dest" placeholder="Destination folder (leave empty for ${this.escapeHtml(this._exportDefault || 'the data folder\'s exports/')})" autocomplete="off">
+                <div class="session-export-dest-row">
+                    <input id="session-export-dest" placeholder="Destination folder (leave empty for ${this.escapeHtml(this._exportDefault || 'the data folder\'s exports/')})" autocomplete="off">
+                    <button type="button" class="session-edit-btn reveal-local" id="session-export-browse" onclick="ReviewApp.browseExportDest()" title="Choose the folder in a dialog">Browse…</button>
+                </div>
+                <label class="session-movie-option"><input type="checkbox" id="session-export-crops" checked> Also cut each embryo out of the DIC frames into a Hugging Face folder of its own (needs the Operate tab's embryo marking)</label>
                 <div class="session-name-form-row">
                     <button type="submit" class="session-resume-btn">Export</button>
                     <button type="button" class="session-edit-btn" onclick="document.getElementById('session-export-form').innerHTML = ''">Cancel</button>
@@ -522,13 +529,32 @@ const ReviewApp = {
         if (input) input.focus();
     },
 
+    async browseExportDest() {
+        const input = document.getElementById('session-export-dest');
+        const btn = document.getElementById('session-export-browse');
+        if (!input || typeof Reveal === 'undefined') return;
+        if (btn) { btn.disabled = true; btn.textContent = 'Choosing…'; }
+        try {
+            const path = await Reveal.pickFolder({
+                title: 'Export the session to…',
+                initial: input.value.trim() || this._exportDefault || null,
+            });
+            if (path) { input.value = path; input.focus(); }
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Browse…'; }
+        }
+    },
+
     async startExport() {
         const s = this.currentSession;
         const input = document.getElementById('session-export-dest');
         const dest = input && input.value.trim() ? input.value.trim() : null;
+        const cropsBox = document.getElementById('session-export-crops');
+        const body = { crops: !cropsBox || cropsBox.checked };
+        if (dest) body.dest = dest;
         try {
             const r = await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/export`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dest ? { dest } : {}),
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
             });
             if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || ('HTTP ' + r.status)); }
             this.renderExport(await r.json());
@@ -536,6 +562,140 @@ const ReviewApp = {
         } catch (e) {
             const host = document.getElementById('session-export');
             if (host) host.insertAdjacentHTML('beforeend', `<div class="session-export-status is-error">Export failed to start: ${this.escapeHtml(e.message)}</div>`);
+        }
+    },
+
+    // ---- movies, from any folder: DIC frames, or SPIM volumes ---------------
+    // Two buttons with two behaviours. A DIC movie is frames over time, with
+    // the flat divided out where the dark and flat sit beside them. A SPIM
+    // movie is volumes: max projections over time, or every slice, stack by
+    // stack. Any folder: an export on a share, a session's own volumes.
+
+    async pollMovie(once) {
+        const host = document.getElementById('session-movies');
+        if (!host) return;
+        let job = null;
+        try {
+            const r = await fetch('/api/movies');
+            job = r.ok ? await r.json() : null;
+        } catch (_) { /* leave it */ }
+        if (!job) return;
+        this.renderMovies(job);
+        clearTimeout(this._movieTimer);
+        if (job.state === 'running') this._movieTimer = setTimeout(() => this.pollMovie(false), 1000);
+    },
+
+    renderMovies(job) {
+        const host = document.getElementById('session-movies');
+        if (!host) return;
+        if (!document.getElementById('session-movie-status')) {
+            host.innerHTML = `
+                <div class="session-export-row">
+                    <button class="session-edit-btn" id="session-movie-dic" onclick="ReviewApp.askMovie('dic')" title="A folder of DIC frames (an export's dic/) as a movie: every frame in time order, and flat-fielded where the dark and flat are beside them">DIC movie…</button>
+                    <button class="session-edit-btn" id="session-movie-spim" onclick="ReviewApp.askMovie('spim')" title="A folder of volumes (an export's <embryo>/volumes) as a movie: max projections over time, or every slice stack by stack">SPIM movie…</button>
+                    <button class="session-edit-btn" id="session-movie-crops" onclick="ReviewApp.askMovie('crops')" title="Cut each embryo out of a folder of DIC frames (an export's dic/) into a Hugging Face folder of its own: raw and corrected crops, the references, one metadata table. Where the embryos are comes from this session's Operate marking">Embryo crops…</button>
+                    <span id="session-movie-status"></span>
+                </div>
+                <div id="session-movie-form"></div>`;
+        }
+        const status = document.getElementById('session-movie-status');
+        const running = job.state === 'running';
+        for (const id of ['session-movie-dic', 'session-movie-spim', 'session-movie-crops']) {
+            const b = document.getElementById(id);
+            if (b) b.disabled = running;
+        }
+        if (running) {
+            const pct = job.total ? Math.round((job.done / job.total) * 100) : 0;
+            const doing = job.kind === 'crops' ? 'Cutting the embryos out' : `Making ${this.escapeHtml(job.current || 'the movie')}`;
+            status.innerHTML = `<span class="session-export-status">${doing}… ${job.done}${job.total ? ` of ${job.total}` : ''}</span>
+                <div class="dose-bar session-export-bar"><span style="width:${pct}%"></span></div>`;
+            return;
+        }
+        const open = typeof Reveal !== 'undefined'
+            ? Reveal.button({ what: 'movie' }, 'show', { label: 'Open folder', title: 'Show the movie in the file manager', cls: 'session-edit-btn' })
+            : '';
+        if (job.state === 'done') {
+            status.innerHTML = `<span class="session-export-status">Wrote ${this.escapeHtml((job.outputs || []).join(', '))}${job.note ? ` (${this.escapeHtml(job.note)})` : ''} in <code>${this.escapeHtml(job.folder)}</code></span> ${open}`;
+        } else if (job.state === 'error') {
+            status.innerHTML = `<span class="session-export-status is-error">Movie failed: ${this.escapeHtml(job.error || '')}</span>`;
+        } else {
+            status.innerHTML = '';
+        }
+    },
+
+    askMovie(kind) {
+        const host = document.getElementById('session-movie-form');
+        if (!host) return;
+        const dic = kind === 'dic';
+        const crops = kind === 'crops';
+        const prefill = (dic || crops) && this._exportPath ? `${this._exportPath}\\dic` : '';
+        const choice = dic
+            ? `<label class="session-movie-option"><input type="checkbox" id="session-movie-corrected" checked> Also flat-fielded, with the dark and flat beside the frames (dic_corrected.avi)</label>`
+            : crops
+                ? ''
+                : `<label class="session-movie-option"><input type="radio" name="session-movie-view" value="projection" checked> Max projection, one frame per timepoint (spim_projection.avi)</label>
+               <label class="session-movie-option"><input type="radio" name="session-movie-view" value="slices"> Every slice, stack by stack (spim_slices.avi)</label>`;
+        const makeLabel = dic ? 'Make DIC movie' : crops ? 'Cut the embryos out' : 'Make SPIM movie';
+        const hint = dic
+            ? 'Every frame in time order, one brightness stretch for the run, frame and time in the corner. Written beside the frames; Fiji opens it with File › Import › AVI.'
+            : crops
+                ? 'One fixed box per embryo, from this session\'s Operate marking. Writes dic/embryos/<embryo>/ with raw/ and corrected/ crops, the dark and flat cropped the same, metadata.csv, two movies, and a README that says how to load or upload it to Hugging Face.'
+                : 'One brightness stretch for the run, timepoint (and slice) in the corner. Written beside the volumes; Fiji opens it with File › Import › AVI.';
+        host.innerHTML = `
+            <form class="session-name-form" onsubmit="event.preventDefault(); ReviewApp.startMovie('${kind}')">
+                <div class="session-export-dest-row">
+                    <input id="session-movie-folder" value="${this.escapeHtml(prefill)}" placeholder="${dic || crops ? "Folder of DIC frames: an export's dic/ folder" : "Folder of volumes: an export's <embryo>/volumes folder"}" autocomplete="off">
+                    <button type="button" class="session-edit-btn reveal-local" id="session-movie-browse" onclick="ReviewApp.browseMovieFolder()" title="Choose the folder in a dialog">Browse…</button>
+                </div>
+                ${choice}
+                <div class="session-name-form-row">
+                    <button type="submit" class="session-resume-btn">${makeLabel}</button>
+                    <button type="button" class="session-edit-btn" onclick="document.getElementById('session-movie-form').innerHTML = ''">Cancel</button>
+                    <span class="hint">${hint}</span>
+                </div>
+            </form>`;
+        const input = document.getElementById('session-movie-folder');
+        if (input) input.focus();
+    },
+
+    async browseMovieFolder() {
+        const input = document.getElementById('session-movie-folder');
+        const btn = document.getElementById('session-movie-browse');
+        if (!input || typeof Reveal === 'undefined') return;
+        if (btn) { btn.disabled = true; btn.textContent = 'Choosing…'; }
+        try {
+            const path = await Reveal.pickFolder({ title: 'The folder to make a movie of', initial: input.value.trim() || this._exportPath || null });
+            if (path) { input.value = path; input.focus(); }
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Browse…'; }
+        }
+    },
+
+    async startMovie(kind) {
+        const input = document.getElementById('session-movie-folder');
+        const folder = input ? input.value.trim() : '';
+        const body = { kind, folder };
+        if (kind === 'dic') {
+            const c = document.getElementById('session-movie-corrected');
+            body.corrected = !c || c.checked;
+        } else if (kind === 'crops') {
+            body.session_id = this.currentSession ? this.currentSession.session_id : null;
+        } else {
+            const v = document.querySelector('input[name="session-movie-view"]:checked');
+            body.view = v ? v.value : 'projection';
+        }
+        const status = document.getElementById('session-movie-status');
+        try {
+            const r = await fetch('/api/movies', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+            });
+            if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || ('HTTP ' + r.status)); }
+            const form = document.getElementById('session-movie-form');
+            if (form) form.innerHTML = '';
+            this.renderMovies(await r.json());
+            this.pollMovie(false);
+        } catch (e) {
+            if (status) status.innerHTML = `<span class="session-export-status is-error">Not started: ${this.escapeHtml(e.message)}</span>`;
         }
     },
 

@@ -19,6 +19,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,59 @@ def open_in_fiji(path: Path, fiji: Path) -> None:
             raise
         kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0)
         subprocess.Popen([str(fiji), str(path)], **kwargs)  # noqa: S603
+
+
+# The folder dialog. One at a time: a second one would open behind the
+# first, and the operator can only answer one.
+_DIALOG = threading.Lock()
+
+# Runs in a process of its own, so Tk never lives inside the server. It
+# prints the chosen folder, or nothing when the dialog was cancelled.
+_ASK_FOLDER = """
+import sys
+import tkinter as tk
+from tkinter import filedialog
+sys.stdout.reconfigure(encoding="utf-8")
+root = tk.Tk()
+root.withdraw()
+root.attributes("-topmost", True)
+root.update()
+kw = {"title": sys.argv[1], "parent": root, "mustexist": False}
+if sys.argv[2]:
+    kw["initialdir"] = sys.argv[2]
+sys.stdout.write(filedialog.askdirectory(**kw) or "")
+root.destroy()
+"""
+
+
+class DialogBusy(RuntimeError):
+    """A folder dialog is already open and waiting for an answer."""
+
+
+def ask_folder(title: str, initial: Path | None = None, timeout: float = 600.0) -> Path | None:
+    """Ask the operator for a folder, with the system's own dialog, on the
+    screen of the machine Gently runs on. The chosen folder, or ``None``
+    when they cancelled. Waits up to ``timeout`` seconds for an answer."""
+    if not _DIALOG.acquire(blocking=False):
+        raise DialogBusy("A folder dialog is already open")
+    try:
+        start = str(initial) if initial is not None and Path(initial).is_dir() else ""
+        kwargs: dict = {"capture_output": True, "encoding": "utf-8", "timeout": timeout}
+        if sys.platform.startswith("win"):
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        try:
+            done = subprocess.run(  # noqa: S603
+                [sys.executable, "-I", "-c", _ASK_FOLDER, title, start], **kwargs
+            )
+        except subprocess.TimeoutExpired:
+            return None
+        if done.returncode != 0:
+            tail = (done.stderr or "").strip().splitlines()
+            raise RuntimeError(tail[-1] if tail else f"dialog exited {done.returncode}")
+        chosen = (done.stdout or "").strip()
+        return Path(chosen) if chosen else None
+    finally:
+        _DIALOG.release()
 
 
 _LOOPBACK = ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1")

@@ -48,6 +48,7 @@ WHAT: dict[str, str] = {
     "config": "folder",
     "settings_history": "file",
     "export": "folder",
+    "movie": "folder",
 }
 
 ACTIONS = ("show", "fiji", "path")
@@ -76,6 +77,11 @@ def fiji_path() -> Path | None:
     from gently.settings import settings
 
     return os_reveal.find_fiji(getattr(settings.ui, "fiji_path", "") or None)
+
+
+class PickFolderRequest(BaseModel):
+    title: str = "Choose a folder"
+    initial: str | None = None
 
 
 def create_router(server) -> APIRouter:
@@ -161,6 +167,16 @@ def create_router(server) -> APIRouter:
             if not path.is_dir():
                 raise _missing(f"Session {sid} has not been exported yet")
             return path
+
+        if what == "movie":
+            # The folder the operator gave when the movie was started, which
+            # the route checked was a folder of frames then; not from here.
+            from gently.ui.web.routes.sessions import _MOVIES
+
+            folder = _MOVIES.get("folder")
+            if not folder or not Path(folder).is_dir():
+                raise _missing("No movie has been made yet")
+            return Path(folder)
 
         if what in ("timepoint", "volume", "projection"):
             _, sid, eid = _embryo(store, req)
@@ -272,5 +288,35 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"Could not open it: {exc}") from exc
         answer["opened"] = True
         return answer
+
+    @router.post("/api/reveal/pick-folder", dependencies=[Depends(require_control)])
+    async def pick_folder(req: PickFolderRequest, request: Request) -> dict[str, Any]:
+        """Ask the operator for a folder with the system's own dialog. It
+        opens on the machine Gently runs on, so a browser on another computer
+        is told so instead (``reason: remote``) and types the path.
+
+        ``initial`` is only where the dialog starts, and only when it is a
+        folder that exists here; nothing is joined to it or created from it.
+        """
+        host = request.client.host if request.client else None
+        if not os_reveal.is_local(host):
+            return {"path": None, "cancelled": False, "reason": "remote"}
+        initial: Path | None = None
+        if req.initial and Path(req.initial).is_absolute():
+            initial = Path(req.initial)
+        if initial is None or not initial.is_dir():
+            store = _store()
+            root = Path(store.root) / "exports" if store is not None else None
+            initial = root if root is not None and root.is_dir() else None
+        try:
+            chosen = await asyncio.to_thread(os_reveal.ask_folder, req.title, initial)
+        except os_reveal.DialogBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.warning("folder dialog failed: %s", exc)
+            raise HTTPException(
+                status_code=502, detail=f"Could not open a folder dialog: {exc}"
+            ) from exc
+        return {"path": _readable(chosen) if chosen else None, "cancelled": chosen is None}
 
     return router

@@ -473,3 +473,109 @@ class TestWhereTheButtonsAre:
     def test_every_static_button_asks_for_something_the_route_knows(self):
         asked = re.findall(r"data-reveal='\{\"what\":\"(\w+)\"\}'", INDEX)
         assert asked and all(a in reveal_routes.WHAT for a in asked), asked
+
+
+# ── choosing a folder ────────────────────────────────────────────────────
+# "it would be nice to define it with a browse utility, also, apart from
+# the text box to copy paste the destination"
+
+
+class TestPickFolder:
+    @pytest.fixture
+    def dialog(self, monkeypatch, tmp_path):
+        """The dialog, answered. Nothing opens."""
+        asked: list = []
+        answer = {"path": tmp_path / "chosen"}
+
+        def ask_folder(title, initial=None, timeout=600.0):
+            asked.append((title, initial))
+            return answer["path"]
+
+        monkeypatch.setattr(os_reveal, "ask_folder", ask_folder)
+        return asked, answer
+
+    def test_the_chosen_folder_comes_back(self, store, calls, dialog):
+        asked, _ = dialog
+        r = _client(store).post("/api/reveal/pick-folder", json={"title": "Export to…"})
+        assert r.status_code == 200
+        assert Path(r.json()["path"]) == Path(dialog[1]["path"]) and r.json()["cancelled"] is False
+        assert asked[0][0] == "Export to…"
+
+    def test_cancelling_is_not_an_error(self, store, calls, dialog):
+        _, answer = dialog
+        answer["path"] = None
+        body = _client(store).post("/api/reveal/pick-folder", json={}).json()
+        assert body == {"path": None, "cancelled": True}
+
+    def test_it_starts_where_the_page_says_when_that_is_a_folder(
+        self, store, calls, dialog, tmp_path
+    ):
+        asked, _ = dialog
+        here = tmp_path / "somewhere"
+        here.mkdir()
+        _client(store).post("/api/reveal/pick-folder", json={"initial": str(here)})
+        assert asked[0][1] == here
+
+    def test_else_in_the_exports_folder_or_nowhere(self, store, calls, dialog):
+        asked, _ = dialog
+        c = _client(store)
+        c.post("/api/reveal/pick-folder", json={"initial": "relative/or/missing"})
+        assert asked[0][1] is None
+        (store.root / "exports").mkdir()
+        c.post("/api/reveal/pick-folder", json={"initial": "Z:/not/there"})
+        assert asked[1][1] == store.root / "exports"
+
+    def test_another_computer_gets_no_dialog(self, store, calls, dialog, monkeypatch):
+        asked, _ = dialog
+        monkeypatch.setattr(os_reveal, "is_local", lambda host: False)
+        body = _client(store).post("/api/reveal/pick-folder", json={}).json()
+        assert body["reason"] == "remote" and body["path"] is None
+        assert asked == []
+
+    def test_without_control_no_dialog(self, store, calls, dialog):
+        asked, _ = dialog
+        r = _client(store, control=False).post("/api/reveal/pick-folder", json={})
+        assert r.status_code == 403 and asked == []
+
+    def test_one_dialog_at_a_time(self, store, calls, monkeypatch):
+        def busy(title, initial=None, timeout=600.0):
+            raise os_reveal.DialogBusy("A folder dialog is already open")
+
+        monkeypatch.setattr(os_reveal, "ask_folder", busy)
+        r = _client(store).post("/api/reveal/pick-folder", json={})
+        assert r.status_code == 409
+
+    def test_the_dialog_runs_in_its_own_process(self, monkeypatch, tmp_path):
+        import subprocess
+
+        ran: list = []
+
+        def run(cmd, **kw):
+            ran.append((cmd, kw))
+            return subprocess.CompletedProcess(cmd, 0, stdout=str(tmp_path) + "\n", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", run)
+        assert os_reveal.ask_folder("Pick", tmp_path) == tmp_path
+        cmd, kw = ran[0]
+        assert cmd[0] == os_reveal.sys.executable and "-I" in cmd and "tkinter" in cmd[3]
+        assert cmd[-2:] == ["Pick", str(tmp_path)]
+        assert kw["timeout"] == 600.0
+
+        monkeypatch.setattr(
+            subprocess, "run", lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", "")
+        )
+        assert os_reveal.ask_folder("Pick") is None
+
+        def crash(cmd, **kw):
+            return subprocess.CompletedProcess(cmd, 1, "", "TclError: no display name\n")
+
+        monkeypatch.setattr(subprocess, "run", crash)
+        with pytest.raises(RuntimeError, match="no display"):
+            os_reveal.ask_folder("Pick")
+
+    def test_the_export_form_has_a_browse_button_for_this_screen(self):
+        review = (JS / "review.js").read_text(encoding="utf-8")
+        assert 'id="session-export-browse"' in review and "reveal-local" in review
+        assert "Reveal.pickFolder(" in review
+        assert "pickFolder" in REVEAL_JS and "/api/reveal/pick-folder" in REVEAL_JS
+        assert 'html[data-reveal-local="1"] .reveal-local' in CSS

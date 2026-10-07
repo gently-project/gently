@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -250,6 +251,8 @@ def _ask_model_for_a_name(client, summary: dict) -> tuple[str, str] | None:
 
 
 _EXPORTS: dict[str, dict] = {}
+# The movie being made, or the last one: one at a time, from any folder.
+_MOVIES: dict = {"state": "idle"}
 _SIZE_CACHE: dict[str, tuple[float, int]] = {}
 _SIZE_TTL_S = 900.0
 
@@ -984,7 +987,8 @@ def create_router(server) -> APIRouter:
     async def start_export(session_id: str, body: dict | None = None):
         """Begin exporting the session: one folder per embryo, files named so
         a sort is time order, the record beside them (see gently.core.export).
-        ``{"dest": "<folder>"}`` puts it somewhere other than <root>/exports."""
+        ``{"dest": "<folder>"}`` puts it somewhere other than <root>/exports;
+        ``{"crops": false}`` skips cutting each embryo out of the DIC frames."""
         import threading
 
         from gently.core.export import export_session
@@ -998,6 +1002,7 @@ def create_router(server) -> APIRouter:
         if job and job.get("state") == "running":
             return job
         dest = (body or {}).get("dest")
+        crops = bool((body or {}).get("crops", True))
         dest_path = Path(str(dest)).expanduser() if dest else None
         if dest_path is not None and not dest_path.is_absolute():
             raise HTTPException(status_code=400, detail="dest must be an absolute folder path")
@@ -1018,7 +1023,7 @@ def create_router(server) -> APIRouter:
 
         def run() -> None:
             try:
-                out = export_session(store, session_id, dest_path, progress)
+                out = export_session(store, session_id, dest_path, progress, crops=crops)
                 job["path"] = str(out)
                 job["state"] = "done"
             except Exception as exc:
@@ -1040,6 +1045,145 @@ def create_router(server) -> APIRouter:
         )
         job = _EXPORTS.get(session_id) or {"session_id": session_id, "state": "idle"}
         return dict(job, default_dest=default)
+
+    # ---- movies, from any folder ------------------------------------------
+    # Two kinds with two behaviours. A DIC movie is a folder of frames over
+    # time, with the flat divided out where the references are beside them.
+    # A SPIM movie is a folder of volumes: max projections over time, or
+    # every slice stack by stack. The folder is the operator's own (an export
+    # on a share, a session's volumes), so it is given, not looked up.
+
+    @router.post("/api/movies", dependencies=[Depends(require_control)])
+    async def start_movie(body: dict):
+        """``{"kind": "dic", "folder": ..., "corrected": true}``,
+        ``{"kind": "spim", "folder": ..., "view": "projection"|"slices"}``, or
+        ``{"kind": "crops", "folder": ..., "session_id": ...}``: each embryo
+        cut out of a folder of DIC frames, where the session's Operate
+        marking says the embryos are."""
+        import threading
+
+        from gently.core.export import (
+            _dic_frames,
+            _volume_files,
+            dic_crops,
+            dic_movie,
+            find_embryo_boxes,
+            marking_seeds,
+            spim_movie,
+        )
+
+        kind = str((body or {}).get("kind") or "")
+        if kind not in ("dic", "spim", "crops"):
+            raise HTTPException(status_code=400, detail="kind must be 'dic', 'spim' or 'crops'")
+        if _MOVIES.get("state") == "running":
+            raise HTTPException(status_code=409, detail="A movie is already being made")
+        folder = (body or {}).get("folder")
+        if not folder:
+            raise HTTPException(status_code=400, detail="Which folder?")
+        path = Path(str(folder).strip().strip('"')).expanduser()
+        if not path.is_absolute():
+            raise HTTPException(status_code=400, detail="folder must be an absolute path")
+        if not path.is_dir():
+            raise HTTPException(status_code=404, detail=f"Folder not found: {path}")
+
+        steps: list[dict] = []
+        seeds: dict = {}
+        if kind == "crops":
+            if not _dic_frames(path) and _dic_frames(path / "dic"):
+                path = path / "dic"
+            if not _dic_frames(path):
+                raise HTTPException(
+                    status_code=400, detail="No DIC frames (dic_f*.tif or dic.csv) in that folder"
+                )
+            sid = str((body or {}).get("session_id") or "")
+            store = _file_store()
+            if not sid or store is None or store.get_session(sid) is None:
+                raise HTTPException(status_code=400, detail="Which session marked the embryos?")
+            seeds = marking_seeds(store, sid, store.list_embryos(sid) or [])
+            if not seeds:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This session has no embryo marking (Operate tab), so there is "
+                    "nothing to say where the embryos are.",
+                )
+            steps.append({"crops": True})
+        elif kind == "dic":
+            if not _dic_frames(path) and _dic_frames(path / "dic"):
+                path = path / "dic"
+            if not _dic_frames(path):
+                raise HTTPException(
+                    status_code=400, detail="No DIC frames (dic_f*.tif or dic.csv) in that folder"
+                )
+            steps.append({"corrected": False})
+            if bool((body or {}).get("corrected", True)):
+                steps.append({"corrected": True})
+        else:
+            if not _volume_files(path) and _volume_files(path / "volumes"):
+                path = path / "volumes"
+            if not _volume_files(path):
+                raise HTTPException(status_code=400, detail="No volumes (.tif) in that folder")
+            view = str((body or {}).get("view") or "projection")
+            if view not in ("projection", "slices"):
+                raise HTTPException(status_code=400, detail="view must be 'projection' or 'slices'")
+            steps.append({"view": view})
+
+        job: dict[str, Any] = {
+            "kind": kind,
+            "folder": str(path),
+            "state": "running",
+            "done": 0,
+            "total": 0,
+            "current": "",
+            "outputs": [],
+            "note": None,
+            "error": None,
+            "started_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        # The thread writes into the very dict the status route reads.
+        _MOVIES.clear()
+        _MOVIES.update(job)
+        job = _MOVIES
+
+        def run() -> None:
+            try:
+                base = 0
+                for step in steps:
+
+                    def progress(i: int, n: int, what: str) -> None:
+                        job["total"] = n * len(steps)
+                        job["done"] = base + i  # noqa: B023
+                        job["current"] = what.split(" ")[0]
+
+                    out: Path | None
+                    if kind == "crops":
+                        out = dic_crops(path, find_embryo_boxes(path, seeds), progress=progress)
+                    elif kind == "dic":
+                        out = dic_movie(path, progress=progress, corrected=step["corrected"])
+                        if out is None and step["corrected"]:
+                            job["note"] = (
+                                "no dark and flat beside the frames, so no corrected movie"
+                            )
+                    else:
+                        out = spim_movie(path, view=step["view"], progress=progress)
+                    if out is not None:
+                        job["outputs"].append(out.name)
+                    base = job["done"]
+                job["done"] = job["total"] = max(job["total"], job["done"])
+                job["state"] = "done" if job["outputs"] else "error"
+                if not job["outputs"]:
+                    job["error"] = job["note"] or "Nothing could be written"
+            except Exception as exc:
+                logger.exception("movie of %s failed", path)
+                job["error"] = str(exc)
+                job["state"] = "error"
+
+        threading.Thread(target=run, name=f"movie-{kind}", daemon=True).start()
+        return job
+
+    @router.get("/api/movies")
+    async def movie_status():
+        """The movie being made, or the last one."""
+        return dict(_MOVIES)
 
     @router.get("/api/sessions/{session_id}/snapshot/{stem}.png")
     async def session_snapshot_png(session_id: str, stem: str, max: int | None = None):
