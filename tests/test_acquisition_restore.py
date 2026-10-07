@@ -254,7 +254,7 @@ def test_fill_is_the_inverse_of_read():
     ):
         assert f"'{field}'" in fn, f"fillPlan never sets {field}"
     assert "renderOverrideRows();" in fn and "plan.overrides.forEach" in fn
-    assert "_dicPin = plan.dic.position === 'here'" in fn
+    assert "_dicPins = plan.dic.position === 'here'" in fn
 
 
 def test_the_pane_says_where_the_plan_came_from():

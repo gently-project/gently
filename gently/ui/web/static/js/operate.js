@@ -2142,7 +2142,7 @@ const OperateManager = (function () {
     // ══ THE ACQUISITION PLAN ══════════════════════════════════════════════
     // The Adaptive pane is a form for one object (acquisition-plan.js). Every
     // input re-reads it and re-says it; Start sends exactly what was said.
-    let _dicPin = null;          // the stage position captured for "taken from here"
+    let _dicPins = [];           // the stage positions captured for "taken from here": one field, or several
     let _laserPresetsLoaded = false;
     // Per-line power bounds, from the device layer ({488: {min, max}}). Null
     // until read: the fields are then unbounded on the pane, and the start
@@ -2301,8 +2301,8 @@ const OperateManager = (function () {
         const dic = $('op-plan-dic');
         if (dic) dic.checked = !!plan.dic.enabled;
         set('op-plan-dic-every', plan.dic.everyRounds);
-        _dicPin = plan.dic.position === 'here' && plan.dic.pin ? plan.dic.pin : null;
-        set('op-plan-dic-pos', _dicPin ? 'here' : 'centroid');
+        _dicPins = plan.dic.position === 'here' ? (plan.dic.pins || []).map(p => ({ x: p.x, y: p.y })) : [];
+        set('op-plan-dic-pos', _dicPins.length ? 'here' : 'centroid');
         set('op-plan-dic-exposure', plan.dic.exposureMs);
         set('op-plan-dic-light', plan.dic.light);
         // Not through set(): an absent brightness has to CLEAR the field, or
@@ -2397,7 +2397,7 @@ const OperateManager = (function () {
             dic: !!($('op-plan-dic') && $('op-plan-dic').checked),
             dicEveryRounds: v('op-plan-dic-every'),
             dicPosition: v('op-plan-dic-pos'),
-            dicPin: _dicPin,
+            dicPins: _dicPins,
             dicExposureMs: v('op-plan-dic-exposure'),
             dicLight: v('op-plan-dic-light'),
             stopKind: v('op-tl-stop'),
@@ -2461,9 +2461,14 @@ const OperateManager = (function () {
         if (pin) {
             const here = plan.dic.position === 'here';
             pin.hidden = !here;
-            pin.textContent = here
-                ? (_dicPin ? `stage at ${_dicPin.x.toFixed(0)}, ${_dicPin.y.toFixed(0)} µm — captured when chosen`
-                           : 'no stage position known yet')
+            // One field, or several: when the embryos do not all fit in one
+            // frame, the operator drives to each place and adds it.
+            const rows = _dicPins.length
+                ? _dicPins.map((p, i) => `<span class="op-dic-pin">${_dicPins.length > 1 ? `field ${i + 1}:` : 'stage at'} ${p.x.toFixed(0)}, ${p.y.toFixed(0)} µm`
+                    + ` <button type="button" class="op-dic-pin-x" data-dic-pin-remove="${i}" title="Drop this position">×</button></span>`).join('')
+                : '<span class="op-dic-pin">no stage position known yet</span>';
+            pin.innerHTML = here
+                ? rows + ` <button type="button" class="op-dic-pin-add" data-dic-pin-add title="The embryos do not all fit in one field: drive to the next place and add it">+ another field, from here</button>`
                 : '';
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
@@ -3254,12 +3259,30 @@ const OperateManager = (function () {
                 const pos = e.target.closest('#op-plan-dic-pos');
                 if (pos) {
                     if (pos.value === 'here') {
-                        if (_xy) _dicPin = { x: _xy.x, y: _xy.y };
-                        else { toastFail('No stage position known yet'); pos.value = 'centroid'; }
+                        if (!_dicPins.length) {
+                            if (_xy) _dicPins = [{ x: _xy.x, y: _xy.y }];
+                            else { toastFail('No stage position known yet'); pos.value = 'centroid'; }
+                        }
                     } else {
-                        _dicPin = null;
+                        _dicPins = [];
                     }
                 }
+                renderPlan();
+            });
+            // Several fields: each added from where the stage is at that moment.
+            planPanel.addEventListener('click', e => {
+                const add = e.target.closest('[data-dic-pin-add]');
+                const drop = e.target.closest('[data-dic-pin-remove]');
+                if (!add && !drop) return;
+                e.preventDefault();
+                if (add) {
+                    if (!_xy) { toastFail('No stage position known yet'); return; }
+                    _dicPins.push({ x: _xy.x, y: _xy.y });
+                } else {
+                    _dicPins.splice(Number(drop.dataset.dicPinRemove), 1);
+                    if (!_dicPins.length) set('op-plan-dic-pos', 'centroid');
+                }
+                _planDirty = true;
                 renderPlan();
             });
             renderPlan();

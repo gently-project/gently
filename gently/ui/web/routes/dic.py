@@ -95,6 +95,8 @@ def create_router(server) -> APIRouter:
                 {
                     "stem": stem,
                     "frame": meta.get("frame"),
+                    "field": meta.get("field"),
+                    "fields": meta.get("fields"),
                     "round": meta.get("round"),
                     "position": meta.get("position"),
                     "captured_at": meta.get("captured_at") or rec.get("captured_at"),

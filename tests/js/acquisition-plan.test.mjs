@@ -188,3 +188,18 @@ test('the plan says which light the overview is taken under', () => {
     assert.equal(P.fromStructure({ dic: { enabled: true, use_led: true } }).dic.light, 'room');
     assert.deepEqual(Object.keys(P.DIC_LIGHTS), ['room', 'led', 'none']);
 });
+
+test('the embryos do not all fit in one field: a frame from each pinned position', () => {
+    const two = P.fromForm({ dic: true, dicPosition: 'here', dicPins: [{ x: -500, y: -400 }, { x: 900, y: -380 }] });
+    const dic = P.toPayload(two, IDS).dic;
+    assert.deepEqual(dic.position, { x: -500, y: -400 }, 'the first is the position older code reads');
+    assert.deepEqual(dic.positions, [{ x: -500, y: -400 }, { x: 900, y: -380 }]);
+    assert.match(P.describe(two, SUBJECTS), /from 2 positions/);
+    // and it survives being saved and reloaded
+    const back = P.fromStructure(P.toStructure(two));
+    assert.deepEqual(back.dic.pins, two.dic.pins);
+    // one pin says nothing new, so the payload is the old payload
+    const one = P.fromForm({ dic: true, dicPosition: 'here', dicPins: [{ x: -500, y: -400 }] });
+    assert.equal('positions' in P.toPayload(one, IDS).dic, false);
+    assert.deepEqual(P.toPayload(one, IDS).dic.position, { x: -500, y: -400 });
+});

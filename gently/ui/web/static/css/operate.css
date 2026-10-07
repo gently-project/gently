@@ -1793,3 +1793,12 @@
 .sp-mid { font-size: 11px; color: var(--op-ink-dim); text-align: center; min-width: 56px; }
 .sp-steps .is-on { border-color: var(--accent); color: var(--op-ink); }
 .sp-note { max-width: 320px; }
+
+/* The DIC overview's pinned positions: one field, or several. */
+#op-plan-dic-pin { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.op-dic-pin { display: inline-flex; align-items: center; gap: 4px; }
+.op-dic-pin-x, .op-dic-pin-add {
+    font: inherit; font-size: 11px; line-height: 1.2; padding: 1px 6px; border-radius: 6px;
+    border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit; cursor: pointer;
+}
+.op-dic-pin-x:hover, .op-dic-pin-add:hover { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }

@@ -107,12 +107,23 @@ def _parse_dic_config(raw) -> dict | None:
         if every <= 0:
             raise HTTPException(status_code=400, detail="dic.every_seconds must be > 0")
     out["every_seconds"] = every
+
+    def xy(pos, what: str) -> dict:
+        try:
+            return {"x": float(pos["x"]), "y": float(pos["y"])}
+        except (TypeError, KeyError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{what} must be {{x, y}}") from None
+
+    positions = raw.get("positions")
+    if positions is not None:
+        if not isinstance(positions, list):
+            raise HTTPException(status_code=400, detail="dic.positions must be a list of {x, y}")
+        out["positions"] = [xy(p, "each of dic.positions") for p in positions]
     pos = raw.get("position")
     if pos is not None:
-        try:
-            out["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
-        except (TypeError, KeyError, ValueError):
-            raise HTTPException(status_code=400, detail="dic.position must be {x, y}") from None
+        out["position"] = xy(pos, "dic.position")
+    elif out.get("positions"):
+        out["position"] = dict(out["positions"][0])
     else:
         out["position"] = None
     exposure = raw.get("exposure_ms")

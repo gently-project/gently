@@ -384,7 +384,7 @@ class TimelapseOrchestrator:
         self._dic_last_at = None
         self._dic_next_due_at = None
         if self._dic and self._dic.enabled:
-            if self._dic.position is None:
+            if self._dic.position is None and not self._dic.positions:
                 self._dic.position = self._subject_centroid(list(self._embryo_states))
             self._dic_next_due_at = now
             self._dic_references = self._find_brightfield_references()
@@ -512,7 +512,7 @@ class TimelapseOrchestrator:
                 sorted(stop_conditions),
             )
 
-        if overview.position is None:
+        if overview.position is None and not overview.positions:
             known = self.experiment.embryos.values()
             ids = embryo_ids or [e.id for e in known if not e.should_skip]
             # None when no embryo has a position: the frame is then taken
@@ -863,7 +863,8 @@ class TimelapseOrchestrator:
         return for_frame(found)
 
     async def _capture_dic_overview(self) -> bool:
-        """Take one overview frame and file it beside the session's snapshots.
+        """Take the overview frame — one per field, when the embryos do not
+        all fit in one — and file each beside the session's snapshots.
 
         A failed frame is logged and the next one is still scheduled — the
         volumes are the experiment; the overview must never take them down.
@@ -876,7 +877,38 @@ class TimelapseOrchestrator:
         if dic is None:
             return False
         frame = self._dic_frames + 1
-        pos = dic.position
+        fields = dic.fields()
+        got_any = False
+        last_at: datetime | None = None
+        try:
+            for i, pos in enumerate(fields, start=1):
+                got, at = await self._capture_dic_field(dic, frame, i, len(fields), pos)
+                got_any = got_any or got
+                last_at = at or last_at
+            if last_at is None:
+                # Every field failed outright: not a frame, for any run.
+                return False
+            if not got_any and not self._volumes:
+                # Not counted, and not announced: a brightfield run that ends
+                # "after 12 frames" has to have twelve.
+                return False
+            self._dic_frames = frame
+            self._dic_last_at = last_at
+            logger.info("DIC overview frame %d acquired (%d field(s))", frame, len(fields))
+            return got_any
+        finally:
+            self._dic_next_due_at = datetime.now() + timedelta(seconds=self._dic_every_seconds())
+
+    async def _capture_dic_field(
+        self,
+        dic: DicOverview,
+        frame: int,
+        field: int,
+        n_fields: int,
+        pos: dict[str, float] | None,
+    ) -> tuple[bool, datetime | None]:
+        """One frame of one field: move there, light, capture, light off,
+        file. Whether there is a frame to show, and when it was taken."""
         lit: str | None = None
         lit_led = False
         try:
@@ -917,6 +949,8 @@ class TimelapseOrchestrator:
                 meta = {
                     "channel": "dic",
                     "frame": frame,
+                    "field": field,
+                    "fields": n_fields,
                     "round": self._current_round,
                     "position": pos,
                     "exposure_ms": dic.exposure_ms,
@@ -947,11 +981,7 @@ class TimelapseOrchestrator:
                     )
             got = stored is not None if filing else bool(real or image_path)
             if not got and not self._volumes:
-                # Not counted, and not announced: a brightfield run that ends
-                # "after 12 frames" has to have twelve.
-                return False
-            self._dic_frames = frame
-            self._dic_last_at = captured_at
+                return False, None
             self._emit_event(
                 EventType.IMAGE_ACQUIRED,
                 {
@@ -959,19 +989,18 @@ class TimelapseOrchestrator:
                     "channel": "dic",
                     "embryo_id": None,
                     "frame": frame,
+                    "field": field,
+                    "fields": n_fields,
                     "image_path": str(stored or image_path or ""),
                     "image_b64": image_b64,
                     "position": pos,
                     "timestamp": captured_at.isoformat(),
                 },
             )
-            logger.info("DIC overview frame %d acquired", frame)
-            return got
+            return got, captured_at
         except Exception as exc:
-            logger.warning("DIC overview frame %d failed: %s", frame, exc)
-            return False
-        finally:
-            self._dic_next_due_at = datetime.now() + timedelta(seconds=self._dic_every_seconds())
+            logger.warning("DIC overview frame %d, field %d failed: %s", frame, field, exc)
+            return False, None
 
     async def _dic_light_on(self, light: str, frame: int) -> str | None:
         """Put the overview's light on. Returns what THIS call switched on, so

@@ -269,7 +269,7 @@ const EmbryosManager = {
         const i = frame.stem ? this._dicFrames.findIndex(f => f.stem === frame.stem) : -1;
         if (i >= 0) this._dicFrames[i] = Object.assign(this._dicFrames[i], frame);
         else this._dicFrames.push(frame);
-        this._dicFrames.sort((a, b) => (a.frame || 0) - (b.frame || 0));
+        this._dicFrames.sort((a, b) => ((a.frame || 0) - (b.frame || 0)) || ((a.field || 1) - (b.field || 1)));
     },
 
     async refreshDicStrip() {
@@ -278,7 +278,7 @@ const EmbryosManager = {
             if (!r.ok) return;
             const d = await r.json();
             (d.frames || []).forEach(f => this._dicRemember({
-                stem: f.stem, frame: f.frame, url: f.url, when: f.captured_at, position: f.position,
+                stem: f.stem, frame: f.frame, field: f.field, fields: f.fields, url: f.url, when: f.captured_at, position: f.position,
                 round: f.round, exposure_ms: f.exposure_ms, light: f.light, led_intensity_pct: f.led_intensity_pct,
                 correctable: !!f.correctable,
                 thumb: `${f.url}?max=256`,
@@ -299,6 +299,8 @@ const EmbryosManager = {
             url: stem ? `/api/dic/frames/${stem}.png` : null,
             thumb: data.image_b64 ? `data:image/png;base64,${data.image_b64}` : (stem ? `/api/dic/frames/${stem}.png?max=256` : null),
             when: data.timestamp,
+            field: data.field,
+            fields: data.fields,
             position: data.position,
             round: data.round,
             exposure_ms: data.exposure_ms,
@@ -345,9 +347,10 @@ const EmbryosManager = {
         frames.innerHTML = shown.map(f => {
             const t = f.when ? this.formatTime(f.when) : '';
             const idx = all.indexOf(f);
-            return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${t ? `, ${t}` : ''} — open">` +
-                (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
-                `<span class="dic-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
+            const fld = f.fields > 1 ? ` · field ${f.field}` : '';
+            return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${fld}${t ? `, ${t}` : ''} — open">` +
+                (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
+                `<span class="dic-frame-cap">${f.frame}${fld}${t ? ` · ${t}` : ''}</span></button>`;
         }).join('');
         frames.scrollLeft = frames.scrollWidth;
     },

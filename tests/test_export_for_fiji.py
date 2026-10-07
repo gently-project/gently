@@ -914,3 +914,99 @@ class TestCropsInTheExport:
             "body.session_id",
         ):
             assert needle in REVIEW_JS, needle
+
+
+class TestTwoFields:
+    """ "i am sure two positions exist which covers all the embryos": the
+    overview taken from two positions exports as two series, a folder each."""
+
+    @staticmethod
+    def _two_field_session(store, sid="two"):
+        import tifffile
+
+        store.create_session(sid, name="two fields")
+        store.register_embryo(sid, "embryo_1", position_x=-500.0, position_y=-400.0, role="test")
+        sd = store._session_dir(sid)
+        ref = sd / "calibration" / "brightfield" / "20261004_210000"
+        ref.mkdir(parents=True)
+        tifffile.imwrite(ref / "dark.tif", np.full((16, 20), 10, dtype=np.uint16))
+        tifffile.imwrite(ref / "flat.tif", np.full((16, 20), 500, dtype=np.uint16))
+        (ref / "brightfield.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "record": "20261004_210000",
+                    "spec": {"light": "room"},
+                    "dark": {"file": "dark.tif"},
+                    "flat": {"file": "flat.tif"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        positions = {1: {"x": -500.0, "y": -400.0}, 2: {"x": 900.0, "y": -400.0}}
+        for frame in (1, 2, 3):
+            for field in (1, 2):
+                store.put_snapshot(
+                    sid,
+                    "dic",
+                    np.full((16, 20), 100 + 50 * field, dtype=np.uint16),
+                    metadata={
+                        "channel": "dic",
+                        "frame": frame,
+                        "field": field,
+                        "fields": 2,
+                        "captured_at": f"2026-10-04T21:{frame:02d}:{field:02d}",
+                        "position": positions[field],
+                    },
+                )
+        return sid
+
+    def test_one_folder_per_field_each_a_series_of_its_own(self, store):
+        from gently.core.export import _dic_frames
+
+        sid = self._two_field_session(store)
+        out = export_session(store, sid)
+        d = out / "dic"
+        assert not list(d.glob("dic_f*.tif")), "no frames loose in dic/ when there are fields"
+        for field in (1, 2):
+            fd = d / f"field_{field}"
+            names = sorted(p.name for p in fd.glob("dic_f*.tif"))
+            assert names == [f"dic_f000{i}_20261004-210{i}0{field}.tif" for i in (1, 2, 3)]
+            rows = list(csv.DictReader(open(fd / "dic.csv", encoding="utf-8")))
+            assert [r["field"] for r in rows] == ["2", "2", "2"] if field == 2 else True
+            assert rows[0]["file"] == f"dic/field_{field}/{names[0]}"
+            assert rows[0]["dark"].startswith("../references/")
+            # The references resolve from the field folder, so a corrected
+            # movie comes out of it like any dic/ folder.
+            frames = _dic_frames(fd)
+            assert (fd / frames[0]["dark"]).resolve().is_file()
+            assert (fd / "dic.avi").is_file() and (fd / "dic_corrected.avi").is_file()
+        text = (out / "README.txt").read_text(encoding="utf-8")
+        assert "taken from 2 positions" in text and "dic/field_2/" in text
+
+    def test_a_marking_per_field_finds_the_embryos_in_that_field(self, store):
+        from gently.core.export import marking_seeds
+
+        sid = self._two_field_session(store)
+        store.register_embryo(sid, "embryo_2", position_x=900.0, position_y=-400.0, role="test")
+        for stage, px, who in ((-500.0, 1.0, -500.0), (900.0, 2.0, 900.0)):
+            store.put_snapshot(
+                sid,
+                "operate_marked",
+                np.zeros((4, 5), dtype=np.uint16),
+                metadata={
+                    "kind": "operate_marking",
+                    "stage_position": [stage, -400.0],
+                    "frame": {"width": 5.0, "height": 4.0, "downsample": 4.0},
+                    "embryos": [
+                        {"pixel_x": px, "pixel_y": 2.0, "stage_x_um": who, "stage_y_um": -400.0}
+                    ],
+                },
+            )
+        embryos = store.list_embryos(sid)
+        assert marking_seeds(store, sid, embryos, position={"x": -500.0, "y": -400.0}) == {
+            "embryo_1": (4.0, 8.0)
+        }
+        assert marking_seeds(store, sid, embryos, position={"x": 900.0, "y": -400.0}) == {
+            "embryo_2": (8.0, 8.0)
+        }
+        assert marking_seeds(store, sid, embryos, position={"x": 5000.0, "y": 0.0}) == {}

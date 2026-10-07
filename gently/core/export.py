@@ -26,6 +26,8 @@ cannot touch the session.
         dic/         dic_f0001_20261004-213000.tif …   dic.csv
                      dic.avi  dic_corrected.avi  references/
                      embryos/<label>/raw/ corrected/ metadata.csv …   (see dic_crops)
+                     field_1/ field_2/ …   the same, per field, when the overview
+                                           was taken from more than one position
 
 Fiji opens a volumes/ folder with File › Import › Image Sequence…, in order,
 and dic.avi with File › Import › AVI… (it is Motion JPEG, which Fiji and
@@ -769,13 +771,30 @@ def _crops_card(
 
 
 def marking_seeds(
-    store: Any, session_id: str, embryos: list[dict]
+    store: Any,
+    session_id: str,
+    embryos: list[dict],
+    position: dict | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Where each embryo is in the full DIC frame, from the Operate tab's
-    marking (the newest one): the preview's pixel positions scaled to the
-    frame, keyed by the embryo's export label. A mark is an embryo's when
-    its stage position is the nearest, within 50 µm. ``{}`` with no marking."""
+    marking: the preview's pixel positions scaled to the frame, keyed by the
+    embryo's export label. A mark is an embryo's when its stage position is
+    the nearest, within 50 µm. The newest marking is used, or with
+    ``position`` the newest taken from there (within 300 µm): a run with
+    more than one field has a marking per field. ``{}`` with no marking."""
     marks = store.list_snapshots(session_id, "operate_marked") or []
+    if position is not None and position.get("x") is not None:
+
+        def near(r: dict) -> bool:
+            at = (r.get("metadata") or {}).get("stage_position") or []
+            try:
+                dx = float(at[0]) - float(position["x"])
+                dy = float(at[1]) - float(position["y"])
+            except (TypeError, ValueError, IndexError, KeyError):
+                return False
+            return (dx * dx + dy * dy) ** 0.5 <= 300.0
+
+        marks = [r for r in marks if near(r)]
     if not marks:
         return {}
     mark = max(marks, key=lambda r: str(r.get("captured_at") or ""))
@@ -983,6 +1002,8 @@ def plan_lines(plan: dict | None) -> list[str]:
         bits = []
         if dic.get("every_seconds"):
             bits.append(f"every {dic['every_seconds']} s")
+        if len(dic.get("positions") or []) > 1:
+            bits.append(f"from {len(dic['positions'])} positions")
         if dic.get("light"):
             bits.append(
                 f"{dic['light']}"
@@ -1246,44 +1267,68 @@ def export_session(
                     ref_records.append(doc)
 
     # --- the DIC overview, by frame then time, not by uuid ------------------
+    # Taken from more than one position, the overview is one series per
+    # field, each in a folder of its own with its own table and movies.
+    n_fields = max(
+        (int((r.get("metadata") or {}).get("fields") or 1) for r in snapshots), default=1
+    )
+    multi = n_fields > 1
+
+    def dic_dir_of(field_no: int) -> Path:
+        return out / "dic" / f"field_{field_no}" if multi else out / "dic"
+
     dic_rows = []
+    rows_by_field: dict[int, list[dict]] = {}
+    field_positions: dict[int, dict] = {}
     for i, rec in enumerate(
         sorted(
             snapshots,
-            key=lambda r: ((r.get("metadata") or {}).get("frame") or 0, r.get("captured_at") or ""),
+            key=lambda r: (
+                (r.get("metadata") or {}).get("frame") or 0,
+                (r.get("metadata") or {}).get("field") or 1,
+                r.get("captured_at") or "",
+            ),
         ),
         start=1,
     ):
         meta = rec.get("metadata") or {}
         frame = int(meta.get("frame") or i)
+        field_no = int(meta.get("field") or 1)
         when = meta.get("captured_at") or rec.get("captured_at")
         name = f"dic_f{frame:04d}_{_stamp(when)}.tif" if when else f"dic_f{frame:04d}.tif"
-        if _copy(Path(rec.get("file_path") or ""), out / "dic" / name, step):
+        if _copy(Path(rec.get("file_path") or ""), dic_dir_of(field_no) / name, step):
             pos = meta.get("position") or {}
-            dic_rows.append(
-                {
-                    "file": f"dic/{name}",
-                    "frame": frame,
-                    "round": meta.get("round"),
-                    "captured_at": when,
-                    "x_um": pos.get("x"),
-                    "y_um": pos.get("y"),
-                    "exposure_ms": meta.get("exposure_ms"),
-                    "light": meta.get("light"),
-                    "led_intensity_pct": meta.get("led_intensity_pct"),
-                    "width": rec.get("width"),
-                    "height": rec.get("height"),
-                    "dark": _ref_path(meta, "dark", ref_records),
-                    "flat": _ref_path(meta, "flat", ref_records),
-                }
-            )
-    if dic_rows:
+            if pos and field_no not in field_positions:
+                field_positions[field_no] = dict(pos)
+            dark, flat = _ref_path(meta, "dark", ref_records), _ref_path(meta, "flat", ref_records)
+            if multi:
+                dark, flat = (f"../{dark}" if dark else ""), (f"../{flat}" if flat else "")
+            row = {
+                "file": f"dic/field_{field_no}/{name}" if multi else f"dic/{name}",
+                "frame": frame,
+                "field": field_no,
+                "round": meta.get("round"),
+                "captured_at": when,
+                "x_um": pos.get("x"),
+                "y_um": pos.get("y"),
+                "exposure_ms": meta.get("exposure_ms"),
+                "light": meta.get("light"),
+                "led_intensity_pct": meta.get("led_intensity_pct"),
+                "width": rec.get("width"),
+                "height": rec.get("height"),
+                "dark": dark,
+                "flat": flat,
+            }
+            dic_rows.append(row)
+            rows_by_field.setdefault(field_no, []).append(row)
+    for field_no, rows_f in sorted(rows_by_field.items()):
         _write_csv(
-            out / "dic" / "dic.csv",
-            dic_rows,
+            dic_dir_of(field_no) / "dic.csv",
+            rows_f,
             [
                 "file",
                 "frame",
+                "field",
                 "round",
                 "captured_at",
                 "x_um",
@@ -1304,36 +1349,52 @@ def export_session(
     movies = [False, True] if (dic_rows and ref_records) else [False] if dic_rows else []
     for corrected in movies:
         base = done
+        for field_no, rows_f in sorted(rows_by_field.items()):
+            at = base
 
-        def movie_progress(i: int, _n: int, what: str) -> None:
-            nonlocal done
-            done = base + i  # noqa: B023
-            if progress:
-                progress(done, total, what)
+            def movie_progress(i: int, _n: int, what: str) -> None:
+                nonlocal done
+                done = at + i  # noqa: B023
+                if progress:
+                    progress(done, total, what)
 
-        try:
-            dic_movie(out / "dic", progress=movie_progress, corrected=corrected)
-        except Exception:
-            logger.exception("the DIC movie failed; the frames are exported without it")
-        done = base + len(dic_rows)
+            try:
+                dic_movie(dic_dir_of(field_no), progress=movie_progress, corrected=corrected)
+            except Exception:
+                logger.exception("the DIC movie failed; the frames are exported without it")
+            base = at + len(rows_f)
+        done = base
 
     # --- each embryo cut out of the DIC frames, a dataset folder each --------
+    # With more than one field, each field has its own marking (the operator
+    # marked the embryos at each position) and its own embryos/ folder.
     crops_root: Path | None = None
     if dic_rows and seeds:
         base = done
+        for field_no, rows_f in sorted(rows_by_field.items()):
+            at = base
+            seeds_f = (
+                marking_seeds(store, session_id, embryos, position=field_positions.get(field_no))
+                if multi
+                else seeds
+            )
+            if not seeds_f:
+                base = at + len(rows_f)
+                continue
 
-        def crops_progress(i: int, _n: int, what: str) -> None:
-            nonlocal done
-            done = base + i  # noqa: B023
-            if progress:
-                progress(done, total, what)
+            def crops_progress(i: int, _n: int, what: str) -> None:
+                nonlocal done
+                done = at + i  # noqa: B023
+                if progress:
+                    progress(done, total, what)
 
-        try:
-            boxes = find_embryo_boxes(out / "dic", seeds)
-            crops_root = dic_crops(out / "dic", boxes, progress=crops_progress)
-        except Exception:
-            logger.exception("embryo crops failed; the frames are exported without them")
-        done = base + len(dic_rows)
+            try:
+                boxes = find_embryo_boxes(dic_dir_of(field_no), seeds_f)
+                crops_root = dic_crops(dic_dir_of(field_no), boxes, progress=crops_progress)
+            except Exception:
+                logger.exception("embryo crops failed; the frames are exported without them")
+            base = at + len(rows_f)
+        done = base
 
     # --- the README: what this is, and where the originals are --------------
     name = info.get("name") or sd.name
@@ -1397,6 +1458,14 @@ def export_session(
         "----",
         "  A time series: File > Import > Image Sequence..., choose an <embryo>/volumes folder.",
         "  One volume: File > Open on a single .tif (it is a Z stack).",
+        *(
+            [
+                f"  The overview was taken from {n_fields} positions: dic/field_1/ … "
+                f"dic/field_{n_fields}/ hold one series each, with the same files inside.",
+            ]
+            if multi
+            else []
+        ),
         "  The DIC overview as a movie: open dic/dic.avi (File > Import > AVI...), or"
         " Image Sequence on the dic/ folder for the raw frames.",
         "  dic.avi is Motion JPEG: every frame in time order, one brightness stretch for"

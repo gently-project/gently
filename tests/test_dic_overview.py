@@ -310,3 +310,66 @@ def test_the_frame_event_carries_a_thumbnail_the_tab_can_show(tmp_path):
     assert data["frame"] == 1 and data["embryo_id"] is None
     assert isinstance(data["image_b64"], str) and len(data["image_b64"]) > 100
     assert len(data["image_b64"]) < 400_000, "that is not a thumbnail"
+
+
+# "i am sure two positions exist which covers all the embryos": the overview
+# taken from more than one place, a frame per position per round.
+
+
+def test_two_pinned_positions_are_visited_in_turn_each_frame_filed_with_its_field(tmp_path):
+    orch = _orchestrator(tmp_path)
+    asyncio.run(
+        _run(
+            orch,
+            0.3,
+            dic=DicOverview(
+                enabled=True,
+                every_seconds=100,
+                positions=[{"x": 1.0, "y": 2.0}, {"x": 900.0, "y": 2.0}],
+            ),
+        )
+    )
+    names = [c[0] for c in orch.client.method_calls]
+    captures = [i for i, n in enumerate(names) if n == "capture_bottom_image"]
+    assert len(captures) == 2, "one frame per position, once"
+    # Each capture is preceded by a move to its own position.
+    moves = []
+    for at in captures:
+        before = [c for c in orch.client.method_calls[:at] if c[0] == "move_to_position"]
+        moves.append(before[-1][1])
+    assert moves == [(1.0, 2.0), (900.0, 2.0)]
+    # Filed as frame 1, fields 1 and 2 of 2.
+    metas = [kw["metadata"] for _, kw in orch._store.register_snapshot.call_args_list]
+    assert [(m["frame"], m["field"], m["fields"]) for m in metas] == [(1, 1, 2), (1, 2, 2)]
+    assert [m["position"] for m in metas] == [{"x": 1.0, "y": 2.0}, {"x": 900.0, "y": 2.0}]
+    # and it is one frame of the overview, not two
+    assert orch.get_status().dic["frames"] == 1
+
+
+def test_positions_round_trip_and_the_first_is_the_position():
+    dic = DicOverview.from_dict(
+        {"enabled": True, "positions": [{"x": 1, "y": 2}, {"x": "3", "y": 4.5}, {"x": None}]}
+    )
+    assert dic.positions == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.5}]
+    assert dic.position == {"x": 1.0, "y": 2.0}
+    assert dic.fields() == dic.positions
+    back = DicOverview.from_dict(dic.to_dict())
+    assert back.positions == dic.positions and back.position == dic.position
+    # One position is one field, as it always was; none is "wherever the stage is".
+    one = DicOverview(enabled=True, position={"x": 5.0, "y": 6.0})
+    assert one.fields() == [{"x": 5.0, "y": 6.0}] and one.positions == [{"x": 5.0, "y": 6.0}]
+    assert DicOverview(enabled=True).fields() == [None]
+
+
+def test_the_plan_route_takes_a_list_of_positions():
+    from fastapi import HTTPException
+
+    from gently.ui.web.routes.data import _parse_dic_config
+
+    out = _parse_dic_config({"enabled": True, "positions": [{"x": 1, "y": 2}, {"x": 3, "y": 4}]})
+    assert out["positions"] == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]
+    assert out["position"] == {"x": 1.0, "y": 2.0}
+    with pytest.raises(HTTPException):
+        _parse_dic_config({"enabled": True, "positions": [{"x": 1}]})
+    with pytest.raises(HTTPException):
+        _parse_dic_config({"enabled": True, "positions": {"x": 1, "y": 2}})

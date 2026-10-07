@@ -84,8 +84,11 @@ def test_every_input_re_says_the_plan():
 
 def test_taken_from_here_captures_the_stage_when_chosen_not_at_start():
     wiring = _wire_body()
-    assert "_dicPin = { x: _xy.x, y: _xy.y }" in wiring
+    assert "_dicPins = [{ x: _xy.x, y: _xy.y }]" in wiring
     assert "No stage position known yet" in wiring
+    # and when the embryos do not all fit in one field, another position is
+    # added from where the stage is at that moment
+    assert "data-dic-pin-add" in wiring and "_dicPins.push({ x: _xy.x, y: _xy.y })" in wiring
 
 
 def test_the_sentence_sits_beside_start_not_atop_a_scrolling_panel():
