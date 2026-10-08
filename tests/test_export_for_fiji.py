@@ -983,30 +983,41 @@ class TestTwoFields:
         text = (out / "README.txt").read_text(encoding="utf-8")
         assert "taken from 2 positions" in text and "dic/field_2/" in text
 
-    def test_a_marking_per_field_finds_the_embryos_in_that_field(self, store):
+    def test_one_marking_places_the_embryos_in_every_field(self, store):
+        """The marking was made at one place; a field is another. The marks
+        say how microns map to pixels, and each embryo's own stage position
+        is projected into the field. One outside it is left out."""
         from gently.core.export import marking_seeds
 
         sid = self._two_field_session(store)
-        store.register_embryo(sid, "embryo_2", position_x=900.0, position_y=-400.0, role="test")
-        for stage, px, who in ((-500.0, 1.0, -500.0), (900.0, 2.0, 900.0)):
-            store.put_snapshot(
-                sid,
-                "operate_marked",
-                np.zeros((4, 5), dtype=np.uint16),
-                metadata={
-                    "kind": "operate_marking",
-                    "stage_position": [stage, -400.0],
-                    "frame": {"width": 5.0, "height": 4.0, "downsample": 4.0},
-                    "embryos": [
-                        {"pixel_x": px, "pixel_y": 2.0, "stage_x_um": who, "stage_y_um": -400.0}
-                    ],
-                },
-            )
+        store.register_embryo(sid, "embryo_2", position_x=-600.0, position_y=-320.0, role="test")
+        # Preview 5 x 4 at downsample 4 (the frames are 20 x 16), marked at
+        # stage (-500, -400): embryo_1 at (-500, -400) sits at pixel (2, 2),
+        # embryo_2 at (-600, -320) at pixel (1, 3): 0.01 px/µm in x, 0.0125 in y.
+        store.put_snapshot(
+            sid,
+            "operate_marked",
+            np.zeros((4, 5), dtype=np.uint16),
+            metadata={
+                "kind": "operate_marking",
+                "stage_position": [-500.0, -400.0],
+                "frame": {"width": 5.0, "height": 4.0, "downsample": 4.0},
+                "embryos": [
+                    {"pixel_x": 2.0, "pixel_y": 2.0, "stage_x_um": -500.0, "stage_y_um": -400.0},
+                    {"pixel_x": 1.0, "pixel_y": 3.0, "stage_x_um": -600.0, "stage_y_um": -320.0},
+                ],
+            },
+        )
         embryos = store.list_embryos(sid)
-        assert marking_seeds(store, sid, embryos, position={"x": -500.0, "y": -400.0}) == {
-            "embryo_1": (4.0, 8.0)
+        # The marking's own field: as marked, scaled by 4.
+        assert marking_seeds(store, sid, embryos) == {
+            "embryo_1": (8.0, 8.0),
+            "embryo_2": (4.0, 12.0),
         }
-        assert marking_seeds(store, sid, embryos, position={"x": 900.0, "y": -400.0}) == {
-            "embryo_2": (8.0, 8.0)
+        # A field 80 µm further in y: both move a pixel (0.0125 px/µm), and
+        # embryo_2 at preview row 4 falls off the bottom of a 4-row field.
+        assert marking_seeds(store, sid, embryos, position={"x": -500.0, "y": -480.0}) == {
+            "embryo_1": (8.0, 12.0)
         }
+        # A field far away holds nobody.
         assert marking_seeds(store, sid, embryos, position={"x": 5000.0, "y": 0.0}) == {}

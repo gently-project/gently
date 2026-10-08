@@ -776,31 +776,26 @@ def marking_seeds(
     embryos: list[dict],
     position: dict | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Where each embryo is in the full DIC frame, from the Operate tab's
-    marking: the preview's pixel positions scaled to the frame, keyed by the
-    embryo's export label. A mark is an embryo's when its stage position is
-    the nearest, within 50 µm. The newest marking is used, or with
-    ``position`` the newest taken from there (within 300 µm): a run with
-    more than one field has a marking per field. ``{}`` with no marking."""
+    """Where each embryo is in the full DIC frame, keyed by its export label.
+
+    From the Operate tab's marking (the newest): the preview's pixel
+    positions scaled to the frame, each mark given to the embryo whose
+    stage position is nearest, within 50 µm.
+
+    With ``position`` — a field of a run taken from several — the marking
+    was made somewhere else, so its pixels are not this field's. The marks
+    say how stage microns map to frame pixels (fitted when they are spread
+    enough, else from the marking's recorded pixel size), and each embryo's
+    own stage position is projected into the field. Embryos outside it are
+    left out. ``{}`` with no marking."""
     marks = store.list_snapshots(session_id, "operate_marked") or []
-    if position is not None and position.get("x") is not None:
-
-        def near(r: dict) -> bool:
-            at = (r.get("metadata") or {}).get("stage_position") or []
-            try:
-                dx = float(at[0]) - float(position["x"])
-                dy = float(at[1]) - float(position["y"])
-            except (TypeError, ValueError, IndexError, KeyError):
-                return False
-            return (dx * dx + dy * dy) ** 0.5 <= 300.0
-
-        marks = [r for r in marks if near(r)]
     if not marks:
         return {}
     mark = max(marks, key=lambda r: str(r.get("captured_at") or ""))
     meta = mark.get("metadata") or {}
     frame = meta.get("frame") or {}
     preview_w = float(frame.get("width") or mark.get("width") or 0)
+    preview_h = float(frame.get("height") or mark.get("height") or preview_w)
     if not preview_w:
         return {}
     dics = store.list_snapshots(session_id, "dic") or []
@@ -808,23 +803,91 @@ def marking_seeds(
     if not full_w:
         full_w = preview_w * float(frame.get("downsample") or 1)
     k = full_w / preview_w
-    seeds: dict[str, tuple[float, float]] = {}
+
+    pairs = []
     for m in meta.get("embryos") or []:
-        sx, sy = m.get("stage_x_um"), m.get("stage_y_um")
-        if sx is None or sy is None or m.get("pixel_x") is None or m.get("pixel_y") is None:
+        try:
+            pairs.append(
+                (
+                    float(m["pixel_x"]),
+                    float(m["pixel_y"]),
+                    float(m["stage_x_um"]),
+                    float(m["stage_y_um"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
             continue
-        best: tuple[float, dict] | None = None
-        for e in embryos:
-            pos = e.get("position_coarse") or {}
-            ex, ey = pos.get("x", e.get("position_x")), pos.get("y", e.get("position_y"))
-            if ex is None or ey is None:
-                continue
-            d = float(((float(ex) - float(sx)) ** 2 + (float(ey) - float(sy)) ** 2) ** 0.5)
-            if best is None or d < best[0]:
-                best = (d, e)
-        if best is None or best[0] > 50.0:
+
+    def stage_of(e: dict) -> tuple[float, float] | None:
+        pos = e.get("position_coarse") or {}
+        ex, ey = pos.get("x", e.get("position_x")), pos.get("y", e.get("position_y"))
+        try:
+            return (float(ex), float(ey)) if ex is not None and ey is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    seeds: dict[str, tuple[float, float]] = {}
+    at = meta.get("stage_position")
+    if position is None or position.get("x") is None or not isinstance(at, list | tuple):
+        # The marking's own field: each mark to the embryo it is nearest.
+        for px, py, sx, sy in pairs:
+            best: tuple[float, dict] | None = None
+            for e in embryos:
+                st = stage_of(e)
+                if st is None:
+                    continue
+                d = ((st[0] - sx) ** 2 + (st[1] - sy) ** 2) ** 0.5
+                if best is None or d < best[0]:
+                    best = (d, e)
+            if best is not None and best[0] <= 50.0:
+                seeds[label_for(best[1])] = (px * k, py * k)
+        return seeds
+
+    # Another field: pixel = c + g * (stage - field), per axis, from the marks.
+    try:
+        mx, my = float(at[0]), float(at[1])
+    except (TypeError, ValueError, IndexError):
+        return {}
+    um_per_px = None
+    tr = meta.get("transform") or {}
+    try:
+        if tr.get("pixel_size_um") and tr.get("objective_mag"):
+            um_per_px = (
+                float(tr["pixel_size_um"])
+                / float(tr["objective_mag"])
+                * float(frame.get("downsample") or 1)
+            )
+    except (TypeError, ValueError):
+        um_per_px = None
+
+    def axis(pix: list[float], stage: list[float], centre: float) -> tuple[float, float]:
+        """(c, g) for pixel = c + g * (stage - mark): fitted from marks spread
+        more than 50 µm apart, else the recorded pixel size through the
+        marking's centre, else nothing to go on."""
+        if len(pix) >= 2 and max(stage) - min(stage) > 50.0:
+            n = len(pix)
+            ms, mp = sum(stage) / n, sum(pix) / n
+            var = sum((x - ms) ** 2 for x in stage)
+            g = sum((x - ms) * (y - mp) for x, y in zip(stage, pix, strict=True)) / var
+            return mp - g * ms, g
+        if um_per_px:
+            return centre, 1.0 / um_per_px
+        raise ValueError("the marking does not say how microns map to pixels")
+
+    try:
+        cx, gx = axis([p[0] for p in pairs], [p[2] - mx for p in pairs], preview_w / 2)
+        cy, gy = axis([p[1] for p in pairs], [p[3] - my for p in pairs], preview_h / 2)
+    except ValueError:
+        return {}
+    fx, fy = float(position["x"]), float(position["y"])
+    for e in embryos:
+        st = stage_of(e)
+        if st is None:
             continue
-        seeds[label_for(best[1])] = (float(m["pixel_x"]) * k, float(m["pixel_y"]) * k)
+        px = cx + gx * (st[0] - fx)
+        py = cy + gy * (st[1] - fy)
+        if 0 <= px < preview_w and 0 <= py < preview_h:
+            seeds[label_for(e)] = (px * k, py * k)
     return seeds
 
 
