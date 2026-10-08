@@ -325,11 +325,9 @@ def dic_movie(
 Box = tuple[int, int, int, int]  # x0, y0, x1, y1 in pixels of the full frame
 
 
-def _dark_blobs(dic_dir: Path, sample: int = 3) -> tuple[tuple[int, int], list[list[tuple]]]:
-    """The dark blobs of ``sample`` frames spread through the run, each as
-    (x0, y0, x1, y1, cx, cy): what an embryo looks like to a threshold on
-    the flat-fielded frame. Returns the frame shape and one list per frame."""
-    import cv2
+def _sample_frames(dic_dir: Path, sample: int) -> list[tuple[Any, Any, Any]]:
+    """``sample`` frames spread through the run, each as (image, dark, flat)
+    with the references the frame names (None when it names none)."""
     import numpy as np
     import tifffile
 
@@ -339,13 +337,12 @@ def _dark_blobs(dic_dir: Path, sample: int = 3) -> tuple[tuple[int, int], list[l
         raise FileNotFoundError(f"No DIC frames in {dic_dir}")
     picks = frames[:: max(1, (len(frames) - 1) // max(1, sample - 1))][:sample]
     refs: dict[tuple[str, str], tuple] = {}
-    shape = None
-    out: list[list[tuple]] = []
+    out = []
     for rec in picks:
         img = np.squeeze(np.asarray(tifffile.imread(str(rec["path"]))))
         if img.ndim == 3:
             img = img.max(axis=0)
-        shape = img.shape
+        dark = flat = None
         if rec["dark"] and rec["flat"]:
             key = (str(rec["dark"]), str(rec["flat"]))
             if key not in refs:
@@ -354,22 +351,23 @@ def _dark_blobs(dic_dir: Path, sample: int = 3) -> tuple[tuple[int, int], list[l
                     tifffile.imread(str(dic_dir / key[1])),
                 )
             dark, flat = refs[key]
-            if dark.shape == img.shape and flat.shape == img.shape:
-                from gently.app.brightfield import correct
+            if dark.shape != img.shape or flat.shape != img.shape:
+                dark = flat = None
+        out.append((img, dark, flat))
+    return out
 
-                img = correct(img, dark, flat)
-        f = img.astype(np.float32)
-        bg = float(np.median(f))
-        mask: Any = (cv2.GaussianBlur(f, (0, 0), 3) < bg * 0.75).astype(np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
-        n, _labels, stats, cent = cv2.connectedComponentsWithStats(mask)
-        least = 0.0005 * img.shape[0] * img.shape[1]
-        blobs = []
-        for k in range(1, n):
-            x, y, w, h, area = (int(v) for v in stats[k])
-            if area >= least:
-                blobs.append((x, y, x + w, y + h, float(cent[k][0]), float(cent[k][1])))
-        out.append(blobs)
+
+def _dark_blobs(dic_dir: Path, sample: int = 3) -> tuple[tuple[int, int], list[list[tuple]]]:
+    """The dark blobs of ``sample`` frames spread through the run, each as
+    (x0, y0, x1, y1, cx, cy): what an embryo looks like to a threshold on
+    the flat-fielded frame. Returns the frame shape and one list per frame."""
+    from gently.core.embryo_finding import dark_blobs
+
+    shape = None
+    out: list[list[tuple]] = []
+    for img, dark, flat in _sample_frames(dic_dir, sample):
+        shape = img.shape
+        out.append([b[:6] for b in dark_blobs(img, dark, flat)])
     assert shape is not None
     return (int(shape[0]), int(shape[1])), out
 
@@ -423,15 +421,43 @@ def find_embryo_boxes(
     seeds: dict[str, tuple[float, float]],
     margin: int = 40,
     sample: int = 3,
+    method: str = "auto",
 ) -> dict[str, Box]:
     """Where each embryo is in the DIC field, as one box that holds it in
     every frame. ``seeds`` is each embryo's approximate centre in full-frame
-    pixels (the Operate tab's marking gives these). An embryo is the dark
-    blob nearest its seed in the flat-fielded frame, measured in ``sample``
-    frames spread through the run and unioned; all boxes are then made the
-    same size, so the crops compare. An embryo found in no frame keeps a
-    box of the common size around its seed."""
+    pixels (the Operate tab's marking gives these). An embryo is the box
+    nearest its seed, measured in ``sample`` frames spread through the run
+    and unioned; all boxes are then made the same size, so the crops
+    compare. An embryo found in no frame keeps a box of the common size
+    around its seed.
+
+    ``method`` is who finds the boxes: ``"blobs"`` thresholds the
+    flat-fielded frame for dark ovals; ``"claude"`` asks the vision model,
+    and falls back to the blobs for any embryo it did not see; ``"auto"``
+    (the default) is Claude when there is an API key, else the blobs."""
+    if method not in ("auto", "blobs", "claude"):
+        raise ValueError(f"method must be 'auto', 'blobs' or 'claude', not {method!r}")
+    if method == "auto":
+        import os
+
+        method = "claude" if os.environ.get("ANTHROPIC_API_KEY") else "blobs"
     shape, per_frame = _dark_blobs(dic_dir, sample)
+    if method == "claude":
+        from gently.core.embryo_finding import claude_boxes
+
+        seen = []
+        for img, dark, flat in _sample_frames(dic_dir, sample):
+            boxes_here = claude_boxes(img, dark, flat)
+            centres = [((b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in boxes_here]
+            seen.append([(*b, c[0], c[1]) for b, c in zip(boxes_here, centres, strict=True)])
+        if any(seen):
+            # Claude's boxes first; the blobs stand in where it saw nothing.
+            per_frame = [c or b for c, b in zip(seen, per_frame, strict=True)]
+            logger.info(
+                "embryo boxes from Claude for %d of %d frames", sum(1 for c in seen if c), len(seen)
+            )
+        else:
+            logger.info("embryo boxes: Claude saw nothing (or was not asked); the blobs stand")
     reach = max(shape) * 0.1
     found: dict[str, list[Box]] = {name: [] for name in seeds}
     for blobs in per_frame:

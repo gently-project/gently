@@ -133,3 +133,31 @@ def test_the_panel_offers_the_pipeline_and_sends_the_choice() -> None:
     assert "tune.use_sam = cfg.use_sam" in operate, (
         "runDetect no longer forwards the SAM stage choice"
     )
+
+
+# ── what an embryo looks like ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "sent, expected",
+    [
+        ({"method": "dark"}, "dark"),
+        ({"method": "bright"}, "bright"),
+        ({}, "bright"),
+        ({"method": "x"}, "bright"),
+    ],
+)
+def test_the_look_of_an_embryo_reaches_the_detector(sent, expected) -> None:
+    client = _client()
+    r = _app(client).post("/api/devices/detect_embryos", json={"use_sam": False, **sent})
+    assert r.status_code == 200, r.text
+    assert client.detect_embryos.await_args.kwargs["method"] == expected
+
+
+def test_the_marking_panel_offers_the_look() -> None:
+    js = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web" / "static" / "js"
+    marking = (js / "panels" / "marking.js").read_text(encoding="utf-8")
+    operate = (js / "operate.js").read_text(encoding="utf-8")
+    assert 'data-set="look"' in marking and "Dark · LED" in marking
+    assert "method: settings.look === 'dark' ? 'dark' : 'bright'" in marking
+    assert "tune.method = cfg.method" in operate and "'dark blobs'" in operate

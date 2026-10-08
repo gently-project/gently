@@ -263,3 +263,55 @@ def test_max_candidates_bounds_the_work_and_keeps_the_strongest() -> None:
     uncapped, _ = det.find_embryo_candidates(img, min_relative_peak=0.0)
     assert len(uncapped) >= len(capped)
     assert min(c["relative_strength"] for c in capped) >= 0.0
+
+
+# "and also include box finder in the bottom cam detector methods": under the
+# LED an embryo is a dark oval on a bright field, and the export's finder
+# becomes the detector's other candidate method.
+
+
+def _dark_field(h=480, w=640):
+    yy, xx = np.mgrid[0:h, 0:w]
+    r = np.hypot((yy - h / 2) / h, (xx - w / 2) / w)
+    gain = 700.0 * (1.0 - 0.5 * r)
+    t = np.full((h, w), 0.6)
+    t[80:170, 100:160] = 0.15
+    t[300:390, 420:480] = 0.15
+    return (100 + t * gain).astype(np.uint16), [(130, 125), (450, 345)]
+
+
+def test_the_dark_method_finds_dark_ovals_in_the_bright_finders_shape() -> None:
+    img, centres = _dark_field()
+    det = _detector()
+    cands, enhanced = det.find_embryo_candidates(img, method="dark")
+    assert _match(cands, centres, tol=6.0) == 2, [c["centroid"] for c in cands]
+    assert len(cands) == 2
+    c = cands[0]
+    assert set(c) == {"bbox", "centroid", "area", "relative_strength"}
+    bx, by, bw, bh = c["bbox"]
+    assert bw > 40 and bh > 70 and c["relative_strength"] == 1.0
+    assert enhanced.dtype == np.uint8 and enhanced.shape == img.shape
+    # The bright finder, asked the same frame, is not the same finder.
+    bright, _ = det.find_embryo_candidates(img, method="bright", min_relative_peak=0.6)
+    assert _match(bright, centres, tol=6.0) < 2 or len(bright) != 2
+
+
+def test_the_dark_method_runs_through_the_pipeline_without_sam(tmp_path) -> None:
+    import asyncio
+
+    img, centres = _dark_field()
+    out = asyncio.run(
+        _detector().detect_embryos(
+            img,
+            stage_position=(0.0, 0.0),
+            use_claude_review=False,
+            use_sam=False,
+            save_visualizations=False,
+            output_dir=tmp_path,
+            method="dark",
+        )
+    )
+    got = [(e["pixel_x"], e["pixel_y"]) for e in out["embryos"]]
+    assert len(got) == 2
+    for cx, cy in centres:
+        assert any(abs(x - cx) < 6 and abs(y - cy) < 6 for x, y in got), (cx, cy, got)

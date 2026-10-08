@@ -1242,9 +1242,13 @@ class DiSPIMMicroscope(Microscope):
         use_last_frame: bool = False,
         capture_only: bool = False,
         use_sam: bool = True,
+        method: str = "bright",
     ) -> dict:
         """
         Capture image and detect embryos using blob detection + SAM.
+
+        ``method`` is what an embryo looks like: "bright" under the room
+        light, "dark" under the LED (the export's box finder).
 
         Returns raw SAM detections plus the bottom-camera image and stage
         position. Interactive editing is the caller's responsibility — the
@@ -1301,6 +1305,7 @@ class DiSPIMMicroscope(Microscope):
                 "use_last_frame": use_last_frame,
                 "capture_only": capture_only,
                 "use_sam": use_sam,
+                "method": method,
             }
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms

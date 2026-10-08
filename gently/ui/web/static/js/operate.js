@@ -1047,7 +1047,7 @@ const OperateManager = (function () {
     // "Detecting…" leaves an operator watching a spinner with no idea whether
     // 20 seconds is normal.
     function detectingCaption(tune) {
-        const parts = ['blobs'];
+        const parts = [tune.method === 'dark' ? 'dark blobs' : 'blobs'];
         if (tune.use_claude_review !== false) parts.push('Claude');
         if (tune.use_sam !== false) parts.push('SAM');
         return `Detecting… ${parts.join(' + ')}`;
@@ -1072,6 +1072,7 @@ const OperateManager = (function () {
         if (typeof cfg.use_claude_review === 'boolean') tune.use_claude_review = cfg.use_claude_review;
         if (typeof cfg.use_sam === 'boolean') tune.use_sam = cfg.use_sam;
         if (typeof cfg.min_relative_peak === 'number') tune.min_relative_peak = cfg.min_relative_peak;
+        if (cfg.method === 'dark' || cfg.method === 'bright') tune.method = cfg.method;
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;

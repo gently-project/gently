@@ -725,6 +725,55 @@ class TestEmbryoCrops:
         assert orient_seeds(d, {"a": (30.0, 120 - 30.0), "b": (100.0, 120 - 40.0)}) == upright
         assert orient_seeds(d, {}) == {}
 
+    def test_claude_finds_the_boxes_and_the_blobs_stand_in_where_it_did_not(
+        self, tmp_path, monkeypatch
+    ):
+        """ "replace the box finder with claude based setup": the vision model's
+        boxes come first; an embryo it did not see keeps the blob's box; and
+        with nothing from it at all, the blobs are the answer as before."""
+        from gently.core.export import find_embryo_boxes
+
+        d = self._field(tmp_path)  # embryos at (40, 35) and (122, 85)
+        seeds = {"a": (40.0, 35.0), "b": (122.0, 85.0)}
+        asked = []
+
+        def fake_claude(img, dark=None, flat=None, **kw):
+            asked.append(img.shape)
+            return [(28, 18, 52, 52)]  # a, a little looser than the blob; b unseen
+
+        import gently.core.embryo_finding as finding
+
+        monkeypatch.setattr(finding, "claude_boxes", fake_claude)
+        boxes = find_embryo_boxes(d, seeds, margin=5, method="claude")
+        assert asked, "Claude was asked"
+        a, b = boxes["a"], boxes["b"]
+        assert a[0] <= 28 and a[1] <= 18 and a[2] >= 52 and a[3] >= 52, "Claude's box for a"
+        assert b[0] <= 110 and b[1] <= 70 and b[2] >= 135 and b[3] >= 100, "the blob's box for b"
+        assert (a[2] - a[0], a[3] - a[1]) == (b[2] - b[0], b[3] - b[1]), "sized alike"
+
+        monkeypatch.setattr(finding, "claude_boxes", lambda *a, **k: [])
+        assert find_embryo_boxes(d, seeds, margin=5, method="claude") == find_embryo_boxes(
+            d, seeds, margin=5, method="blobs"
+        )
+
+    def test_auto_is_claude_with_a_key_and_the_blobs_without(self, tmp_path, monkeypatch):
+        import gently.core.embryo_finding as finding
+        from gently.core.export import find_embryo_boxes
+
+        d = self._field(tmp_path)
+        seeds = {"a": (40.0, 35.0)}
+        asked = []
+        monkeypatch.setattr(finding, "claude_boxes", lambda *a, **k: (asked.append(1), [])[1])
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        find_embryo_boxes(d, seeds, method="auto")
+        assert asked
+        asked.clear()
+        monkeypatch.delenv("ANTHROPIC_API_KEY")
+        find_embryo_boxes(d, seeds, method="auto")
+        assert not asked
+        with pytest.raises(ValueError):
+            find_embryo_boxes(d, seeds, method="guess")
+
     def test_a_seed_with_nothing_near_it_still_gets_a_box(self, tmp_path):
         from gently.core.export import find_embryo_boxes
 

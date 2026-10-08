@@ -1865,6 +1865,9 @@ def create_router(server) -> APIRouter:
             "use_last_frame": bool(payload.get("use_last_frame", False)),
             "capture_only": bool(payload.get("capture_only", False)),
             "use_sam": use_sam,
+            # What an embryo looks like: bright under the room light, dark
+            # under the LED. The dark finder is the export's box finder.
+            "method": "dark" if str(payload.get("method") or "bright") == "dark" else "bright",
         }
         for key, cast in (
             ("exposure_ms", float),
