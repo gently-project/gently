@@ -373,3 +373,61 @@ def test_the_plan_route_takes_a_list_of_positions():
         _parse_dic_config({"enabled": True, "positions": [{"x": 1}]})
     with pytest.raises(HTTPException):
         _parse_dic_config({"enabled": True, "positions": {"x": 1, "y": 2}})
+
+
+# "how reliable is the thing like next frame indicator? why it does not seem
+# to show accurate timing?" — every 30 s came out as 35: the next frame was
+# scheduled from the end of the capture, not from when the last was due.
+
+
+def test_the_next_frame_is_due_one_interval_after_the_last_was_due_not_done(tmp_path):
+    from datetime import datetime, timedelta
+
+    orch = _orchestrator(tmp_path)
+    asyncio.run(_run(orch, 0.2, dic=DicOverview(enabled=True, every_seconds=100)))
+    taking = orch.client.capture_bottom_image
+
+    async def slow(*a, **k):
+        await asyncio.sleep(0.2)
+        return await taking(*a, **k)
+
+    orch.client.capture_bottom_image = AsyncMock(side_effect=slow)
+    due = datetime.now() - timedelta(seconds=1)
+    orch._dic_next_due_at = due
+    asyncio.run(orch._capture_dic_overview())
+    assert orch._dic_next_due_at == due + timedelta(seconds=100), "from when it was due"
+    # A capture that overran its interval is followed at once, never scheduled in the past.
+    orch._dic.every_seconds = 0.01
+    before = datetime.now()
+    orch._dic_next_due_at = before - timedelta(seconds=1)
+    asyncio.run(orch._capture_dic_overview())
+    assert before <= orch._dic_next_due_at <= datetime.now()
+
+
+def test_in_a_brightfield_run_the_frame_is_the_round(tmp_path):
+    # "why it shows round 146, but shows 148 frames?" — the loop's counter
+    # starts at -1 and steps after the capture, so it ran two behind.
+    orch = _orchestrator(tmp_path)
+    asyncio.run(_run(orch, 0.45, volumes=False, dic=DicOverview(enabled=True, every_seconds=0.1)))
+    metas = [kw["metadata"] for _, kw in orch._store.register_snapshot.call_args_list]
+    assert len(metas) >= 2
+    assert all(m["round"] == m["frame"] for m in metas), [(m["frame"], m["round"]) for m in metas]
+
+
+def test_the_header_counts_down_to_the_next_frame_in_a_brightfield_run():
+    from pathlib import Path
+
+    js = (
+        Path(__file__).resolve().parents[1]
+        / "gently"
+        / "ui"
+        / "web"
+        / "static"
+        / "js"
+        / "embryos.js"
+    ).read_text(encoding="utf-8")
+    tick = js[js.index("updateCountdowns() {") :]
+    tick = tick[: tick.index("summary-next-countdown") + 400]
+    # The per-second tick used to overwrite the frame countdown with the
+    # volume one, which has no embryo to count from in a brightfield run.
+    assert "this.runKind() === 'brightfield' ? this.getOverviewCountdown()" in tick

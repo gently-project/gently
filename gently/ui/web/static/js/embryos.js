@@ -3576,9 +3576,11 @@ const EmbryosManager = {
         // Update the header NEXT countdown. This ticks every second
         // instead of only on VOLUME_ACQUIRED events, so it no longer
         // freezes during the long wait between rounds.
+        // In a brightfield run the next thing is a frame, not a volume: the
+        // volume countdown has no embryo to count from and said "—".
         const nextEl = document.getElementById('summary-next-countdown');
         if (nextEl) {
-            nextEl.textContent = this.getNextCountdown();
+            nextEl.textContent = this.runKind() === 'brightfield' ? this.getOverviewCountdown() : this.getNextCountdown();
         }
 
         // Update per-embryo countdowns (compact cards use mini-countdown class)

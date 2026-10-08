@@ -897,7 +897,13 @@ class TimelapseOrchestrator:
             logger.info("DIC overview frame %d acquired (%d field(s))", frame, len(fields))
             return got_any
         finally:
-            self._dic_next_due_at = datetime.now() + timedelta(seconds=self._dic_every_seconds())
+            # The next frame is one interval after this one was DUE, not after
+            # it was done: counted from the end of the capture, "every 30 s"
+            # came out as 35, the moves and exposures added to every gap.
+            # A capture that overran the interval is followed at once.
+            every = timedelta(seconds=self._dic_every_seconds())
+            due = self._dic_next_due_at or datetime.now()
+            self._dic_next_due_at = max(due + every, datetime.now())
 
     async def _capture_dic_field(
         self,
@@ -951,7 +957,10 @@ class TimelapseOrchestrator:
                     "frame": frame,
                     "field": field,
                     "fields": n_fields,
-                    "round": self._current_round,
+                    # In a brightfield run the frame is the round; the loop's
+                    # counter runs two behind it (it starts at -1 and steps
+                    # after the capture), which read as frames gone missing.
+                    "round": frame if not self._volumes else self._current_round,
                     "position": pos,
                     "exposure_ms": dic.exposure_ms,
                     "light": dic.light,
