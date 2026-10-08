@@ -54,6 +54,14 @@ def _app(records, session_id="s1"):
             r for r in records if sid == "s1" and (source in (None, r["source"]))
         ]
     )
+    # One frame by its stem, as the file store does it: its own sidecar.
+    server.gently_store.get_snapshot = MagicMock(
+        side_effect=lambda sid, stem: next(
+            (r for r in records if sid == "s1" and Path(r["file_path"]).stem == stem), None
+        )
+    )
+    # A mock has no folders to date the listing by; every call lists afresh.
+    server.gently_store._session_dir = MagicMock(return_value=None)
     app = FastAPI()
     app.include_router(create_router(server))
     return TestClient(app), server
@@ -170,3 +178,59 @@ def test_a_frame_with_a_dark_and_flat_can_be_served_corrected(tmp_path: Path):
     corrected = bf.correct(frame, dark, flat)
     assert corrected.dtype == np.uint16
     assert abs(float(corrected.mean()) - float((frame.astype(float) - 100).mean())) < 1.0
+
+
+# "cannot seem to see any images change … upon pressing the play button":
+# every image request listed every sidecar in the session to find one, on
+# the loop the orchestrator runs on. With two thousand frames and playback
+# asking ten times a second, the agent stalled and the run slowed with it.
+
+
+def test_a_frame_is_found_by_its_own_sidecar_not_by_listing_them_all(tmp_path):
+    client, server = _app([_frame(tmp_path, 1), _frame(tmp_path, 2)])
+    server.gently_store.list_snapshots.side_effect = AssertionError("listed every frame")
+    r = client.get("/api/dic/frames/dic_frame2.png")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert client.get("/api/dic/frames/dic_frame9.png").status_code == 404
+
+
+def test_the_store_reads_one_sidecar_and_takes_no_path(tmp_path):
+    from gently.core.file_store import FileStore
+
+    store = FileStore(root=tmp_path / "data")
+    store.create_session("s1")
+    store.put_snapshot(
+        "s1", "dic", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 1}, stem="abc"
+    )
+    rec = store.get_snapshot("s1", "dic_abc")
+    assert rec and rec["source"] == "dic" and rec["metadata"] == {"frame": 1}
+    assert store.get_snapshot("s1", "dic_nope") is None
+    for bad in ("../session.yaml", "dic_abc/..", "..", "", "sub/dic_abc", "sub\dic_abc"):
+        assert store.get_snapshot("s1", bad) is None, bad
+    assert store.get_snapshot("no-such-session", "dic_abc") is None
+
+
+def test_the_listing_is_read_once_per_change_of_the_folder(tmp_path):
+    from gently.core.file_store import FileStore
+
+    store = FileStore(root=tmp_path / "data")
+    store.create_session("s1")
+    store.put_snapshot("s1", "dic", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 1})
+    server = MagicMock()
+    server.agent_bridge.agent.session_id = "s1"
+    server.gently_store = store
+    reads = []
+    real = store.list_snapshots
+    store.list_snapshots = lambda sid, source=None: (reads.append(sid), real(sid, source))[1]
+    app = FastAPI()
+    app.include_router(create_router(server))
+    client = TestClient(app)
+    assert client.get("/api/dic/frames").json()["count"] == 1
+    assert client.get("/api/dic/frames").json()["count"] == 1
+    assert len(reads) == 1, "the folder had not changed"
+    import time
+
+    time.sleep(0.05)
+    store.put_snapshot("s1", "dic", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 2})
+    assert client.get("/api/dic/frames").json()["count"] == 2
+    assert len(reads) == 2, "a frame landed, so it was listed again"

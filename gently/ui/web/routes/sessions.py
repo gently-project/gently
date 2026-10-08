@@ -1195,13 +1195,22 @@ def create_router(server) -> APIRouter:
         store = _file_store()
         if store is None:
             raise HTTPException(status_code=503, detail="Store not available")
-        try:
-            recs = store.list_snapshots(session_id) or []
-        except Exception:
-            recs = []
-        rec = next((r for r in recs if Path(r.get("file_path") or "").stem == stem), None)
+
+        def find() -> dict | None:
+            one = getattr(store, "get_snapshot", None)
+            if callable(one):
+                got = one(session_id, stem)
+                if isinstance(got, dict) or got is None:
+                    return got
+            try:
+                recs = store.list_snapshots(session_id) or []
+            except Exception:
+                recs = []
+            return next((r for r in recs if Path(r.get("file_path") or "").stem == stem), None)
+
+        rec = await asyncio.to_thread(find)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"no snapshot {stem!r} in this session")
-        return tiff_png_response(Path(rec["file_path"]), stem, max)
+        return await asyncio.to_thread(tiff_png_response, Path(rec["file_path"]), stem, max)
 
     return router

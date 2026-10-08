@@ -1393,6 +1393,29 @@ class FileStore:
         logger.debug("put_snapshot: %s", canonical)
         return canonical
 
+    def get_snapshot(self, session_id: str, stem: str) -> dict[str, Any] | None:
+        """One snapshot record by the stem of its file (``dic_6d29469c4763``):
+        its own sidecar read, not every record in the session. A page that
+        plays a run back asks for frames ten times a second, and listing two
+        thousand sidecars for each was what stalled the agent. None when the
+        stem is not a plain name, or there is no such snapshot."""
+        if (
+            not stem
+            or Path(stem).name != stem
+            or stem in (".", "..")
+            or "/" in stem
+            or "\\" in stem
+        ):
+            return None
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        meta = sd / "snapshots" / f"{stem}.meta.yaml"
+        if not meta.is_file():
+            return None
+        data = _read_yaml(meta)
+        return data if isinstance(data, dict) else None
+
     def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""
         sd = self._session_dir(session_id)
