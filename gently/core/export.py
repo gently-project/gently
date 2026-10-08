@@ -325,19 +325,10 @@ def dic_movie(
 Box = tuple[int, int, int, int]  # x0, y0, x1, y1 in pixels of the full frame
 
 
-def find_embryo_boxes(
-    dic_dir: Path,
-    seeds: dict[str, tuple[float, float]],
-    margin: int = 40,
-    sample: int = 3,
-) -> dict[str, Box]:
-    """Where each embryo is in the DIC field, as one box that holds it in
-    every frame. ``seeds`` is each embryo's approximate centre in full-frame
-    pixels (the Operate tab's marking gives these). An embryo is the dark
-    blob nearest its seed in the flat-fielded frame, measured in ``sample``
-    frames spread through the run and unioned; all boxes are then made the
-    same size, so the crops compare. An embryo found in no frame keeps a
-    box of the common size around its seed."""
+def _dark_blobs(dic_dir: Path, sample: int = 3) -> tuple[tuple[int, int], list[list[tuple]]]:
+    """The dark blobs of ``sample`` frames spread through the run, each as
+    (x0, y0, x1, y1, cx, cy): what an embryo looks like to a threshold on
+    the flat-fielded frame. Returns the frame shape and one list per frame."""
     import cv2
     import numpy as np
     import tifffile
@@ -348,8 +339,8 @@ def find_embryo_boxes(
         raise FileNotFoundError(f"No DIC frames in {dic_dir}")
     picks = frames[:: max(1, (len(frames) - 1) // max(1, sample - 1))][:sample]
     refs: dict[tuple[str, str], tuple] = {}
-    found: dict[str, list[Box]] = {name: [] for name in seeds}
     shape = None
+    out: list[list[tuple]] = []
     for rec in picks:
         img = np.squeeze(np.asarray(tifffile.imread(str(rec["path"]))))
         if img.ndim == 3:
@@ -372,20 +363,86 @@ def find_embryo_boxes(
         mask: Any = (cv2.GaussianBlur(f, (0, 0), 3) < bg * 0.75).astype(np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
         n, _labels, stats, cent = cv2.connectedComponentsWithStats(mask)
-        reach = max(img.shape) * 0.1
         least = 0.0005 * img.shape[0] * img.shape[1]
+        blobs = []
+        for k in range(1, n):
+            x, y, w, h, area = (int(v) for v in stats[k])
+            if area >= least:
+                blobs.append((x, y, x + w, y + h, float(cent[k][0]), float(cent[k][1])))
+        out.append(blobs)
+    assert shape is not None
+    return (int(shape[0]), int(shape[1])), out
+
+
+def orient_seeds(
+    dic_dir: Path, seeds: dict[str, tuple[float, float]], sample: int = 3
+) -> dict[str, tuple[float, float]]:
+    """The seeds as the frames are oriented. A marking is made on a preview
+    that may not be the filed frame's way up — this rig's frames are the
+    preview turned by 180° — so the four ways the seeds could sit in the
+    frame (as they are, mirrored in x, in y, in both) are each scored by
+    how many land on a dark blob in a few frames, and the best is kept.
+    A tie keeps them as they are."""
+    if not seeds:
+        return {}
+    (h, w), per_frame = _dark_blobs(dic_dir, sample)
+    reach = max(h, w) * 0.1
+
+    def score(flip_x: bool, flip_y: bool) -> int:
+        hits = 0
+        for cx, cy in seeds.values():
+            sx = (w - cx) if flip_x else cx
+            sy = (h - cy) if flip_y else cy
+            for blobs in per_frame:
+                if any(((bx - sx) ** 2 + (by - sy) ** 2) ** 0.5 < reach for *_, bx, by in blobs):
+                    hits += 1
+                    break
+        return hits
+
+    best = (score(False, False), False, False)
+    for flip_x, flip_y in ((True, True), (True, False), (False, True)):
+        s = score(flip_x, flip_y)
+        if s > best[0]:
+            best = (s, flip_x, flip_y)
+    _, flip_x, flip_y = best
+    if not (flip_x or flip_y):
+        return dict(seeds)
+    logger.info(
+        "embryo seeds mirrored%s%s to match the frames",
+        " in x" if flip_x else "",
+        " in y" if flip_y else "",
+    )
+    return {
+        name: ((w - cx) if flip_x else cx, (h - cy) if flip_y else cy)
+        for name, (cx, cy) in seeds.items()
+    }
+
+
+def find_embryo_boxes(
+    dic_dir: Path,
+    seeds: dict[str, tuple[float, float]],
+    margin: int = 40,
+    sample: int = 3,
+) -> dict[str, Box]:
+    """Where each embryo is in the DIC field, as one box that holds it in
+    every frame. ``seeds`` is each embryo's approximate centre in full-frame
+    pixels (the Operate tab's marking gives these). An embryo is the dark
+    blob nearest its seed in the flat-fielded frame, measured in ``sample``
+    frames spread through the run and unioned; all boxes are then made the
+    same size, so the crops compare. An embryo found in no frame keeps a
+    box of the common size around its seed."""
+    shape, per_frame = _dark_blobs(dic_dir, sample)
+    reach = max(shape) * 0.1
+    found: dict[str, list[Box]] = {name: [] for name in seeds}
+    for blobs in per_frame:
         for name, (cx, cy) in seeds.items():
             best = None
-            for k in range(1, n):
-                x, y, w, h, area = (int(v) for v in stats[k])
-                if area < least:
-                    continue
-                d = float(np.hypot(cent[k][0] - cx, cent[k][1] - cy))
+            for x0, y0, x1, y1, bx, by in blobs:
+                d = ((bx - cx) ** 2 + (by - cy) ** 2) ** 0.5
                 if d < reach and (best is None or d < best[0]):
-                    best = (d, (x, y, x + w, y + h))
+                    best = (d, (x0, y0, x1, y1))
             if best is not None:
                 found[name].append(best[1])
-    assert shape is not None
     boxes: dict[str, Box] = {}
     for name, hits in found.items():
         if hits:
@@ -786,7 +843,8 @@ def marking_seeds(
     was made somewhere else, so its pixels are not this field's. The marks
     say how stage microns map to frame pixels (fitted when they are spread
     enough, else from the marking's recorded pixel size), and each embryo's
-    own stage position is projected into the field. Embryos outside it are
+    own stage position is projected into the field. An embryo outside it,
+    or within a tenth of the frame of its edge (its crop would be cut), is
     left out. ``{}`` with no marking."""
     marks = store.list_snapshots(session_id, "operate_marked") or []
     if not marks:
@@ -886,7 +944,7 @@ def marking_seeds(
             continue
         px = cx + gx * (st[0] - fx)
         py = cy + gy * (st[1] - fy)
-        if 0 <= px < preview_w and 0 <= py < preview_h:
+        if 0.1 * preview_w <= px <= 0.9 * preview_w and 0.1 * preview_h <= py <= 0.9 * preview_h:
             seeds[label_for(e)] = (px * k, py * k)
     return seeds
 
@@ -1452,6 +1510,7 @@ def export_session(
                     progress(done, total, what)
 
             try:
+                seeds_f = orient_seeds(dic_dir_of(field_no), seeds_f)
                 boxes = find_embryo_boxes(dic_dir_of(field_no), seeds_f)
                 crops_root = dic_crops(dic_dir_of(field_no), boxes, progress=crops_progress)
             except Exception:

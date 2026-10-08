@@ -1069,6 +1069,7 @@ def create_router(server) -> APIRouter:
             dic_movie,
             find_embryo_boxes,
             marking_seeds,
+            orient_seeds,
             spim_movie,
         )
 
@@ -1156,7 +1157,8 @@ def create_router(server) -> APIRouter:
 
                     out: Path | None
                     if kind == "crops":
-                        out = dic_crops(path, find_embryo_boxes(path, seeds), progress=progress)
+                        placed = orient_seeds(path, seeds)
+                        out = dic_crops(path, find_embryo_boxes(path, placed), progress=progress)
                     elif kind == "dic":
                         out = dic_movie(path, progress=progress, corrected=step["corrected"])
                         if out is None and step["corrected"]:

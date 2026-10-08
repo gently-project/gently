@@ -655,9 +655,10 @@ class TestEmbryoCrops:
     one box per embryo, the same in every frame, each a folder of its own."""
 
     @staticmethod
-    def _field(tmp_path, n_frames=3):
-        """Frames of a bright field with two dark embryos, the dark and flat
-        that explain the field, and the dic.csv that names them."""
+    def _field(tmp_path, n_frames=3, embryos=((20, 50, 30, 50), (70, 100, 110, 135))):
+        """Frames of a bright field with two dark embryos (rows and columns
+        given as y0, y1, x0, x1), the dark and flat that explain the field,
+        and the dic.csv that names them."""
         import tifffile
 
         d = tmp_path / "dic"
@@ -671,8 +672,8 @@ class TestEmbryoCrops:
         rows = []
         for i in range(1, n_frames + 1):
             t = np.full((h, w), 0.6)
-            t[20:50, 30:50] = 0.15  # embryo A, 30 tall x 20 wide
-            t[70:100, 110:135] = 0.15  # embryo B, 30 x 25
+            for y0, y1, x0, x1 in embryos:
+                t[y0:y1, x0:x1] = 0.15  # by default A: 30 tall x 20 wide, B: 30 x 25
             frame = (dark + t * gain).astype(np.uint16)
             name = f"dic_f{i:04d}_20261006-10{i:02d}00.tif"
             tifffile.imwrite(d / name, frame)
@@ -703,6 +704,26 @@ class TestEmbryoCrops:
         assert (a[2] - a[0], a[3] - a[1]) == (b[2] - b[0], b[3] - b[1])
         # The blur widens a blob by a pixel or two a side.
         assert 25 + 10 <= b[2] - b[0] <= 25 + 14 and 30 + 10 <= b[3] - b[1] <= 30 + 14
+
+    def test_seeds_are_turned_to_the_frames_way_up(self, tmp_path):
+        """The marking's preview and the filed frame need not share a way
+        up: on this rig the frame is the preview turned by 180°. The seeds
+        are scored each way round against the dark blobs, and the way that
+        lands on them wins."""
+        from gently.core.export import orient_seeds
+
+        # Two embryos laid out with no symmetry, at (30, 30) and (100, 40)
+        # in a 160 x 120 field, so only one way up lands on both.
+        d = self._field(tmp_path, embryos=((15, 45, 20, 40), (30, 50, 90, 110)))
+        upright = {"a": (30.0, 30.0), "b": (100.0, 40.0)}
+        assert orient_seeds(d, upright) == upright
+        # The same two, as a preview turned by 180° would place them.
+        turned = {"a": (160 - 30.0, 120 - 30.0), "b": (160 - 100.0, 120 - 40.0)}
+        assert orient_seeds(d, turned) == upright
+        # Mirrored in one axis only, likewise.
+        assert orient_seeds(d, {"a": (160 - 30.0, 30.0), "b": (160 - 100.0, 40.0)}) == upright
+        assert orient_seeds(d, {"a": (30.0, 120 - 30.0), "b": (100.0, 120 - 40.0)}) == upright
+        assert orient_seeds(d, {}) == {}
 
     def test_a_seed_with_nothing_near_it_still_gets_a_box(self, tmp_path):
         from gently.core.export import find_embryo_boxes
