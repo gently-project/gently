@@ -29,6 +29,11 @@ class DiSPIMLED:
     # brightness: the controller reports 0 for "off", so dark is `Closed`.
     INTENSITY_PROPERTY = "LED Intensity(%)"
     INTENSITY_LIMITS_PCT = (1, 100)
+    # What the LED is set to when the device layer creates it. The controller
+    # powers up holding its own number (50 % on this rig), and the bottom
+    # camera's panel read that back as if it were a choice. The rig's
+    # brightfield default is 1 %, the same number the plan opens on.
+    DEFAULT_INTENSITY_PCT = 1
 
     def __init__(self, core: pymmcore.CMMCore, name: str = "LED", group_name: str | None = None):
         self.core = core

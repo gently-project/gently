@@ -162,3 +162,37 @@ def test_scanner_b_piezo_b_both_absent_on_single_side_rig():
     assert "piezo_b" not in devices
     assert "scanner" in devices
     assert "piezo" in devices
+
+
+# ---------------------------------------------------------------------------
+# The LED opens at the rig's default brightness, not the controller's
+# ---------------------------------------------------------------------------
+
+
+class _CoreWithLed(FakeCore):
+    """A core whose LED holds the controller's power-on brightness."""
+
+    def __init__(self):
+        super().__init__(loaded_devices=["HamCam1"])
+        self.props = {("LED:X:31", "LED Intensity(%)"): "50"}
+
+    def getProperty(self, dev, prop):
+        return self.props.get((dev, prop), "0")
+
+    def setProperty(self, dev, prop, val):
+        self.props[(dev, prop)] = str(val)
+
+    def getAvailableConfigs(self, group):
+        return ["Open", "Closed"]
+
+
+def test_the_led_is_set_to_the_rigs_default_at_boot():
+    """The Tiger powers up holding 50 %, and the bottom camera's panel read
+    that back as if it were a choice. The rig's brightfield default is 1 %."""
+    from gently.hardware.dispim.devices import DiSPIMLED
+
+    core = _CoreWithLed()
+    devices = create_devices_from_mmcore(core, {"led_name": "LED:X:31"})
+    assert "led" in devices
+    assert DiSPIMLED.DEFAULT_INTENSITY_PCT == 1
+    assert devices["led"].get_intensity_pct() == 1
