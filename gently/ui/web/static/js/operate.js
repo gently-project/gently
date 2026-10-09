@@ -245,14 +245,17 @@ const OperateManager = (function () {
     // y are floats and nothing else — so this predicate is the whole guard.
     // Do not add a second fetch of this endpoint; grep the URL string before
     // touching XY motion.
-    async function moveStageTo(x, y, why) {
+    // `said` is what to toast on success. It was named `why`, which shadowed
+    // the why() helper the catch calls — so every failed move threw a second
+    // time, inside its own handler, and the operator saw no toast at all.
+    async function moveStageTo(x, y, said) {
         if (isEngaged()) {
             toastFail('Sample is at the objective — back it off before moving XY');
             return false;
         }
         try {
             await postJSON('/api/devices/stage/move', { x, y });
-            if (why) toast(why);
+            if (said) toast(said);
             return true;
         } catch (e) {
             toastFail(`Move failed (${why(e)})`);
@@ -1047,7 +1050,7 @@ const OperateManager = (function () {
     // "Detecting…" leaves an operator watching a spinner with no idea whether
     // 20 seconds is normal.
     function detectingCaption(tune) {
-        const parts = ['blobs'];
+        const parts = [tune.method === 'dark' ? 'dark blobs' : 'blobs'];
         if (tune.use_claude_review !== false) parts.push('Claude');
         if (tune.use_sam !== false) parts.push('SAM');
         return `Detecting… ${parts.join(' + ')}`;
@@ -1072,6 +1075,7 @@ const OperateManager = (function () {
         if (typeof cfg.use_claude_review === 'boolean') tune.use_claude_review = cfg.use_claude_review;
         if (typeof cfg.use_sam === 'boolean') tune.use_sam = cfg.use_sam;
         if (typeof cfg.min_relative_peak === 'number') tune.min_relative_peak = cfg.min_relative_peak;
+        if (cfg.method === 'dark' || cfg.method === 'bright') tune.method = cfg.method;
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;
@@ -2142,12 +2146,158 @@ const OperateManager = (function () {
     // ══ THE ACQUISITION PLAN ══════════════════════════════════════════════
     // The Adaptive pane is a form for one object (acquisition-plan.js). Every
     // input re-reads it and re-says it; Start sends exactly what was said.
-    let _dicPin = null;          // the stage position captured for "taken from here"
+    // The fields of view the overview is taken from, [{x, y}] in stage µm:
+    // one, or several when the embryos do not all fit in one frame. Built on
+    // the Bottom cam pane (panels/fields.js), kept in the session
+    // (/api/brightfield/fields), read by the plan as "taken from the fields".
+    let _bfPins = [];
     let _laserPresetsLoaded = false;
     // Per-line power bounds, from the device layer ({488: {min, max}}). Null
     // until read: the fields are then unbounded on the pane, and the start
     // route is what refuses a power the hardware would.
     let _laserLimits = null;
+
+    // ══ THE OVERVIEW FIELDS ═══════════════════════════════════════════════
+    // The list is the session's, not the form's: a field is a place on the
+    // dish the operator chose while looking at it, and it has to be there
+    // after a reload and on the other pane. So every change is published
+    // (the two Fields panels redraw), persisted (best effort — the page
+    // keeps the list if the write fails), and said back in the plan.
+    let _fieldsLoaded = false;
+    let _fieldsSaveTimer = null;
+
+    function publishFields() {
+        SharedState.set('overviewFields', structuredClone(_bfPins));
+        ['op-frail-count', 'op-fields-count'].forEach(id => {
+            const el = $(id); if (el) el.textContent = _bfPins.length;
+        });
+    }
+
+    function persistFields() {
+        clearTimeout(_fieldsSaveTimer);
+        _fieldsSaveTimer = setTimeout(() => {
+            fetch('/api/brightfield/fields', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: _bfPins.map(p => ({ x: p.x, y: p.y })) }),
+            }).then(r => { if (!r.ok) console.warn(`[gently] fields not kept: ${r.status}`); })
+                .catch(() => { /* the list lives on in the page */ });
+        }, 200);
+    }
+
+    /** The session's fields, once. A list already built here outranks them. */
+    async function loadFields() {
+        if (_fieldsLoaded) return;
+        _fieldsLoaded = true;
+        try {
+            const d = await getJSON('/api/brightfield/fields');
+            const got = (d && Array.isArray(d.fields) ? d.fields : [])
+                .filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.y))
+                .map(p => ({ x: p.x, y: p.y }));
+            if (got.length && !_bfPins.length) {
+                // A session with fields is a session that wants the overview
+                // from them: the select and the channel follow, as they do
+                // when a field is added. The last run's plan, restored after
+                // this, may still say otherwise — and then it is believed.
+                _bfPins = got;
+                const pos = $('op-plan-bf-pos'); if (pos) pos.value = 'here';
+                const bf = $('op-plan-bf'); if (bf && !bf.disabled) bf.checked = true;
+            }
+        } catch (_) { /* no session, or the rig is away: an empty list */ }
+        publishFields();
+        renderPlan();
+    }
+
+    /** The field the stage is at, within the Fields panel's tolerance, or -1. */
+    function fieldIndexAt(xy) {
+        const tol = (typeof FieldsPanel !== 'undefined' && FieldsPanel.HERE_UM) || 50;
+        return _bfPins.findIndex(p => M ? M.atPosition(xy, p, tol)
+            : (xy && Math.hypot(p.x - xy.x, p.y - xy.y) <= tol));
+    }
+
+    /**
+     * A field from where the stage is, now. The one way a field is made —
+     * from the rail, from Acquisition, or from the "taken from" select
+     * choosing the list while it is empty.
+     */
+    function addFieldHere() {
+        if (!_xy || !Number.isFinite(_xy.x) || !Number.isFinite(_xy.y)) {
+            toastFail('No stage position known yet');
+            return false;
+        }
+        const dup = fieldIndexAt(_xy);
+        if (dup >= 0) { toast(`The stage is at field ${dup + 1} already`); return false; }
+        _bfPins.push({ x: _xy.x, y: _xy.y });
+        fieldsChanged();
+        const n = _bfPins.length;
+        toast(n === 1 ? 'Field 1 added — the overview will be taken from it'
+            : `Field ${n} added — the overview will take a frame from each of the ${n} fields`);
+        return true;
+    }
+
+    function removeField(i) {
+        if (!(i >= 0 && i < _bfPins.length)) return;
+        _bfPins.splice(i, 1);
+        fieldsChanged();
+        toast(_bfPins.length ? `Field dropped — ${_bfPins.length} left` : 'Last field dropped — the overview goes back to the centroid');
+    }
+
+    /** Through the XY chokepoint, so the interlock holds here too. */
+    async function goToField(i) {
+        const p = _bfPins[i];
+        if (!p) return;
+        await moveStageTo(p.x, p.y, `Stage sent to field ${i + 1}`);
+    }
+
+    /**
+     * The list is the plan's "taken from". A field added is a field wanted:
+     * the select follows the list, and the overview channel is switched on
+     * (it cannot be, while a brightfield run already is the overview). The
+     * last one dropped means the centroid again.
+     */
+    function fieldsChanged() {
+        const pos = $('op-plan-bf-pos');
+        if (pos) pos.value = _bfPins.length ? 'here' : 'centroid';
+        const bf = $('op-plan-bf');
+        if (bf && _bfPins.length && !bf.disabled) bf.checked = true;
+        _planDirty = true;
+        publishFields();
+        persistFields();
+        renderPlan();
+    }
+
+    /**
+     * The overview frames as the live view has them: the LED's brightness
+     * if it is open (else the room light), and the camera's exposure. What
+     * the operator is looking at is what they usually want the run to take.
+     */
+    async function useLiveSettings() {
+        const b = $('op-ov-match');
+        if (b) b.disabled = true;
+        try {
+            const light = SharedState.get('light') || {};
+            const ledOpen = light.led === 'Open';
+            const pct = ledOpen && light.ledPct != null && Number.isFinite(Number(light.ledPct))
+                ? Math.max(1, Math.min(100, Math.round(Number(light.ledPct)))) : null;
+            let ms = null;
+            try {
+                const d = await getJSON('/api/devices/camera/exposure');
+                if (d && d.success !== false && d.exposure_ms != null) ms = Number(d.exposure_ms);
+            } catch (_) { /* unread stays as it was */ }
+            const sel = $('op-plan-bf-light');
+            if (sel) sel.value = ledOpen ? 'led' : 'room';
+            const led = $('op-plan-bf-led');
+            if (led && pct != null) led.value = pct;
+            const exp = $('op-plan-bf-exposure');
+            if (exp && Number.isFinite(ms) && ms > 0) exp.value = ms;
+            _planDirty = true;
+            renderPlan();
+            if (typeof BrightfieldRefs !== 'undefined') BrightfieldRefs.refresh();
+            const lit = ledOpen ? `LED${pct != null ? ` ${pct} %` : ''}` : 'room light';
+            toast(`Overview frames: ${lit}${Number.isFinite(ms) && ms > 0 ? ` · ${ms} ms` : ' · exposure not read'}`);
+        } finally {
+            if (b) b.disabled = false;
+        }
+    }
 
     /** The embryos this run will image, with the labels the sentence uses. */
     function planSubjects() {
@@ -2298,17 +2448,24 @@ const OperateManager = (function () {
             const pct = (plan.spim.laserPowers || {})[inp.dataset.planPower];
             inp.value = pct != null ? pct : '';
         });
-        const dic = $('op-plan-dic');
-        if (dic) dic.checked = !!plan.dic.enabled;
-        set('op-plan-dic-every', plan.dic.everyRounds);
-        _dicPin = plan.dic.position === 'here' && plan.dic.pin ? plan.dic.pin : null;
-        set('op-plan-dic-pos', _dicPin ? 'here' : 'centroid');
-        set('op-plan-dic-exposure', plan.dic.exposureMs);
-        set('op-plan-dic-light', plan.dic.light);
+        const bf = $('op-plan-bf');
+        if (bf) bf.checked = !!plan.bf.enabled;
+        set('op-plan-bf-every', plan.bf.everyRounds);
+        // The fields are the session's (loadFields), and a list already
+        // built outranks the last run's positions. A session that has none
+        // takes the plan's, and keeps them from now on.
+        if (!_bfPins.length) {
+            _bfPins = plan.bf.position === 'here' ? (plan.bf.pins || []).map(p => ({ x: p.x, y: p.y })) : [];
+            if (_bfPins.length) persistFields();
+        }
+        set('op-plan-bf-pos', _bfPins.length && plan.bf.position === 'here' ? 'here' : 'centroid');
+        publishFields();
+        set('op-plan-bf-exposure', plan.bf.exposureMs);
+        set('op-plan-bf-light', plan.bf.light);
         // Not through set(): an absent brightness has to CLEAR the field, or
         // the last plan's 40 % is sent with this one.
-        const led = $('op-plan-dic-led');
-        if (led) led.value = plan.dic.ledPct != null ? plan.dic.ledPct : '';
+        const led = $('op-plan-bf-led');
+        if (led) led.value = plan.bf.ledPct != null ? plan.bf.ledPct : '';
         set('op-tl-stop', plan.stop.kind);
         set('op-tl-condval', plan.stop.value);
         set('op-tl-monitor', plan.monitoringMode || 'idle');
@@ -2325,7 +2482,7 @@ const OperateManager = (function () {
     /**
      * The session's last plan, back in the form. A resumed session used to
      * come back with the pane's defaults — five minutes, fifty slices, no
-     * DIC, manual — whatever it had been running.
+     * brightfield, manual — whatever it had been running.
      */
     async function restorePlan() {
         if (_planRestored) return;
@@ -2390,16 +2547,16 @@ const OperateManager = (function () {
             intervalUnit: v('op-plan-unit'),
             // Absent from the page (an older template) is a volume run.
             volumes: !($('op-plan-spim') && !$('op-plan-spim').checked),
-            dicLedPct: v('op-plan-dic-led'),
+            bfLedPct: v('op-plan-bf-led'),
             slices: v('op-plan-slices'),
             exposureMs: v('op-plan-exposure'),
             laserConfig: v('op-plan-laser'),
-            dic: !!($('op-plan-dic') && $('op-plan-dic').checked),
-            dicEveryRounds: v('op-plan-dic-every'),
-            dicPosition: v('op-plan-dic-pos'),
-            dicPin: _dicPin,
-            dicExposureMs: v('op-plan-dic-exposure'),
-            dicLight: v('op-plan-dic-light'),
+            bf: !!($('op-plan-bf') && $('op-plan-bf').checked),
+            bfEveryRounds: v('op-plan-bf-every'),
+            bfPosition: v('op-plan-bf-pos'),
+            bfPins: _bfPins,
+            bfExposureMs: v('op-plan-bf-exposure'),
+            bfLight: v('op-plan-bf-light'),
             stopKind: v('op-tl-stop'),
             stopValue: v('op-tl-condval'),
             overrides,
@@ -2453,18 +2610,45 @@ const OperateManager = (function () {
         plan = readPlan();
         const condval = $('op-tl-condval');
         if (condval) condval.hidden = !(AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
-        const dicBody = $('op-plan-dic-body');
-        if (dicBody) dicBody.hidden = !plan.dic.enabled;
-        const ledField = $('op-plan-dic-led-field');
-        if (ledField) ledField.hidden = plan.dic.light !== 'led';
-        const pin = $('op-plan-dic-pin');
+        const bfBody = $('op-plan-bf-body');
+        if (bfBody) bfBody.hidden = !plan.bf.enabled;
+        const ledField = $('op-plan-bf-led-field');
+        if (ledField) ledField.hidden = plan.bf.light !== 'led';
+        // The "here" option carries the list's size, so the select reads as
+        // a fact: "the 2 fields in the list", not a promise.
+        const posSel = $('op-plan-bf-pos');
+        if (posSel) {
+            const n = _bfPins.length;
+            const opt = [...posSel.options].find(o => o.value === 'here');
+            if (opt) opt.textContent = n ? `the ${n} field${n === 1 ? '' : 's'} in the list` : 'the fields list (none yet — adds where the stage is)';
+        }
+        const pin = $('op-plan-bf-pin');
         if (pin) {
-            const here = plan.dic.position === 'here';
+            const here = plan.bf.position === 'here';
             pin.hidden = !here;
-            pin.textContent = here
-                ? (_dicPin ? `stage at ${_dicPin.x.toFixed(0)}, ${_dicPin.y.toFixed(0)} µm — captured when chosen`
-                           : 'no stage position known yet')
-                : '';
+            const n = _bfPins.length;
+            // A list changed under a run is the NEXT run's: the orchestrator
+            // read its positions at Start, and says so rather than implying
+            // the frames move tonight.
+            const later = _runBusy ? ' A change here applies at the next Start, not to the run going now.' : '';
+            pin.textContent = !here ? ''
+                : n === 0 ? 'No fields yet — add them on Bottom cam, beside the picture, or from the list on the left.'
+                    : (n === 1 ? 'One frame each round, from field 1.' : `${n} frames each round, one from each field.`)
+                        + ' Add or drop fields in the list on the left, or on Bottom cam.' + later;
+        }
+        // How the frame is lit and exposed, and whether its dark and flat
+        // exist, are set on Bottom cam; said back here with the way there.
+        const setup = $('op-plan-bf-setup');
+        if (setup) {
+            const lit = plan.bf.light === 'led' ? `LED${plan.bf.ledPct != null ? ` ${plan.bf.ledPct} %` : ''}`
+                : plan.bf.light === 'room' ? 'room light' : 'light as it is';
+            const exp = plan.bf.exposureMs != null ? `${plan.bf.exposureMs} ms` : "the camera's exposure";
+            const refs = typeof BrightfieldRefs !== 'undefined' && BrightfieldRefs.status ? BrightfieldRefs.status() : null;
+            const refTxt = !refs ? '' : refs.have ? ' · dark and flat taken'
+                : ' · <span class="op-cap-warn">no dark and flat yet</span>';
+            setup.innerHTML = `${escapeHtml(lit)} · ${escapeHtml(exp)}${refTxt} — `
+                + '<button type="button" class="op-btn op-btn-quiet" data-goto-pane="bottom" '
+                + 'title="The light, exposure, dark and flat are set beside the live view">Change on Bottom cam →</button>';
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
         const problems = AcquisitionPlan.validate(plan, subjectIds(), _laserLimits);
@@ -2515,23 +2699,23 @@ const OperateManager = (function () {
     function renderChannels(volumes) {
         const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
         show('op-plan-spim-body', volumes);
-        show('op-plan-dic-every-field', volumes);
+        show('op-plan-bf-every-field', volumes);
         show('op-plan-overrides', volumes);
         show('op-plan-watch-sec', volumes);
         show('op-plan-watch-field', volumes);
         const cap = $('op-plan-spim-cap');
         if (cap) cap.textContent = volumes ? 'every embryo, every round' : 'off — a brightfield run';
-        const name = $('op-plan-dic-name');
-        if (name) name.textContent = volumes ? 'DIC overview' : 'Brightfield';
-        const dic = $('op-plan-dic');
-        if (dic) {
-            if (!volumes) dic.checked = true;
-            dic.disabled = !volumes;
+        const name = $('op-plan-bf-name');
+        if (name) name.textContent = volumes ? 'Brightfield overview' : 'Brightfield';
+        const bf = $('op-plan-bf');
+        if (bf) {
+            if (!volumes) bf.checked = true;
+            bf.disabled = !volumes;
         }
         // On the way INTO a brightfield run, once: the LED is what it is lit
         // by. Afterwards the select is the operator's, room light included.
         if (!volumes && _planWasVolumes) {
-            const light = $('op-plan-dic-light');
+            const light = $('op-plan-bf-light');
             if (light && light.value === 'room') light.value = 'led';
         }
         _planWasVolumes = volumes;
@@ -2708,8 +2892,8 @@ const OperateManager = (function () {
 
         const parts = [];
         // A brightfield run has no embryo rows to be seen by.
-        const brightfield = !!(st && st.volumes === false && st.dic);
-        if (running || ids.length || (brightfield && (resumable || st.dic.frames))) {
+        const brightfield = !!(st && st.volumes === false && st.bf);
+        if (running || ids.length || (brightfield && (resumable || st.bf.frames))) {
             // Idle with embryos still going is one of two things. A run
             // somebody stopped is not one that was interrupted.
             const idle = st.ended === 'stopped'
@@ -2717,7 +2901,7 @@ const OperateManager = (function () {
                 : 'interrupted — press Resume run to carry on';
             const bits = [resumable ? idle : (st.ended && !running ? st.ended : st.status)];
             if (brightfield) {
-                const n = st.dic.frames || 0;
+                const n = st.bf.frames || 0;
                 bits.push('brightfield, no SPIM volumes');
                 bits.push(`${n} frame${n === 1 ? '' : 's'}`);
             } else if (st.current_round != null && st.current_round >= 0) {
@@ -2725,9 +2909,9 @@ const OperateManager = (function () {
             }
             if (st.seconds_until_next_round != null) bits.push(`next ${fmtWhen(st.seconds_until_next_round)}`);
             if (st.duration_minutes) bits.push(`${Math.round(st.duration_minutes)} min in`);
-            if (st.dic && !brightfield) {
-                bits.push(`DIC ${st.dic.frames || 0} frame${st.dic.frames === 1 ? '' : 's'}` +
-                    (st.dic.seconds_until_next != null && running ? `, next ${fmtWhen(st.dic.seconds_until_next)}` : ''));
+            if (st.bf && !brightfield) {
+                bits.push(`brightfield ${st.bf.frames || 0} frame${st.bf.frames === 1 ? '' : 's'}` +
+                    (st.bf.seconds_until_next != null && running ? `, next ${fmtWhen(st.bf.seconds_until_next)}` : ''));
             }
             parts.push(`<div class="op-run-status">${escapeHtml(bits.join(' · '))}</div>`);
             parts.push(`<div class="op-runrows">${ids.map(id => runRow(id, rows[id], running)).join('')}</div>`);
@@ -2875,14 +3059,27 @@ const OperateManager = (function () {
         LightPanel.mount('op-light-host');
     }
 
-    // The dark/flat references for the overview frames sit under the DIC
-    // fields of the plan and read them (panels/brightfield-refs.js).
+    // The dark/flat references for the overview frames sit under the plan's
+    // light, LED and exposure fields in the Bottom cam pane's Overview frames
+    // block, and read them (panels/brightfield-refs.js). When a reference
+    // lands, the Acquisition pane's summary line says so.
     let _bfRefsMounted = false;
     function mountBrightfieldRefs() {
         if (_bfRefsMounted || typeof BrightfieldRefs === 'undefined') return;
         if (!$('op-bfref-host')) return;
         _bfRefsMounted = true;
-        BrightfieldRefs.mount('op-bfref-host');
+        BrightfieldRefs.mount('op-bfref-host', { onChange: () => renderPlan() });
+    }
+
+    // The fields list, in the rail beside every instrument surface and in
+    // the Acquisition pane's left column — the same two places the embryo
+    // roster is, because it is the same kind of list (panels/fields.js).
+    let _fieldsMounted = false;
+    function mountFieldsPanels() {
+        if (_fieldsMounted || typeof FieldsPanel === 'undefined') return;
+        _fieldsMounted = true;
+        if ($('op-frail-list')) FieldsPanel.mount('op-frail-list', { compact: true });
+        if ($('op-fields')) FieldsPanel.mount('op-fields', {});
     }
 
     let _stagePadMounted = false;
@@ -2926,6 +3123,7 @@ const OperateManager = (function () {
                     { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom' });
             }
         }
+        mountFieldsPanels();
         // The bottom camera's LED card. Here rather than in mountLightPanel:
         // that one waits for the SPIM pane, and this is the pane we start on.
         if (typeof LightPanel !== 'undefined' && $('op-led-host')) {
@@ -3249,21 +3447,32 @@ const OperateManager = (function () {
             planPanel.addEventListener('input', () => { _planDirty = true; renderPlan(); });
             planPanel.addEventListener('change', e => {
                 _planDirty = true;
-                // "Taken from here" means the stage position at the moment it
-                // was chosen, not at Start: the operator drove there and said so.
-                const pos = e.target.closest('#op-plan-dic-pos');
-                if (pos) {
-                    if (pos.value === 'here') {
-                        if (_xy) _dicPin = { x: _xy.x, y: _xy.y };
-                        else { toastFail('No stage position known yet'); pos.value = 'centroid'; }
-                    } else {
-                        _dicPin = null;
-                    }
+                // "Taken from the fields" with none in the list yet makes one
+                // from where the stage is, the way the rail's button does —
+                // the operator drove there and said so. Choosing the centroid
+                // leaves the list alone: it is the session's, just not used.
+                const pos = e.target.closest('#op-plan-bf-pos');
+                if (pos && pos.value === 'here' && !_bfPins.length && !addFieldHere()) {
+                    pos.value = 'centroid';
                 }
                 renderPlan();
             });
+            // The way to where the light, exposure, dark and flat are set.
+            planPanel.addEventListener('click', e => {
+                const go = e.target.closest('[data-goto-pane]');
+                if (go) { e.preventDefault(); showPane(go.dataset.gotoPane); }
+            });
             renderPlan();
         }
+        // The plan's overview fields live on the Bottom cam pane, beside the
+        // live view; a change there re-says the plan like one on Acquisition.
+        const ov = $('op-overview-host');
+        if (ov) {
+            ov.addEventListener('input', () => { _planDirty = true; renderPlan(); });
+            ov.addEventListener('change', () => { _planDirty = true; renderPlan(); });
+        }
+        const match = $('op-ov-match');
+        if (match) match.addEventListener('click', useLiveSettings);
         const lib = $('op-lib-list');
         if (lib) {
             lib.addEventListener('click', e => {
@@ -3370,6 +3579,14 @@ const OperateManager = (function () {
         showPaneInitial();
         if (_pane === 'spim') mountLightPanel();
         try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) {}
+        // The session's fields, then the session's last plan — in that
+        // order, so a list the session holds outranks the run's positions.
+        // The plan is restored HERE, not only on entering Acquisition: the
+        // plan's light, exposure and fields are on the Bottom cam pane now,
+        // and the first thing typed there must not be what stops the rest
+        // of the plan (cadence, ending) coming back.
+        await loadFields();
+        await restorePlan();
         await Promise.all([bz.refresh(), fd.refresh()]);
         renderLock();
         renderSubnavMeta();
@@ -3413,6 +3630,13 @@ const OperateManager = (function () {
             },
             toggleRole: id => toggleRole(id),
             goTo: pane => showPane(pane),
+        },
+        // panels/fields.js renders SharedState.overviewFields and calls
+        // these. The list, the stage position and the plan stay here.
+        fields: {
+            addHere: () => addFieldHere(),
+            remove: i => removeField(Number(i)),
+            goTo: i => goToField(Number(i)),
         },
         marking: {
             detect: opts => runDetect(opts),

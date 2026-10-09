@@ -110,6 +110,11 @@ const SharedState = (() => {
         // listed under the roster. Nothing of a removed embryo is deleted,
         // so each of these can be put back.
         removedEmbryos: [],
+        // The bottom camera's fields of view for the brightfield overview,
+        // [{x, y}] in stage µm, owned by operate.js and rendered by
+        // panels/fields.js on the rail and on Acquisition. The other list
+        // of places a run goes back to, beside the embryos'.
+        overviewFields: [],
     };
     const subs = new Map();     // key -> Set<handler>
 

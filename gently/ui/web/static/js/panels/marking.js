@@ -66,7 +66,14 @@ const MarkingPanel = (() => {
         { id: 'strict', label: 'Strict · \u226560% of the best', peak: 0.6,
           hint: 'Keep only blobs at least 60% as strong as the strongest one. What the detector uses when nothing is filtering.' },
     ];
-    const DEFAULTS = { claude: true, sam: true, sensitivity: 'permissive', fresh: false };
+    // What an embryo looks like in the frame: bright under the room light,
+    // dark under the transmitted-light LED. The dark finder is the one the
+    // export's crops use.
+    const LOOKS = [
+        { id: 'bright', label: 'Bright · room light' },
+        { id: 'dark', label: 'Dark · LED' },
+    ];
+    const DEFAULTS = { claude: true, sam: true, sensitivity: 'permissive', fresh: false, look: 'bright' };
     let settings = Object.assign({}, DEFAULTS);
     try {
         const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -89,6 +96,7 @@ const MarkingPanel = (() => {
             use_sam: !!settings.sam,
             min_relative_peak: sensitivity().peak,
             fresh: !!settings.fresh,
+            method: settings.look === 'dark' ? 'dark' : 'bright',
         };
     }
 
@@ -190,6 +198,12 @@ const MarkingPanel = (() => {
                 </div>
 
                 <div class="mk-opts">
+                  <label class="mk-opt" title="Bright: embryos lit by the room light. Dark: embryos under the transmitted-light LED, found the way the export's crops find them.">
+                    <span class="mk-opt-cap">Embryos look</span>
+                    <select class="mk-select" data-set="look">
+                      ${LOOKS.map(o => `<option value="${o.id}"${o.id === (settings.look || 'bright') ? ' selected' : ''}>${o.label}</option>`).join('')}
+                    </select>
+                  </label>
                   <label class="mk-opt">
                     <span class="mk-opt-cap">Sensitivity</span>
                     <select class="mk-select" data-set="sensitivity" title="${escape(sens.hint)}">

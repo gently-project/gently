@@ -647,6 +647,30 @@ class FileStore:
         doc = _read_yaml(sd / "acquisition.yaml")
         return doc if isinstance(doc, dict) else None
 
+    # ==================================================================
+    # Overview fields — the bottom camera's fields of view for the
+    # brightfield overview, as the operator set them on the Bottom cam pane
+    # ==================================================================
+
+    def save_overview_fields(self, session_id: str, fields: list[dict]) -> Path:
+        """Write ``overview_fields.yaml``: each field {x, y} in stage µm, in
+        the order the frames are taken. Kept in the session so a reload, or
+        the Acquisition pane, finds the same list the operator built while
+        looking at the dish."""
+        sd = self._require_session_dir(session_id)
+        path = sd / "overview_fields.yaml"
+        _write_yaml(path, {"fields": [dict(f) for f in fields]})
+        return path
+
+    def get_overview_fields(self, session_id: str) -> list[dict]:
+        """The session's overview fields, oldest first; empty when none."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        doc = _read_yaml(sd / "overview_fields.yaml")
+        fields = doc.get("fields") if isinstance(doc, dict) else None
+        return [dict(f) for f in fields if isinstance(f, dict)] if isinstance(fields, list) else []
+
     def append_temperature_sample(self, session_id: str, sample: dict) -> None:
         """Append one temperature reading to the session's temperature.jsonl."""
         sd = self._require_session_dir(session_id)
@@ -1392,6 +1416,29 @@ class FileStore:
         _write_yaml(canonical.with_suffix(".meta.yaml"), sidecar)
         logger.debug("put_snapshot: %s", canonical)
         return canonical
+
+    def get_snapshot(self, session_id: str, stem: str) -> dict[str, Any] | None:
+        """One snapshot record by the stem of its file (``bf_6d29469c4763``):
+        its own sidecar read, not every record in the session. A page that
+        plays a run back asks for frames ten times a second, and listing two
+        thousand sidecars for each was what stalled the agent. None when the
+        stem is not a plain name, or there is no such snapshot."""
+        if (
+            not stem
+            or Path(stem).name != stem
+            or stem in (".", "..")
+            or "/" in stem
+            or "\\" in stem
+        ):
+            return None
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        meta = sd / "snapshots" / f"{stem}.meta.yaml"
+        if not meta.is_file():
+            return None
+        data = _read_yaml(meta)
+        return data if isinstance(data, dict) else None
 
     def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""

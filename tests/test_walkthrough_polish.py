@@ -1,6 +1,6 @@
 """Three things from the first walkthrough of the acquisition surface.
 
-* "the DIC overview image is not viewable … more like an icon, than a
+* "the brightfield overview image is not viewable … more like an icon, than a
   clickable image" — the strip's frames open a viewer with the full frame.
 * "the embryos left layout has more space than needed, and the center and
   right one feels a bit crowded" — the columns are sized to what they hold.
@@ -28,10 +28,10 @@ def test_a_frame_on_the_strip_opens_the_stage_not_a_modal():
     strip used to open a lightbox. Now it opens the overview stage in place —
     the newest frame large, the series beneath — on that frame. There is no
     modal: a frame you can see does not need a lightbox."""
-    assert 'id="dic-viewer"' not in HTML
+    assert 'id="bf-viewer"' not in HTML
     assert 'id="embryos-overview"' in HTML and "panels/overview-stage.js" in HTML
-    assert "openDicViewer(index) {" in EMBRYOS
-    opener = EMBRYOS[EMBRYOS.index("openDicViewer(index) {") :][:400]
+    assert "openBfViewer(index) {" in EMBRYOS
+    opener = EMBRYOS[EMBRYOS.index("openBfViewer(index) {") :][:400]
     assert "this._overviewOpen = true;" in opener and "OverviewStage.go(index, true)" in opener
     stage = (WEB / "static" / "js" / "panels" / "overview-stage.js").read_text(encoding="utf-8")
     for needle in (
@@ -54,16 +54,16 @@ def test_the_stage_walks_the_series_from_the_keyboard():
     keys = stage[stage.index("function onKey(ev)") :][:1200]
     for key in ("'ArrowLeft'", "'ArrowRight'", "'Home'", "'End'", "' '", "ev.shiftKey ? 10 : 1"):
         assert key in keys, key
-    wiring = EMBRYOS[EMBRYOS.index("_wireDicStrip() {") :][:900]
-    assert "this.openDicViewer(Number(b.dataset.dicIndex))" in wiring
-    assert "dic-strip-open" in wiring
+    wiring = EMBRYOS[EMBRYOS.index("_wireBfStrip() {") :][:900]
+    assert "this.openBfViewer(Number(b.dataset.bfIndex))" in wiring
+    assert "bf-strip-open" in wiring
 
 
 def test_the_strip_hydrates_from_disk_for_a_page_that_opened_late():
-    assert "/api/dic/frames" in EMBRYOS
-    assert "this.refreshDicStrip();" in EMBRYOS
-    assert "ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshDicStrip())" in EMBRYOS
-    assert "create_dic_router" in ROUTES_INIT, "the DIC routes are not registered"
+    assert "/api/bf/frames" in EMBRYOS
+    assert "this.refreshBfStrip();" in EMBRYOS
+    assert "ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshBfStrip())" in EMBRYOS
+    assert "create_bf_router" in ROUTES_INIT, "the brightfield routes are not registered"
 
 
 def test_a_restored_session_brings_its_own_frames_to_the_strip():
@@ -74,14 +74,14 @@ def test_a_restored_session_brings_its_own_frames_to_the_strip():
     boundary = EMBRYOS[
         EMBRYOS.index("if (serverHasNewSession || serverIsIdleButClientHasData) {") :
     ][:600]
-    assert "this._dicFrames = [];" in boundary
-    assert "this.refreshDicStrip();" in boundary
+    assert "this._bfFrames = [];" in boundary
+    assert "this.refreshBfStrip();" in boundary
 
 
 def test_frames_on_the_strip_read_as_pictures_not_icons():
-    m = re.search(r"\.dic-frame img[^{]*\{[^}]*height:\s*(\d+)px", MAIN_CSS)
+    m = re.search(r"\.bf-frame img[^{]*\{[^}]*height:\s*(\d+)px", MAIN_CSS)
     assert m and int(m.group(1)) >= 96, "strip frames are icon-sized again"
-    assert re.search(r"\.dic-frame:hover[^{]*\{[^}]*border-color", MAIN_CSS), (
+    assert re.search(r"\.bf-frame:hover[^{]*\{[^}]*border-color", MAIN_CSS), (
         "no hover, so nothing says 'clickable'"
     )
 
@@ -134,7 +134,7 @@ def test_idle_is_the_absence_of_a_rule():
 
 
 def test_every_method_the_embryos_init_calls_exists():
-    """A patch that replaced the DIC handler sliced from its comment to the next
+    """A patch that replaced the brightfield handler sliced from its comment to the next
     landmark — a thousand lines later — and took loadDashboardConfig() and
     everything else in between with it. init() then threw on its first line,
     on every page load, and the Embryos tab never subscribed to anything.

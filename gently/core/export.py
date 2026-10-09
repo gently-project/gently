@@ -23,12 +23,14 @@ cannot touch the session.
         <label>/     volumes/<label>_t0001.tif …   volumes.csv
                      projections/<label>_t0001.jpg …
                      embryo.yaml  calibration/  timelapse.mp4
-        dic/         dic_f0001_20261004-213000.tif …   dic.csv
-                     dic.avi  dic_corrected.avi  references/
-                     embryos/<label>/raw/ corrected/ metadata.csv …   (see dic_crops)
+        bf/         bf_f0001_20261004-213000.tif …   bf.csv
+                     bf.avi  bf_corrected.avi  references/
+                     embryos/<label>/raw/ corrected/ metadata.csv …   (see bf_crops)
+                     field_1/ field_2/ …   the same, per field, when the overview
+                                           was taken from more than one position
 
 Fiji opens a volumes/ folder with File › Import › Image Sequence…, in order,
-and dic.avi with File › Import › AVI… (it is Motion JPEG, which Fiji and
+and bf.avi with File › Import › AVI… (it is Motion JPEG, which Fiji and
 every player read).
 """
 
@@ -146,20 +148,20 @@ def _references_for(meta: dict, records: list[dict]) -> dict | None:
     return for_frame(matching(rich, spec_of_frame(meta)))
 
 
-def _dic_frames(dic_dir: Path) -> list[dict[str, Any]]:
-    """The DIC frames of an export's dic/ folder in time order: each with
-    its path, when it was captured, and the dark and flat dic.csv names for
-    it (relative to dic/). From dic.csv when it is there, else the names."""
+def _bf_frames(bf_dir: Path) -> list[dict[str, Any]]:
+    """The brightfield frames of an export's bf/ folder in time order: each with
+    its path, when it was captured, and the dark and flat bf.csv names for
+    it (relative to bf/). From bf.csv when it is there, else the names."""
     rows: list[dict[str, Any]] = []
-    csv_path = dic_dir / "dic.csv"
+    csv_path = bf_dir / "bf.csv"
     if csv_path.is_file():
         with open(csv_path, newline="", encoding="utf-8") as f:
             for r in csv.DictReader(f):
                 name = Path(str(r.get("file") or "")).name
-                if name and (dic_dir / name).is_file():
+                if name and (bf_dir / name).is_file():
                     rows.append(
                         {
-                            "path": dic_dir / name,
+                            "path": bf_dir / name,
                             "captured_at": r.get("captured_at") or None,
                             "dark": r.get("dark") or None,
                             "flat": r.get("flat") or None,
@@ -169,7 +171,7 @@ def _dic_frames(dic_dir: Path) -> list[dict[str, Any]]:
     if not rows:
         rows = [
             {"path": f, "captured_at": None, "dark": None, "flat": None, "row": {}}
-            for f in sorted(dic_dir.glob("dic_f*.tif"))
+            for f in sorted(bf_dir.glob("bf_f*.tif"))
         ]
     return rows
 
@@ -188,20 +190,82 @@ def _elapsed(start: str | None, now: str | None) -> str:
     return f"+{h:02d}:{m:02d}:{sec:02d}"
 
 
-def dic_movie(
-    dic_dir: Path,
+# A plain AVI holds one RIFF chunk of at most this much; OpenCV writes the
+# rest as OpenDML "AVIX" chunks, which Fiji and VLC read and which many
+# players do not: a 1.5 GB movie showed 922 of its 1336 frames in them,
+# and the coworkers who saw that reported frames missing from the video.
+# So a movie is made to fit in one chunk, at a smaller size when it must.
+AVI_CLASSIC_BYTES = 1_000_000_000
+
+
+def _fit_scale(sample: list, n_frames: int, limit: int | None = None) -> float:
+    """The factor to shrink every frame by so ``n_frames`` of them, as
+    Motion JPEG, fit in one classic AVI chunk: 1.0 when they already do.
+
+    Measured, not guessed: the writer itself encodes ``sample`` (8-bit
+    frames spread through the run) into a scratch file, and the bytes per
+    frame it spent, times ``n_frames`` with a tenth to spare, is the size
+    the movie would be. A JPEG of one frame at some quality was off by two
+    either way: the writer's quality is its own, and the first frame of a
+    run is not a typical one."""
+    import os
+    import tempfile
+
+    import cv2
+    import numpy as np
+
+    if limit is None:
+        limit = AVI_CLASSIC_BYTES
+    frames8 = [f for f in sample if f is not None and getattr(f, "ndim", 0) == 2]
+    if not frames8 or n_frames <= 0:
+        return 1.0
+    h, w = frames8[0].shape[:2]
+    fd, tmp = tempfile.mkstemp(suffix=".avi")
+    os.close(fd)
+    per: float | None = None
+    try:
+        fourcc = cv2.VideoWriter_fourcc(*"MJPG")  # type: ignore[attr-defined]
+        wr = cv2.VideoWriter(tmp, fourcc, 10, (int(w), int(h)), isColor=True)
+        if wr.isOpened():
+            n = 0
+            for f in frames8:
+                if f.shape[:2] != (h, w):
+                    f = cv2.resize(f, (int(w), int(h)))
+                wr.write(cv2.cvtColor(np.asarray(f, dtype=np.uint8), cv2.COLOR_GRAY2BGR))
+                n += 1
+            wr.release()
+            if n:
+                per = os.path.getsize(tmp) / n
+    except Exception:
+        per = None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    if per is None:
+        ok, jpg = cv2.imencode(".jpg", frames8[0], [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+        per = float(jpg.size) if ok else 0.0
+    estimate = per * n_frames * 1.1
+    if estimate <= limit:
+        return 1.0
+    return max(0.1, (limit / estimate) ** 0.5)
+
+
+def bf_movie(
+    bf_dir: Path,
     fps: int = 10,
     progress: Progress | None = None,
     label: bool = True,
     corrected: bool = False,
 ) -> Path | None:
-    """Write ``dic.avi`` beside an export's DIC frames: every frame in time
+    """Write ``bf.avi`` beside an export's brightfield frames: every frame in time
     order, one brightness stretch for the whole run (so the movie does not
     flicker with the field), the frame number and the time since the first
     in the corner. Motion JPEG, which Fiji's AVI reader opens.
 
-    ``corrected`` writes ``dic_corrected.avi`` instead, each frame with the
-    dark and flat dic.csv names for it divided out first (the formula in the
+    ``corrected`` writes ``bf_corrected.avi`` instead, each frame with the
+    dark and flat bf.csv names for it divided out first (the formula in the
     README; ``gently.app.brightfield.correct``). A frame with no references,
     or references of another size, goes in as it is.
 
@@ -212,15 +276,15 @@ def dic_movie(
         import numpy as np
         import tifffile
     except ImportError:
-        logger.warning("dic.avi skipped: cv2/tifffile not installed")
+        logger.warning("bf.avi skipped: cv2/tifffile not installed")
         return None
 
-    dic_dir = Path(dic_dir)
-    frames = _dic_frames(dic_dir)
+    bf_dir = Path(bf_dir)
+    frames = _bf_frames(bf_dir)
     if not frames:
         return None
     if corrected and not any(f["dark"] and f["flat"] for f in frames):
-        logger.info("dic_corrected.avi skipped: no frame names a dark and flat")
+        logger.info("bf_corrected.avi skipped: no frame names a dark and flat")
         return None
 
     def load(path: Path):
@@ -239,9 +303,9 @@ def dic_movie(
         key = (str(frame["dark"]), str(frame["flat"]))
         if key not in refs:
             try:
-                refs[key] = (load(dic_dir / key[0]), load(dic_dir / key[1]))
+                refs[key] = (load(bf_dir / key[0]), load(bf_dir / key[1]))
             except Exception as exc:
-                logger.warning("dic_corrected.avi: could not read %s: %s", key, exc)
+                logger.warning("bf_corrected.avi: could not read %s: %s", key, exc)
                 refs[key] = None
         return refs[key]
 
@@ -256,17 +320,25 @@ def dic_movie(
 
     # One stretch for the whole run, from frames spread through it.
     sample = frames[:: max(1, len(frames) // 16)][:16]
-    lo_hi = [np.percentile(read(f), (0.5, 99.5)) for f in sample]
+    sampled = [read(f) for f in sample]
+    lo_hi = [np.percentile(img, (0.5, 99.5)) for img in sampled]
     lo = float(min(x[0] for x in lo_hi))
     hi = float(max(x[1] for x in lo_hi))
     if hi <= lo:
         hi = lo + 1.0
+    sample8 = [
+        np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        for img in sampled
+        if img.ndim == 2
+    ]
+    del sampled
 
-    out = dic_dir / ("dic_corrected.avi" if corrected else "dic.avi")
+    out = bf_dir / ("bf_corrected.avi" if corrected else "bf.avi")
     writer = None
     size: tuple[int, int] | None = None
     start = frames[0]["captured_at"]
     written = 0
+    shrink = 1.0
     try:
         for i, frame_rec in enumerate(frames, start=1):
             path, when = frame_rec["path"], frame_rec["captured_at"]
@@ -280,6 +352,21 @@ def dic_movie(
             frame = np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(
                 np.uint8
             )
+            if size is None:
+                shrink = _fit_scale(sample8, len(frames))
+                if shrink < 1.0:
+                    logger.info(
+                        "%s: %d frames would overflow a plain AVI; written at %.0f%% size",
+                        out.name,
+                        len(frames),
+                        shrink * 100,
+                    )
+            if shrink < 1.0:
+                frame = cv2.resize(
+                    frame,
+                    (max(16, int(frame.shape[1] * shrink)), max(16, int(frame.shape[0] * shrink))),
+                    interpolation=cv2.INTER_AREA,
+                )
             if size is None:
                 size = (int(frame.shape[1]), int(frame.shape[0]))
                 writer = cv2.VideoWriter(
@@ -296,7 +383,7 @@ def dic_movie(
                 frame = cv2.resize(frame, size)
             bgr = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
             if label:
-                m = re.match(r"dic_f(\d+)", path.stem)
+                m = re.match(r"bf_f(\d+)", path.stem)
                 text = f"f{int(m.group(1)):04d}" if m else f"#{i}"
                 since = _elapsed(start, when)
                 if since:
@@ -323,67 +410,150 @@ def dic_movie(
 Box = tuple[int, int, int, int]  # x0, y0, x1, y1 in pixels of the full frame
 
 
-def find_embryo_boxes(
-    dic_dir: Path,
-    seeds: dict[str, tuple[float, float]],
-    margin: int = 40,
-    sample: int = 3,
-) -> dict[str, Box]:
-    """Where each embryo is in the DIC field, as one box that holds it in
-    every frame. ``seeds`` is each embryo's approximate centre in full-frame
-    pixels (the Operate tab's marking gives these). An embryo is the dark
-    blob nearest its seed in the flat-fielded frame, measured in ``sample``
-    frames spread through the run and unioned; all boxes are then made the
-    same size, so the crops compare. An embryo found in no frame keeps a
-    box of the common size around its seed."""
-    import cv2
+def _sample_frames(bf_dir: Path, sample: int) -> list[tuple[Any, Any, Any]]:
+    """``sample`` frames spread through the run, each as (image, dark, flat)
+    with the references the frame names (None when it names none)."""
     import numpy as np
     import tifffile
 
-    dic_dir = Path(dic_dir)
-    frames = _dic_frames(dic_dir)
+    bf_dir = Path(bf_dir)
+    frames = _bf_frames(bf_dir)
     if not frames:
-        raise FileNotFoundError(f"No DIC frames in {dic_dir}")
+        raise FileNotFoundError(f"No brightfield frames in {bf_dir}")
     picks = frames[:: max(1, (len(frames) - 1) // max(1, sample - 1))][:sample]
     refs: dict[tuple[str, str], tuple] = {}
-    found: dict[str, list[Box]] = {name: [] for name in seeds}
-    shape = None
+    out = []
     for rec in picks:
         img = np.squeeze(np.asarray(tifffile.imread(str(rec["path"]))))
         if img.ndim == 3:
             img = img.max(axis=0)
-        shape = img.shape
+        dark = flat = None
         if rec["dark"] and rec["flat"]:
             key = (str(rec["dark"]), str(rec["flat"]))
             if key not in refs:
                 refs[key] = (
-                    tifffile.imread(str(dic_dir / key[0])),
-                    tifffile.imread(str(dic_dir / key[1])),
+                    tifffile.imread(str(bf_dir / key[0])),
+                    tifffile.imread(str(bf_dir / key[1])),
                 )
             dark, flat = refs[key]
-            if dark.shape == img.shape and flat.shape == img.shape:
-                from gently.app.brightfield import correct
+            if dark.shape != img.shape or flat.shape != img.shape:
+                dark = flat = None
+        out.append((img, dark, flat))
+    return out
 
-                img = correct(img, dark, flat)
-        f = img.astype(np.float32)
-        bg = float(np.median(f))
-        mask: Any = (cv2.GaussianBlur(f, (0, 0), 3) < bg * 0.75).astype(np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((15, 15), np.uint8))
-        n, _labels, stats, cent = cv2.connectedComponentsWithStats(mask)
-        reach = max(img.shape) * 0.1
-        least = 0.0005 * img.shape[0] * img.shape[1]
+
+def _dark_blobs(bf_dir: Path, sample: int = 3) -> tuple[tuple[int, int], list[list[tuple]]]:
+    """The dark blobs of ``sample`` frames spread through the run, each as
+    (x0, y0, x1, y1, cx, cy): what an embryo looks like to a threshold on
+    the flat-fielded frame. Returns the frame shape and one list per frame."""
+    from gently.core.embryo_finding import dark_blobs
+
+    shape = None
+    out: list[list[tuple]] = []
+    for img, dark, flat in _sample_frames(bf_dir, sample):
+        shape = img.shape
+        out.append([b[:6] for b in dark_blobs(img, dark, flat)])
+    assert shape is not None
+    return (int(shape[0]), int(shape[1])), out
+
+
+def orient_seeds(
+    bf_dir: Path, seeds: dict[str, tuple[float, float]], sample: int = 3
+) -> dict[str, tuple[float, float]]:
+    """The seeds as the frames are oriented. A marking is made on a preview
+    that may not be the filed frame's way up — this rig's frames are the
+    preview turned by 180° — so the four ways the seeds could sit in the
+    frame (as they are, mirrored in x, in y, in both) are each scored by
+    how many land on a dark blob in a few frames, and the best is kept.
+    A tie keeps them as they are."""
+    if not seeds:
+        return {}
+    (h, w), per_frame = _dark_blobs(bf_dir, sample)
+    reach = max(h, w) * 0.1
+
+    def score(flip_x: bool, flip_y: bool) -> int:
+        hits = 0
+        for cx, cy in seeds.values():
+            sx = (w - cx) if flip_x else cx
+            sy = (h - cy) if flip_y else cy
+            for blobs in per_frame:
+                if any(((bx - sx) ** 2 + (by - sy) ** 2) ** 0.5 < reach for *_, bx, by in blobs):
+                    hits += 1
+                    break
+        return hits
+
+    best = (score(False, False), False, False)
+    for flip_x, flip_y in ((True, True), (True, False), (False, True)):
+        s = score(flip_x, flip_y)
+        if s > best[0]:
+            best = (s, flip_x, flip_y)
+    _, flip_x, flip_y = best
+    if not (flip_x or flip_y):
+        return dict(seeds)
+    logger.info(
+        "embryo seeds mirrored%s%s to match the frames",
+        " in x" if flip_x else "",
+        " in y" if flip_y else "",
+    )
+    return {
+        name: ((w - cx) if flip_x else cx, (h - cy) if flip_y else cy)
+        for name, (cx, cy) in seeds.items()
+    }
+
+
+def find_embryo_boxes(
+    bf_dir: Path,
+    seeds: dict[str, tuple[float, float]],
+    margin: int = 40,
+    sample: int = 3,
+    method: str = "auto",
+) -> dict[str, Box]:
+    """Where each embryo is in the brightfield field, as one box that holds it in
+    every frame. ``seeds`` is each embryo's approximate centre in full-frame
+    pixels (the Operate tab's marking gives these). An embryo is the box
+    nearest its seed, measured in ``sample`` frames spread through the run
+    and unioned; all boxes are then made the same size, so the crops
+    compare. An embryo found in no frame keeps a box of the common size
+    around its seed.
+
+    ``method`` is who finds the boxes: ``"blobs"`` thresholds the
+    flat-fielded frame for dark ovals; ``"claude"`` asks the vision model,
+    and falls back to the blobs for any embryo it did not see; ``"auto"``
+    (the default) is Claude when there is an API key, else the blobs."""
+    if method not in ("auto", "blobs", "claude"):
+        raise ValueError(f"method must be 'auto', 'blobs' or 'claude', not {method!r}")
+    if method == "auto":
+        import os
+
+        method = "claude" if os.environ.get("ANTHROPIC_API_KEY") else "blobs"
+    shape, per_frame = _dark_blobs(bf_dir, sample)
+    if method == "claude":
+        from gently.core.embryo_finding import claude_boxes
+
+        seen = []
+        for img, dark, flat in _sample_frames(bf_dir, sample):
+            boxes_here = claude_boxes(img, dark, flat)
+            centres = [((b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in boxes_here]
+            seen.append([(*b, c[0], c[1]) for b, c in zip(boxes_here, centres, strict=True)])
+        if any(seen):
+            # Claude's boxes first; the blobs stand in where it saw nothing.
+            per_frame = [c or b for c, b in zip(seen, per_frame, strict=True)]
+            logger.info(
+                "embryo boxes from Claude for %d of %d frames", sum(1 for c in seen if c), len(seen)
+            )
+        else:
+            logger.info("embryo boxes: Claude saw nothing (or was not asked); the blobs stand")
+    reach = max(shape) * 0.1
+    found: dict[str, list[Box]] = {name: [] for name in seeds}
+    for blobs in per_frame:
         for name, (cx, cy) in seeds.items():
             best = None
-            for k in range(1, n):
-                x, y, w, h, area = (int(v) for v in stats[k])
-                if area < least:
-                    continue
-                d = float(np.hypot(cent[k][0] - cx, cent[k][1] - cy))
+            for x0, y0, x1, y1, bx, by in blobs:
+                d = ((bx - cx) ** 2 + (by - cy) ** 2) ** 0.5
                 if d < reach and (best is None or d < best[0]):
-                    best = (d, (x, y, x + w, y + h))
+                    best = (d, (x0, y0, x1, y1))
             if best is not None:
                 found[name].append(best[1])
-    assert shape is not None
     boxes: dict[str, Box] = {}
     for name, hits in found.items():
         if hits:
@@ -408,17 +578,17 @@ def find_embryo_boxes(
     return out
 
 
-def dic_crops(
-    dic_dir: Path,
+def bf_crops(
+    bf_dir: Path,
     boxes: dict[str, Box],
     fps: int = 10,
     progress: Progress | None = None,
     label: bool = True,
     notes: dict[str, str] | None = None,
 ) -> Path:
-    """Cut each embryo out of every DIC frame into a folder of its own:
+    """Cut each embryo out of every brightfield frame into a folder of its own:
 
-        <dic_dir>/embryos/
+        <bf_dir>/embryos/
             README.md                     a dataset card: what this is, how to load it
             boxes.png                     the boxes drawn on a frame
             boxes.csv                     embryo, x0, y0, x1, y1
@@ -442,11 +612,11 @@ def dic_crops(
     import numpy as np
     import tifffile
 
-    dic_dir = Path(dic_dir)
-    frames = _dic_frames(dic_dir)
+    bf_dir = Path(bf_dir)
+    frames = _bf_frames(bf_dir)
     if not frames:
-        raise FileNotFoundError(f"No DIC frames in {dic_dir}")
-    root = dic_dir / "embryos"
+        raise FileNotFoundError(f"No brightfield frames in {bf_dir}")
+    root = bf_dir / "embryos"
     root.mkdir(parents=True, exist_ok=True)
     notes = notes or {}
     _write_csv(
@@ -467,8 +637,8 @@ def dic_crops(
         if key not in refs:
             try:
                 refs[key] = (
-                    tifffile.imread(str(dic_dir / key[0])),
-                    tifffile.imread(str(dic_dir / key[1])),
+                    tifffile.imread(str(bf_dir / key[0])),
+                    tifffile.imread(str(bf_dir / key[1])),
                 )
             except Exception as exc:
                 logger.warning("crops: could not read %s: %s", key, exc)
@@ -518,7 +688,7 @@ def dic_crops(
             except Exception as exc:
                 logger.warning("crops: could not read %s: %s", rec["path"].name, exc)
                 continue
-            m = re.match(r"dic_f(\d+)", rec["path"].stem)
+            m = re.match(r"bf_f(\d+)", rec["path"].stem)
             fnum = int(m.group(1)) if m else i
             since = _elapsed(start, rec["captured_at"])
             for name, box in boxes.items():
@@ -655,7 +825,7 @@ def dic_crops(
         if rs:
             _write_csv(root / name / "metadata.csv", rs, columns)
     (root / "README.md").write_text(
-        _crops_card(dic_dir, boxes, rows, start, notes), encoding="utf-8"
+        _crops_card(bf_dir, boxes, rows, start, notes), encoding="utf-8"
     )
     return root
 
@@ -671,7 +841,7 @@ def _elapsed_s(start: str | None, now: str | None) -> str:
 
 
 def _crops_card(
-    dic_dir: Path,
+    bf_dir: Path,
     boxes: dict[str, Box],
     rows: dict[str, list[dict]],
     start,
@@ -684,11 +854,11 @@ def _crops_card(
     n_frames = max((len(rows[n]) for n in names), default=0)
     total = n_frames * len(names)
     size = "n<1K" if total < 1000 else "1K<n<10K" if total < 10000 else "10K<n<100K"
-    session = dic_dir.parent.name
+    session = bf_dir.parent.name
     first = names[0] if names else "<embryo>"
     lines = [
         "---",
-        f"pretty_name: DIC time-lapse of C. elegans embryos, {session}",
+        f"pretty_name: Brightfield time-lapse of C. elegans embryos, {session}",
         "tags:",
         "- microscopy",
         "- brightfield",
@@ -701,7 +871,7 @@ def _crops_card(
         "",
         f"# {session}: one folder per embryo",
         "",
-        f"Gently session `{session}`. Each embryo was cut out of every DIC overview frame",
+        f"Gently session `{session}`. Each embryo was cut out of every brightfield overview frame",
         "with one fixed box, so a folder plays as a fixed camera on one embryo.",
         f"{len(names)} embryo(s), {n_frames} frames each"
         + (f", from {start}" if start else "")
@@ -769,12 +939,24 @@ def _crops_card(
 
 
 def marking_seeds(
-    store: Any, session_id: str, embryos: list[dict]
+    store: Any,
+    session_id: str,
+    embryos: list[dict],
+    position: dict | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Where each embryo is in the full DIC frame, from the Operate tab's
-    marking (the newest one): the preview's pixel positions scaled to the
-    frame, keyed by the embryo's export label. A mark is an embryo's when
-    its stage position is the nearest, within 50 µm. ``{}`` with no marking."""
+    """Where each embryo is in the full brightfield frame, keyed by its export label.
+
+    From the Operate tab's marking (the newest): the preview's pixel
+    positions scaled to the frame, each mark given to the embryo whose
+    stage position is nearest, within 50 µm.
+
+    With ``position`` — a field of a run taken from several — the marking
+    was made somewhere else, so its pixels are not this field's. The marks
+    say how stage microns map to frame pixels (fitted when they are spread
+    enough, else from the marking's recorded pixel size), and each embryo's
+    own stage position is projected into the field. An embryo outside it,
+    or within a tenth of the frame of its edge (its crop would be cut), is
+    left out. ``{}`` with no marking."""
     marks = store.list_snapshots(session_id, "operate_marked") or []
     if not marks:
         return {}
@@ -782,30 +964,99 @@ def marking_seeds(
     meta = mark.get("metadata") or {}
     frame = meta.get("frame") or {}
     preview_w = float(frame.get("width") or mark.get("width") or 0)
+    preview_h = float(frame.get("height") or mark.get("height") or preview_w)
     if not preview_w:
         return {}
-    dics = store.list_snapshots(session_id, "dic") or []
+    dics = store.list_snapshots(session_id, "bf") or []
     full_w = float(next((r.get("width") for r in dics if r.get("width")), 0) or 0)
     if not full_w:
         full_w = preview_w * float(frame.get("downsample") or 1)
     k = full_w / preview_w
-    seeds: dict[str, tuple[float, float]] = {}
+
+    pairs = []
     for m in meta.get("embryos") or []:
-        sx, sy = m.get("stage_x_um"), m.get("stage_y_um")
-        if sx is None or sy is None or m.get("pixel_x") is None or m.get("pixel_y") is None:
+        try:
+            pairs.append(
+                (
+                    float(m["pixel_x"]),
+                    float(m["pixel_y"]),
+                    float(m["stage_x_um"]),
+                    float(m["stage_y_um"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
             continue
-        best: tuple[float, dict] | None = None
-        for e in embryos:
-            pos = e.get("position_coarse") or {}
-            ex, ey = pos.get("x", e.get("position_x")), pos.get("y", e.get("position_y"))
-            if ex is None or ey is None:
-                continue
-            d = float(((float(ex) - float(sx)) ** 2 + (float(ey) - float(sy)) ** 2) ** 0.5)
-            if best is None or d < best[0]:
-                best = (d, e)
-        if best is None or best[0] > 50.0:
+
+    def stage_of(e: dict) -> tuple[float, float] | None:
+        pos = e.get("position_coarse") or {}
+        ex, ey = pos.get("x", e.get("position_x")), pos.get("y", e.get("position_y"))
+        try:
+            return (float(ex), float(ey)) if ex is not None and ey is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    seeds: dict[str, tuple[float, float]] = {}
+    at = meta.get("stage_position")
+    if position is None or position.get("x") is None or not isinstance(at, list | tuple):
+        # The marking's own field: each mark to the embryo it is nearest.
+        for px, py, sx, sy in pairs:
+            best: tuple[float, dict] | None = None
+            for e in embryos:
+                st = stage_of(e)
+                if st is None:
+                    continue
+                d = ((st[0] - sx) ** 2 + (st[1] - sy) ** 2) ** 0.5
+                if best is None or d < best[0]:
+                    best = (d, e)
+            if best is not None and best[0] <= 50.0:
+                seeds[label_for(best[1])] = (px * k, py * k)
+        return seeds
+
+    # Another field: pixel = c + g * (stage - field), per axis, from the marks.
+    try:
+        mx, my = float(at[0]), float(at[1])
+    except (TypeError, ValueError, IndexError):
+        return {}
+    um_per_px = None
+    tr = meta.get("transform") or {}
+    try:
+        if tr.get("pixel_size_um") and tr.get("objective_mag"):
+            um_per_px = (
+                float(tr["pixel_size_um"])
+                / float(tr["objective_mag"])
+                * float(frame.get("downsample") or 1)
+            )
+    except (TypeError, ValueError):
+        um_per_px = None
+
+    def axis(pix: list[float], stage: list[float], centre: float) -> tuple[float, float]:
+        """(c, g) for pixel = c + g * (stage - mark): fitted from marks spread
+        more than 50 µm apart, else the recorded pixel size through the
+        marking's centre, else nothing to go on."""
+        if len(pix) >= 2 and max(stage) - min(stage) > 50.0:
+            n = len(pix)
+            ms, mp = sum(stage) / n, sum(pix) / n
+            var = sum((x - ms) ** 2 for x in stage)
+            g = sum((x - ms) * (y - mp) for x, y in zip(stage, pix, strict=True)) / var
+            return mp - g * ms, g
+        if um_per_px:
+            return centre, 1.0 / um_per_px
+        raise ValueError("the marking does not say how microns map to pixels")
+
+    try:
+        cx, gx = axis([p[0] for p in pairs], [p[2] - mx for p in pairs], preview_w / 2)
+        cy, gy = axis([p[1] for p in pairs], [p[3] - my for p in pairs], preview_h / 2)
+    except ValueError:
+        return {}
+    fx, fy = float(position["x"]), float(position["y"])
+    for e in embryos:
+        st = stage_of(e)
+        if st is None:
             continue
-        seeds[label_for(best[1])] = (float(m["pixel_x"]) * k, float(m["pixel_y"]) * k)
+        px = cx + gx * (st[0] - fx)
+        py = cy + gy * (st[1] - fy)
+        if 0.1 * preview_w <= px <= 0.9 * preview_w and 0.1 * preview_h <= py <= 0.9 * preview_h:
+            seeds[label_for(e)] = (px * k, py * k)
     return seeds
 
 
@@ -828,7 +1079,7 @@ def spim_movie(
     label: bool = True,
 ) -> Path | None:
     """Write a movie of a folder of volumes (an export's ``<embryo>/volumes``,
-    or a session's). Not the DIC movie: a volume is a stack, and there are
+    or a session's). Not the brightfield movie: a volume is a stack, and there are
     two ways to watch one.
 
     ``view="projection"`` writes ``spim_projection.avi``: the max projection
@@ -881,15 +1132,44 @@ def spim_movie(
     hi = float(max(x[1] for x in lo_hi))
     if hi <= lo:
         hi = lo + 1.0
+    sample8 = []
+    for path in sample:
+        vol = load(path)
+        img = vol.max(axis=0) if view == "projection" else vol[vol.shape[0] // 2]
+        sample8.append(
+            np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        )
 
     out = folder / f"spim_{view}.avi"
     writer = None
     size: tuple[int, int] | None = None
     written = 0
+    shrink = 1.0
+    # How many frames the movie will have, for the size to fit a plain AVI.
+    n_total = (
+        len(files)
+        if view == "projection"
+        else sum(int(load(p).shape[0]) for p in sample) * max(1, len(files) // max(1, len(sample)))
+    )
 
     def put(img, text: str) -> bool:
-        nonlocal writer, size, written
+        nonlocal writer, size, written, shrink
         frame = np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        if size is None:
+            shrink = _fit_scale(sample8, n_total)
+            if shrink < 1.0:
+                logger.info(
+                    "%s: %d frames would overflow a plain AVI; written at %.0f%% size",
+                    out.name,
+                    n_total,
+                    shrink * 100,
+                )
+        if shrink < 1.0:
+            frame = cv2.resize(
+                frame,
+                (max(16, int(frame.shape[1] * shrink)), max(16, int(frame.shape[0] * shrink))),
+                interpolation=cv2.INTER_AREA,
+            )
         if size is None:
             size = (int(frame.shape[1]), int(frame.shape[0]))
             writer = cv2.VideoWriter(
@@ -978,25 +1258,27 @@ def plan_lines(plan: dict | None) -> list[str]:
         value = plan.get("condition_value")
     if kind:
         out.append(f"Stop: {kind}" + (f" {value}" if value is not None else ""))
-    dic = plan.get("dic") or {}
-    if dic.get("enabled"):
+    bf = plan.get("bf") or {}
+    if bf.get("enabled"):
         bits = []
-        if dic.get("every_seconds"):
-            bits.append(f"every {dic['every_seconds']} s")
-        if dic.get("light"):
+        if bf.get("every_seconds"):
+            bits.append(f"every {bf['every_seconds']} s")
+        if len(bf.get("positions") or []) > 1:
+            bits.append(f"from {len(bf['positions'])} positions")
+        if bf.get("light"):
             bits.append(
-                f"{dic['light']}"
+                f"{bf['light']}"
                 + (
-                    f" {dic['led_intensity_pct']}%"
-                    if dic.get("led_intensity_pct") is not None
+                    f" {bf['led_intensity_pct']}%"
+                    if bf.get("led_intensity_pct") is not None
                     else ""
                 )
             )
-        if dic.get("exposure_ms") is not None:
-            bits.append(f"{dic['exposure_ms']} ms")
-        out.append("DIC overview: " + ", ".join(bits))
+        if bf.get("exposure_ms") is not None:
+            bits.append(f"{bf['exposure_ms']} ms")
+        out.append("Brightfield overview: " + ", ".join(bits))
     else:
-        out.append("DIC overview: off")
+        out.append("Brightfield overview: off")
     return out
 
 
@@ -1010,8 +1292,8 @@ def export_session(
     """Write the export of ``session_id`` under ``dest`` (default
     ``<root>/exports``) and return its folder. Re-exporting overwrites the
     same folder. ``progress(done, total, what)`` is called per file.
-    ``crops`` also cuts each embryo out of the DIC frames into a Hugging
-    Face folder of its own (see ``dic_crops``), where the session has an
+    ``crops`` also cuts each embryo out of the brightfield frames into a Hugging
+    Face folder of its own (see ``bf_crops``), where the session has an
     Operate marking to say where the embryos are."""
     sd = store._session_dir(session_id)
     if sd is None or not Path(sd).exists():
@@ -1025,7 +1307,7 @@ def export_session(
     embryos = store.list_embryos(session_id) or []
     plan = store.get_acquisition_plan(session_id)
     volumes = store.list_volumes(session_id) or []
-    snapshots = store.list_snapshots(session_id, "dic") or []
+    snapshots = store.list_snapshots(session_id, "bf") or []
     predictions = store.get_predictions(session_id) or []
 
     # Everything that will be copied, counted first so progress means something.
@@ -1233,7 +1515,7 @@ def export_session(
     refs_src = sd / "calibration" / "brightfield"
     ref_records: list[dict] = []
     if refs_src.is_dir():
-        shutil.copytree(refs_src, out / "dic" / "references", dirs_exist_ok=True)
+        shutil.copytree(refs_src, out / "bf" / "references", dirs_exist_ok=True)
         for entry in sorted(refs_src.iterdir()):
             rec = entry / "brightfield.yaml"
             if rec.is_file():
@@ -1245,45 +1527,69 @@ def export_session(
                     doc["record"] = doc.get("record") or entry.name
                     ref_records.append(doc)
 
-    # --- the DIC overview, by frame then time, not by uuid ------------------
-    dic_rows = []
+    # --- the brightfield overview, by frame then time, not by uuid ------------------
+    # Taken from more than one position, the overview is one series per
+    # field, each in a folder of its own with its own table and movies.
+    n_fields = max(
+        (int((r.get("metadata") or {}).get("fields") or 1) for r in snapshots), default=1
+    )
+    multi = n_fields > 1
+
+    def bf_dir_of(field_no: int) -> Path:
+        return out / "bf" / f"field_{field_no}" if multi else out / "bf"
+
+    bf_rows = []
+    rows_by_field: dict[int, list[dict]] = {}
+    field_positions: dict[int, dict] = {}
     for i, rec in enumerate(
         sorted(
             snapshots,
-            key=lambda r: ((r.get("metadata") or {}).get("frame") or 0, r.get("captured_at") or ""),
+            key=lambda r: (
+                (r.get("metadata") or {}).get("frame") or 0,
+                (r.get("metadata") or {}).get("field") or 1,
+                r.get("captured_at") or "",
+            ),
         ),
         start=1,
     ):
         meta = rec.get("metadata") or {}
         frame = int(meta.get("frame") or i)
+        field_no = int(meta.get("field") or 1)
         when = meta.get("captured_at") or rec.get("captured_at")
-        name = f"dic_f{frame:04d}_{_stamp(when)}.tif" if when else f"dic_f{frame:04d}.tif"
-        if _copy(Path(rec.get("file_path") or ""), out / "dic" / name, step):
+        name = f"bf_f{frame:04d}_{_stamp(when)}.tif" if when else f"bf_f{frame:04d}.tif"
+        if _copy(Path(rec.get("file_path") or ""), bf_dir_of(field_no) / name, step):
             pos = meta.get("position") or {}
-            dic_rows.append(
-                {
-                    "file": f"dic/{name}",
-                    "frame": frame,
-                    "round": meta.get("round"),
-                    "captured_at": when,
-                    "x_um": pos.get("x"),
-                    "y_um": pos.get("y"),
-                    "exposure_ms": meta.get("exposure_ms"),
-                    "light": meta.get("light"),
-                    "led_intensity_pct": meta.get("led_intensity_pct"),
-                    "width": rec.get("width"),
-                    "height": rec.get("height"),
-                    "dark": _ref_path(meta, "dark", ref_records),
-                    "flat": _ref_path(meta, "flat", ref_records),
-                }
-            )
-    if dic_rows:
+            if pos and field_no not in field_positions:
+                field_positions[field_no] = dict(pos)
+            dark, flat = _ref_path(meta, "dark", ref_records), _ref_path(meta, "flat", ref_records)
+            if multi:
+                dark, flat = (f"../{dark}" if dark else ""), (f"../{flat}" if flat else "")
+            row = {
+                "file": f"bf/field_{field_no}/{name}" if multi else f"bf/{name}",
+                "frame": frame,
+                "field": field_no,
+                "round": meta.get("round"),
+                "captured_at": when,
+                "x_um": pos.get("x"),
+                "y_um": pos.get("y"),
+                "exposure_ms": meta.get("exposure_ms"),
+                "light": meta.get("light"),
+                "led_intensity_pct": meta.get("led_intensity_pct"),
+                "width": rec.get("width"),
+                "height": rec.get("height"),
+                "dark": dark,
+                "flat": flat,
+            }
+            bf_rows.append(row)
+            rows_by_field.setdefault(field_no, []).append(row)
+    for field_no, rows_f in sorted(rows_by_field.items()):
         _write_csv(
-            out / "dic" / "dic.csv",
-            dic_rows,
+            bf_dir_of(field_no) / "bf.csv",
+            rows_f,
             [
                 "file",
                 "frame",
+                "field",
                 "round",
                 "captured_at",
                 "x_um",
@@ -1297,43 +1603,60 @@ def export_session(
                 "flat",
             ],
         )
-    step("dic.csv")
+    step("bf.csv")
 
-    # --- the DIC frames as a movie, to watch the night go by: as taken, and
+    # --- the brightfield frames as a movie, to watch the night go by: as taken, and
     # with the dark and flat divided out where there are any ----------------
-    movies = [False, True] if (dic_rows and ref_records) else [False] if dic_rows else []
+    movies = [False, True] if (bf_rows and ref_records) else [False] if bf_rows else []
     for corrected in movies:
         base = done
+        for field_no, rows_f in sorted(rows_by_field.items()):
+            at = base
 
-        def movie_progress(i: int, _n: int, what: str) -> None:
-            nonlocal done
-            done = base + i  # noqa: B023
-            if progress:
-                progress(done, total, what)
+            def movie_progress(i: int, _n: int, what: str) -> None:
+                nonlocal done
+                done = at + i  # noqa: B023
+                if progress:
+                    progress(done, total, what)
 
-        try:
-            dic_movie(out / "dic", progress=movie_progress, corrected=corrected)
-        except Exception:
-            logger.exception("the DIC movie failed; the frames are exported without it")
-        done = base + len(dic_rows)
+            try:
+                bf_movie(bf_dir_of(field_no), progress=movie_progress, corrected=corrected)
+            except Exception:
+                logger.exception("the brightfield movie failed; the frames are exported without it")
+            base = at + len(rows_f)
+        done = base
 
-    # --- each embryo cut out of the DIC frames, a dataset folder each --------
+    # --- each embryo cut out of the brightfield frames, a dataset folder each --------
+    # With more than one field, each field has its own marking (the operator
+    # marked the embryos at each position) and its own embryos/ folder.
     crops_root: Path | None = None
-    if dic_rows and seeds:
+    if bf_rows and seeds:
         base = done
+        for field_no, rows_f in sorted(rows_by_field.items()):
+            at = base
+            seeds_f = (
+                marking_seeds(store, session_id, embryos, position=field_positions.get(field_no))
+                if multi
+                else seeds
+            )
+            if not seeds_f:
+                base = at + len(rows_f)
+                continue
 
-        def crops_progress(i: int, _n: int, what: str) -> None:
-            nonlocal done
-            done = base + i  # noqa: B023
-            if progress:
-                progress(done, total, what)
+            def crops_progress(i: int, _n: int, what: str) -> None:
+                nonlocal done
+                done = at + i  # noqa: B023
+                if progress:
+                    progress(done, total, what)
 
-        try:
-            boxes = find_embryo_boxes(out / "dic", seeds)
-            crops_root = dic_crops(out / "dic", boxes, progress=crops_progress)
-        except Exception:
-            logger.exception("embryo crops failed; the frames are exported without them")
-        done = base + len(dic_rows)
+            try:
+                seeds_f = orient_seeds(bf_dir_of(field_no), seeds_f)
+                boxes = find_embryo_boxes(bf_dir_of(field_no), seeds_f)
+                crops_root = bf_crops(bf_dir_of(field_no), boxes, progress=crops_progress)
+            except Exception:
+                logger.exception("embryo crops failed; the frames are exported without them")
+            base = at + len(rows_f)
+        done = base
 
     # --- the README: what this is, and where the originals are --------------
     name = info.get("name") or sd.name
@@ -1377,9 +1700,9 @@ def export_session(
         "  <embryo>/volumes.csv                      when each was taken and with what settings",
         "  <embryo>/projections/                     the per-timepoint JPEG projections",
         "  <embryo>/calibration/                     the calibration runs (frames, plots, fit)",
-        "  dic/dic_f0001_<date-time>.tif ...         the DIC overview frames, in order;"
-        " dic/dic.csv says when and where",
-        "  dic/references/<record>/                  dark and flat-field references;"
+        "  bf/bf_f0001_<date-time>.tif ...         the brightfield overview frames, in order;"
+        " bf/bf.csv says when and where",
+        "  bf/references/<record>/                  dark and flat-field references;"
         " brightfield.yaml says light, exposure, frames averaged, checks",
         "  embryos.csv, stage_calls.csv, events.csv, temperature.csv",
         "  metadata/                                 the session's own files, as kept"
@@ -1387,28 +1710,37 @@ def export_session(
         "",
         "Brightfield correction",
         "----------------------",
-        "  dic.csv names the dark and flat that apply to each frame. Then:",
+        "  bf.csv names the dark and flat that apply to each frame. Then:",
         "    corrected = (frame - dark) / (flat - dark) * mean(flat - dark)",
         "  In Fiji: Process > Image Calculator (Subtract, then Divide, 32-bit result),"
         " then multiply by the mean.",
-        "" if not ref_records else f"  {len(ref_records)} reference record(s) in dic/references/.",
+        "" if not ref_records else f"  {len(ref_records)} reference record(s) in bf/references/.",
         "",
         "Fiji",
         "----",
         "  A time series: File > Import > Image Sequence..., choose an <embryo>/volumes folder.",
         "  One volume: File > Open on a single .tif (it is a Z stack).",
-        "  The DIC overview as a movie: open dic/dic.avi (File > Import > AVI...), or"
-        " Image Sequence on the dic/ folder for the raw frames.",
-        "  dic.avi is Motion JPEG: every frame in time order, one brightness stretch for"
+        *(
+            [
+                f"  The overview was taken from {n_fields} positions: bf/field_1/ … "
+                f"bf/field_{n_fields}/ hold one series each, with the same files inside.",
+            ]
+            if multi
+            else []
+        ),
+        "  The brightfield overview as a movie: open bf/bf.avi (File > Import > AVI...), or"
+        " Image Sequence on the bf/ folder for the raw frames.",
+        "  bf.avi is Motion JPEG: every frame in time order, one brightness stretch for"
         " the run, frame number and time since the first in the corner. For viewing;"
-        " the .tif frames are the data.",
-        "  dic_corrected.avi is the same with each frame's dark and flat divided out"
+        " the .tif frames are the data. A movie is kept under 1 GB so every player"
+        " shows every frame, at a reduced size when a long run needs it.",
+        "  bf_corrected.avi is the same with each frame's dark and flat divided out"
         " (the correction above), where the session had them.",
         *(
             [
-                "  dic/embryos/<embryo>/ is each embryo cut out of every DIC frame with one fixed"
-                " box: raw/ and corrected/ crops, the dark and flat cropped the same, and a"
-                " metadata.csv tying them together. A Hugging Face image folder each; its"
+                "  bf/embryos/<embryo>/ is each embryo cut out of every brightfield frame with"
+                " one fixed box: raw/ and corrected/ crops, the dark and flat cropped the same,"
+                " and a metadata.csv tying them together. A Hugging Face image folder each; its"
                 " README.md says how to load and upload it.",
             ]
             if crops_root is not None

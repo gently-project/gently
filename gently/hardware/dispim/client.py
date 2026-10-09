@@ -1214,7 +1214,7 @@ class DiSPIMMicroscope(Microscope):
             # pixels and kept the path on the result, so _extract_image finds
             # an array and reports no path. Every caller that archives the
             # frame asks `if image_path`, so on a real device layer none of
-            # them ever archived one: a night's DIC overview was 24 frames
+            # them ever archived one: a night's brightfield overview was 24 frames
             # acquired and none on disk.
             if fpath is None and result.get("volume_path"):
                 from pathlib import Path
@@ -1242,9 +1242,13 @@ class DiSPIMMicroscope(Microscope):
         use_last_frame: bool = False,
         capture_only: bool = False,
         use_sam: bool = True,
+        method: str = "bright",
     ) -> dict:
         """
         Capture image and detect embryos using blob detection + SAM.
+
+        ``method`` is what an embryo looks like: "bright" under the room
+        light, "dark" under the LED (the export's box finder).
 
         Returns raw SAM detections plus the bottom-camera image and stage
         position. Interactive editing is the caller's responsibility — the
@@ -1301,6 +1305,7 @@ class DiSPIMMicroscope(Microscope):
                 "use_last_frame": use_last_frame,
                 "capture_only": capture_only,
                 "use_sam": use_sam,
+                "method": method,
             }
             if exposure_ms is not None:
                 payload["exposure_ms"] = exposure_ms

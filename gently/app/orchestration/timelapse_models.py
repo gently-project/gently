@@ -342,8 +342,8 @@ class StopCondition:
 
 
 @dataclass
-class DicOverview:
-    """One bottom-camera (DIC) frame of the whole field, per round.
+class BfOverview:
+    """One bottom-camera (brightfield) frame of the whole field, per round.
 
     The second channel of a Gently timelapse. Not a per-embryo thing: the
     bottom camera's field covers every embryo on the coverslip, so one frame
@@ -360,11 +360,16 @@ class DicOverview:
     only a series if it is taken from the same place each time, so None
     resolves to the centroid of the subjects at start, and the operator can
     pin it to wherever the stage is.
+
+    When the embryos do not all fit in one field, ``positions`` is every
+    place the frame is taken from, in order: one frame per position per
+    round, each filed with its field number. ``position`` is then the first.
     """
 
     enabled: bool = False
     every_seconds: float | None = None
     position: dict[str, float] | None = None
+    positions: list[dict[str, float]] = field(default_factory=list)
     exposure_ms: float | None = None
     # The light the frame is taken under. The bottom camera drives no light
     # of its own, so without this the overview was whatever the room happened
@@ -379,11 +384,26 @@ class DicOverview:
     LIGHTS = ("room", "led", "none")
     LED_INTENSITY_LIMITS_PCT = (1, 100)
 
+    def __post_init__(self) -> None:
+        self.positions = [dict(p) for p in (self.positions or []) if p]
+        if self.positions:
+            self.position = dict(self.positions[0])
+        elif self.position:
+            self.positions = [dict(self.position)]
+
+    def fields(self) -> list[dict[str, float] | None]:
+        """Where the frames of one round are taken from, in order. One entry
+        of None means wherever the stage is."""
+        if self.positions:
+            return [dict(p) for p in self.positions]
+        return [dict(self.position) if self.position else None]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": bool(self.enabled),
             "every_seconds": self.every_seconds,
             "position": dict(self.position) if self.position else None,
+            "positions": [dict(p) for p in self.positions],
             "exposure_ms": self.exposure_ms,
             "light": self.light,
             "led_intensity_pct": self.led_intensity_pct,
@@ -405,21 +425,31 @@ class DicOverview:
         return int(value)
 
     @classmethod
-    def from_dict(cls, d: Any) -> "DicOverview":
-        if isinstance(d, DicOverview):
+    def from_dict(cls, d: Any) -> "BfOverview":
+        if isinstance(d, BfOverview):
             return d
         if not isinstance(d, dict):
             return cls()
-        pos = d.get("position")
-        position = None
-        if isinstance(pos, dict) and pos.get("x") is not None and pos.get("y") is not None:
-            position = {"x": float(pos["x"]), "y": float(pos["y"])}
+
+        def xy(pos: Any) -> dict[str, float] | None:
+            if isinstance(pos, dict) and pos.get("x") is not None and pos.get("y") is not None:
+                return {"x": float(pos["x"]), "y": float(pos["y"])}
+            return None
+
+        position = xy(d.get("position"))
+        raw_positions = d.get("positions")
+        positions = (
+            [p for p in (xy(x) for x in raw_positions) if p]
+            if isinstance(raw_positions, list)
+            else []
+        )
         every = d.get("every_seconds")
         exposure = d.get("exposure_ms")
         return cls(
             enabled=bool(d.get("enabled", False)),
             every_seconds=float(every) if every is not None else None,
             position=position,
+            positions=positions,
             exposure_ms=float(exposure) if exposure is not None else None,
             # `use_led` in an older plan or checkpoint never did anything (the
             # camera ignored it), so it does not choose the LED now either.
@@ -453,8 +483,8 @@ class TimelapseState:
     next_round_time: datetime | None = None
     seconds_until_next_round: float | None = None
     error_message: str | None = None
-    # The DIC overview channel, when the run has one: frames taken, next due.
-    dic: dict[str, Any] | None = None
+    # The brightfield overview channel, when the run has one: frames taken, next due.
+    bf: dict[str, Any] | None = None
     # False for a brightfield-only run: the overview channel is the run, and
     # no embryo is imaged by the SPIM head.
     volumes: bool = True
@@ -486,6 +516,6 @@ class TimelapseState:
                 for eid, e in self.embryos.items()
             },
             "error": self.error_message,
-            "dic": self.dic,
+            "bf": self.bf,
             "volumes": self.volumes,
         }

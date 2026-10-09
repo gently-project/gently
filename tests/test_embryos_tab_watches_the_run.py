@@ -1,9 +1,9 @@
 """The Embryos tab says what the run is and shows its frames as the experiment.
 
 "the embryos tab - it has not been looked at in ages - can you see how we can
-improve that view? especialy now that dic images are being sent there."
+improve that view? especialy now that bf images are being sent there."
 
-A brightfield-only run (volumes off, the DIC channel on) has no embryos; the
+A brightfield-only run (volumes off, the brightfield channel on) has no embryos; the
 tab used to call it "No active timelapse" under a strip of live frames. Now the
 status comes from the run, the stats from what kind of run it is, the frames
 get the stage, and the embryo rail is tiles on the stage ramp, not emoji.
@@ -35,9 +35,9 @@ class TestTheHeaderSaysWhatRuns:
     def test_the_tab_asks_the_run_what_kind_it_is(self):
         assert "fetch('/api/devices/timelapse/status')" in EMBRYOS
         kind = _fn(EMBRYOS, "runKind() {", 900)
-        assert "r.volumes === false && r.dic && r.dic.enabled) return 'brightfield'" in kind
+        assert "r.volumes === false && r.bf && r.bf.enabled) return 'brightfield'" in kind
         assert (
-            "if (this._dicFrames.length && !embryos) return 'brightfield'" in kind
+            "if (this._bfFrames.length && !embryos) return 'brightfield'" in kind
         )  # at rest, by what it holds
 
     def test_brightfield_stats_are_frames_cadence_next_and_references(self):
@@ -49,9 +49,9 @@ class TestTheHeaderSaysWhatRuns:
 
 class TestTheStage:
     def test_the_frames_get_the_stage_and_the_strip_is_its_folded_form(self):
-        assert 'id="embryos-overview"' in INDEX and 'id="dic-strip-open"' in INDEX
-        assert 'id="dic-viewer"' not in INDEX  # no modal
-        strip = _fn(EMBRYOS, "renderDicStrip() {", 2400)
+        assert 'id="embryos-overview"' in INDEX and 'id="bf-strip-open"' in INDEX
+        assert 'id="bf-viewer"' not in INDEX  # no modal
+        strip = _fn(EMBRYOS, "renderBfStrip() {", 2400)
         assert "kind === 'brightfield' || this._overviewOpen" in strip
         assert "OverviewStage.mount('embryos-overview'" in EMBRYOS
         assert "is-overview-only" in strip and ".view-default.is-overview-only" in MAIN_CSS
@@ -73,7 +73,7 @@ class TestTheStage:
         assert ".overview-stage[hidden] { display: none; }" in MAIN_CSS
 
     def test_the_frame_list_carries_light_exposure_and_correctability(self):
-        remember = _fn(EMBRYOS, "async refreshDicStrip() {", 900)
+        remember = _fn(EMBRYOS, "async refreshBfStrip() {", 900)
         for needle in ("exposure_ms", "light", "led_intensity_pct", "correctable"):
             assert needle in remember, needle
 

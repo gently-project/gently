@@ -328,7 +328,7 @@ def create_router(server) -> APIRouter:
                         "last_image_at": held.get("last_image_at"),
                         "run": held.get("run"),
                         "last_run": held.get("last_run"),
-                        "dic_frames": _dic_count(store, sid),
+                        "bf_frames": _bf_count(store, sid),
                         "bytes": folder_bytes(store._session_dir(sid), fresh=sid == active_id),
                         "brightfield_references": _reference_count(store, sid),
                         "suggested_name": derive_session_name(
@@ -361,9 +361,9 @@ def create_router(server) -> APIRouter:
         except Exception:
             return 0
 
-    def _dic_count(store, sid: str) -> int:
+    def _bf_count(store, sid: str) -> int:
         try:
-            return len(store.list_snapshots(sid, "dic") or [])
+            return len(store.list_snapshots(sid, "bf") or [])
         except Exception:
             return 0
 
@@ -737,7 +737,7 @@ def create_router(server) -> APIRouter:
         snapshot = store.load_session_snapshot(session_id) or {}
         experiment = snapshot.get("experiment_data", {}) or {}
         held = await asyncio.to_thread(_what_a_session_holds, store, session_id)
-        embryos, dic_frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
+        embryos, bf_frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
         acquisition = store.get_acquisition_plan(session_id)
         state = _checkpoint(store, session_id)
         _add_dose(embryos, state)
@@ -762,7 +762,7 @@ def create_router(server) -> APIRouter:
             ),
             "acquisition": acquisition,
             "embryos": embryos,
-            "dic_frames": dic_frames,
+            "bf_frames": bf_frames,
             "events": events,
             "temperature": temperature,
             "removed_embryos": removed,
@@ -773,7 +773,7 @@ def create_router(server) -> APIRouter:
 
     def _what_to_look_at(store, sid: str) -> tuple[list[dict], list[dict]]:
         """Per embryo: its latest projection and last predicted stage. Per
-        DIC frame: where to fetch it. Paths never leave the server; the
+        brightfield frame: where to fetch it. Paths never leave the server; the
         client gets URLs the routes below resolve through the store."""
         embryos: list[dict] = []
         states = ((store.load_session_snapshot(sid) or {}).get("experiment_data", {}) or {}).get(
@@ -827,7 +827,7 @@ def create_router(server) -> APIRouter:
             )
         frames: list[dict] = []
         try:
-            recs = store.list_snapshots(sid, "dic") or []
+            recs = store.list_snapshots(sid, "bf") or []
         except Exception:
             recs = []
         for rec in recs:
@@ -968,7 +968,7 @@ def create_router(server) -> APIRouter:
             ],
             "acquisition": acquisition,
             "run": held.get("last_run"),
-            "dic_frames": _dic_count(store, session_id),
+            "bf_frames": _bf_count(store, session_id),
             "operator_said": _first_user_words(snapshot.get("conversation_history") or []),
         }
         try:
@@ -988,7 +988,7 @@ def create_router(server) -> APIRouter:
         """Begin exporting the session: one folder per embryo, files named so
         a sort is time order, the record beside them (see gently.core.export).
         ``{"dest": "<folder>"}`` puts it somewhere other than <root>/exports;
-        ``{"crops": false}`` skips cutting each embryo out of the DIC frames."""
+        ``{"crops": false}`` skips cutting each embryo out of the brightfield frames."""
         import threading
 
         from gently.core.export import export_session
@@ -1047,7 +1047,7 @@ def create_router(server) -> APIRouter:
         return dict(job, default_dest=default)
 
     # ---- movies, from any folder ------------------------------------------
-    # Two kinds with two behaviours. A DIC movie is a folder of frames over
+    # Two kinds with two behaviours. A brightfield movie is a folder of frames over
     # time, with the flat divided out where the references are beside them.
     # A SPIM movie is a folder of volumes: max projections over time, or
     # every slice stack by stack. The folder is the operator's own (an export
@@ -1055,26 +1055,27 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/movies", dependencies=[Depends(require_control)])
     async def start_movie(body: dict):
-        """``{"kind": "dic", "folder": ..., "corrected": true}``,
+        """``{"kind": "bf", "folder": ..., "corrected": true}``,
         ``{"kind": "spim", "folder": ..., "view": "projection"|"slices"}``, or
         ``{"kind": "crops", "folder": ..., "session_id": ...}``: each embryo
-        cut out of a folder of DIC frames, where the session's Operate
+        cut out of a folder of brightfield frames, where the session's Operate
         marking says the embryos are."""
         import threading
 
         from gently.core.export import (
-            _dic_frames,
+            _bf_frames,
             _volume_files,
-            dic_crops,
-            dic_movie,
+            bf_crops,
+            bf_movie,
             find_embryo_boxes,
             marking_seeds,
+            orient_seeds,
             spim_movie,
         )
 
         kind = str((body or {}).get("kind") or "")
-        if kind not in ("dic", "spim", "crops"):
-            raise HTTPException(status_code=400, detail="kind must be 'dic', 'spim' or 'crops'")
+        if kind not in ("bf", "spim", "crops"):
+            raise HTTPException(status_code=400, detail="kind must be 'bf', 'spim' or 'crops'")
         if _MOVIES.get("state") == "running":
             raise HTTPException(status_code=409, detail="A movie is already being made")
         folder = (body or {}).get("folder")
@@ -1089,11 +1090,12 @@ def create_router(server) -> APIRouter:
         steps: list[dict] = []
         seeds: dict = {}
         if kind == "crops":
-            if not _dic_frames(path) and _dic_frames(path / "dic"):
-                path = path / "dic"
-            if not _dic_frames(path):
+            if not _bf_frames(path) and _bf_frames(path / "bf"):
+                path = path / "bf"
+            if not _bf_frames(path):
                 raise HTTPException(
-                    status_code=400, detail="No DIC frames (dic_f*.tif or dic.csv) in that folder"
+                    status_code=400,
+                    detail="No brightfield frames (bf_f*.tif or bf.csv) in that folder",
                 )
             sid = str((body or {}).get("session_id") or "")
             store = _file_store()
@@ -1107,12 +1109,13 @@ def create_router(server) -> APIRouter:
                     "nothing to say where the embryos are.",
                 )
             steps.append({"crops": True})
-        elif kind == "dic":
-            if not _dic_frames(path) and _dic_frames(path / "dic"):
-                path = path / "dic"
-            if not _dic_frames(path):
+        elif kind == "bf":
+            if not _bf_frames(path) and _bf_frames(path / "bf"):
+                path = path / "bf"
+            if not _bf_frames(path):
                 raise HTTPException(
-                    status_code=400, detail="No DIC frames (dic_f*.tif or dic.csv) in that folder"
+                    status_code=400,
+                    detail="No brightfield frames (bf_f*.tif or bf.csv) in that folder",
                 )
             steps.append({"corrected": False})
             if bool((body or {}).get("corrected", True)):
@@ -1156,9 +1159,10 @@ def create_router(server) -> APIRouter:
 
                     out: Path | None
                     if kind == "crops":
-                        out = dic_crops(path, find_embryo_boxes(path, seeds), progress=progress)
-                    elif kind == "dic":
-                        out = dic_movie(path, progress=progress, corrected=step["corrected"])
+                        placed = orient_seeds(path, seeds)
+                        out = bf_crops(path, find_embryo_boxes(path, placed), progress=progress)
+                    elif kind == "bf":
+                        out = bf_movie(path, progress=progress, corrected=step["corrected"])
                         if out is None and step["corrected"]:
                             job["note"] = (
                                 "no dark and flat beside the frames, so no corrected movie"
@@ -1187,21 +1191,30 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/sessions/{session_id}/snapshot/{stem}.png")
     async def session_snapshot_png(session_id: str, stem: str, max: int | None = None):
-        """One of the session's filed snapshots (DIC overview) as a PNG,
+        """One of the session's filed snapshots (brightfield overview) as a PNG,
         ``?max=N`` for a thumbnail. Found through the store's own listing,
         never from a path in the request."""
-        from gently.ui.web.routes.dic import tiff_png_response
+        from gently.ui.web.routes.bf import tiff_png_response
 
         store = _file_store()
         if store is None:
             raise HTTPException(status_code=503, detail="Store not available")
-        try:
-            recs = store.list_snapshots(session_id) or []
-        except Exception:
-            recs = []
-        rec = next((r for r in recs if Path(r.get("file_path") or "").stem == stem), None)
+
+        def find() -> dict | None:
+            one = getattr(store, "get_snapshot", None)
+            if callable(one):
+                got = one(session_id, stem)
+                if isinstance(got, dict) or got is None:
+                    return got
+            try:
+                recs = store.list_snapshots(session_id) or []
+            except Exception:
+                recs = []
+            return next((r for r in recs if Path(r.get("file_path") or "").stem == stem), None)
+
+        rec = await asyncio.to_thread(find)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"no snapshot {stem!r} in this session")
-        return tiff_png_response(Path(rec["file_path"]), stem, max)
+        return await asyncio.to_thread(tiff_png_response, Path(rec["file_path"]), stem, max)
 
     return router

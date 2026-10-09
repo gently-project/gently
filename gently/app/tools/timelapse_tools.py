@@ -205,7 +205,7 @@ async def start_brightfield_timelapse(
     if interval_seconds <= 0:
         return "Error: interval_seconds must be positive."
 
-    dic = {
+    bf = {
         "enabled": True,
         "light": light,
         "exposure_ms": exposure_ms,
@@ -216,7 +216,7 @@ async def start_brightfield_timelapse(
             stop_condition=stop_condition,
             base_interval_seconds=interval_seconds,
             condition_value=condition_value,
-            dic=dic,
+            bf=bf,
             volumes=False,
         )
     except Exception as e:
@@ -246,7 +246,7 @@ def get_timelapse_status(context: dict | None = None) -> str:
     # A brightfield-only run images the field, not embryos: "0 timepoints, 0
     # active embryos" would read as a run that is doing nothing.
     brightfield = status_dict.get("volumes") is False
-    overview = status_dict.get("dic") or {}
+    overview = status_dict.get("bf") or {}
 
     if status_dict["started_at"]:
         lines.append(f"Started: {status_dict['started_at']}")

@@ -286,9 +286,15 @@ class SAMEmbryoDetector:
         mad_k: float = 6.0,
         min_relative_peak: float = 0.6,
         max_candidates: int | None = None,
+        method: str = "bright",
     ) -> tuple[list[dict], np.ndarray]:
         """
         Find embryo candidates by flat-fielding + scale-matched blob detection.
+
+        ``method="dark"`` is the other light: under the transmitted-light LED
+        an embryo is a compact DARK oval on a bright field, and the finder is
+        :func:`gently.core.embryo_finding.dark_blobs` — the one the export's
+        crops use. The candidates come back in the same shape either way.
 
         Embryos are compact BRIGHT ovals on a noisy background that carries a
         strong low-frequency illumination gradient (dark corners) and, often, a
@@ -359,6 +365,8 @@ class SAMEmbryoDetector:
         """
         from skimage.feature import peak_local_max
 
+        if method == "dark":
+            return self._dark_candidates(image, min_area, max_area, max_candidates)
         logger.info("Finding embryo candidates (flat-field + blob, mad_k=%.1f)...", mad_k)
         logger.debug("Input range: %s - %s", image.min(), image.max())
 
@@ -472,6 +480,46 @@ class SAMEmbryoDetector:
 
         logger.info("Found %d embryo candidates", len(candidates))
         return candidates, img_enhanced
+
+    def _dark_candidates(
+        self,
+        image: np.ndarray,
+        min_area: int | None,
+        max_area: int | None,
+        max_candidates: int | None,
+    ) -> tuple[list[dict], np.ndarray]:
+        """Candidates from the dark-blob finder, in the bright finder's shape,
+        with an 8-bit stretch of the flattened frame as the enhanced image."""
+        from gently.core.embryo_finding import dark_blobs, flatten
+
+        img = np.squeeze(np.asarray(image))
+        if img.ndim == 3:
+            img = img.mean(axis=2)
+        h, w = img.shape[:2]
+        r_emb = self._embryo_radius_px((h, w))
+        lo = float(min_area) if min_area is not None else 0.0
+        hi = float(max_area) if max_area is not None else 12.0 * np.pi * r_emb**2
+        candidates: list[dict[str, Any]] = []
+        for x0, y0, x1, y1, cx, cy, area in dark_blobs(img):
+            if not (lo <= area <= hi):
+                continue
+            candidates.append(
+                {
+                    "bbox": (int(x0), int(y0), int(x1 - x0), int(y1 - y0)),
+                    "centroid": (float(cx), float(cy)),
+                    "area": float(area),
+                    "relative_strength": 1.0,
+                }
+            )
+        # The biggest first: with a cap, the embryos are the big dark things.
+        candidates.sort(key=lambda c: -float(c["area"]))
+        if max_candidates is not None:
+            candidates = candidates[:max_candidates]
+        ratio = flatten(img)
+        p_lo, p_hi = np.percentile(ratio, (0.5, 99.5))
+        enhanced = np.clip((ratio - p_lo) / ((p_hi - p_lo) or 1.0) * 255.0, 0, 255).astype(np.uint8)
+        logger.info("Found %d dark embryo candidates", len(candidates))
+        return candidates, enhanced
 
     def refine_with_sam(
         self, image: np.ndarray, candidates: list[dict], padding: int = 20
@@ -625,9 +673,13 @@ class SAMEmbryoDetector:
         min_area: int | None = None,
         max_area: int | None = None,
         min_relative_peak: float | None = None,
+        method: str = "bright",
     ) -> dict:
         """
         Detect embryos using blob-based candidate finding + SAM refinement.
+
+        ``method`` is what an embryo looks like in the frame: ``"bright"``
+        under the room light (the default), ``"dark"`` under the LED.
 
         This hybrid approach:
         1. Finds candidate embryos with flat-fielding + blob detection
@@ -716,6 +768,7 @@ class SAMEmbryoDetector:
             max_area=max_area,
             min_relative_peak=min_relative_peak,
             max_candidates=max_candidates,
+            method=method,
         )
 
         # Step 2: Claude classifies each candidate (removes only; never adds).

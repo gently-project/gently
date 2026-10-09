@@ -66,7 +66,7 @@ def _session_with_a_run(store, sid="s1"):
             "interval_seconds": 600,
             "num_slices": 60,
             "stop_condition": {"kind": "hatching", "value": None},
-            "dic": {
+            "bf": {
                 "enabled": True,
                 "every_seconds": 1800,
                 "light": "led",
@@ -75,7 +75,7 @@ def _session_with_a_run(store, sid="s1"):
         },
     )
     store.put_snapshot(
-        sid, "dic", np.zeros((20, 30), dtype=np.uint16), metadata={"channel": "dic", "frame": 1}
+        sid, "bf", np.zeros((20, 30), dtype=np.uint16), metadata={"channel": "bf", "frame": 1}
     )
     (store._session_dir(sid) / "timelapse.yaml").write_text(
         yaml.safe_dump(
@@ -98,7 +98,7 @@ class TestTheList:
     def test_each_session_says_how_much_it_holds(self, store):
         _session_with_a_run(store)
         s = _client(store).get("/api/sessions").json()["sessions"][0]
-        assert (s["embryo_count"], s["timepoints"], s["dic_frames"]) == (1, 3, 1)
+        assert (s["embryo_count"], s["timepoints"], s["bf_frames"]) == (1, 3, 1)
         assert s["bytes"] > 0  # what the folder occupies on disk
         assert s["brightfield_references"] == 0  # dark/flat sets, for the "has refs" chip
         # A finished run is described, but is not an interrupted one the gate would offer.
@@ -111,20 +111,20 @@ class TestTheDetail:
         sid = _session_with_a_run(store)
         d = _client(store).get(f"/api/sessions/{sid}").json()
         assert d["acquisition"]["interval_seconds"] == 600
-        assert d["acquisition"]["dic"]["every_seconds"] == 1800
+        assert d["acquisition"]["bf"]["every_seconds"] == 1800
         (e,) = d["embryos"]
         assert e["nickname"] == "A" and e["role"] == "test"
         assert e["timepoints"] == 3 and e["latest_timepoint"] == 3
         assert e["thumbnail"] == f"/api/sessions/{sid}/projection?embryo=embryo_1&t=3"
         assert e["stage"] == "1_5_fold"
         assert [p["stage"] for p in e["predictions"]] == ["bean", "comma", "1_5_fold"]
-        (f,) = d["dic_frames"]
-        assert f["frame"] == 1 and f["url"].startswith(f"/api/sessions/{sid}/snapshot/dic_")
+        (f,) = d["bf_frames"]
+        assert f["frame"] == 1 and f["url"].startswith(f"/api/sessions/{sid}/snapshot/bf_")
 
-    def test_a_dic_frame_of_any_session_renders_as_png(self, store):
+    def test_a_bf_frame_of_any_session_renders_as_png(self, store):
         sid = _session_with_a_run(store)
         c = _client(store)
-        url = c.get(f"/api/sessions/{sid}").json()["dic_frames"][0]["url"]
+        url = c.get(f"/api/sessions/{sid}").json()["bf_frames"][0]["url"]
         r = c.get(url, params={"max": 16})
         assert r.status_code == 200 and r.headers["content-type"] == "image/png"
         assert c.get(f"/api/sessions/{sid}/snapshot/not_filed.png").status_code == 404
@@ -137,7 +137,7 @@ class TestThePane:
         assert "session-tab-content" in REVIEW_JS and ".session-tab-content" in REVIEW_CSS
 
     def test_the_pane_shows_plan_pictures_frames_and_stage_calls(self):
-        needles = ("renderPlan(", "embryo-thumb", "renderDicStrip(", "stage-call", "tool_result")
+        needles = ("renderPlan(", "embryo-thumb", "renderBfStrip(", "stage-call", "tool_result")
         for needle in needles:
             assert needle in REVIEW_JS, needle
 

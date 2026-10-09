@@ -9,7 +9,7 @@ import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from gently.app.orchestration.timelapse_models import DicOverview
+from gently.app.orchestration.timelapse_models import BfOverview
 from gently.harness import calibration_gate
 from gently.ui.web.auth import require_control
 
@@ -84,17 +84,17 @@ async def _run_cancellable_calibration(agent, coro, what: str):
             agent._calibration_aborting = None
 
 
-def _parse_dic_config(raw) -> dict | None:
-    """The DIC overview block of a plan, validated. None when absent or off."""
+def _parse_bf_config(raw) -> dict | None:
+    """The brightfield overview block of a plan, validated. None when absent or off."""
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        raise HTTPException(status_code=400, detail="dic must be an object")
+        raise HTTPException(status_code=400, detail="bf must be an object")
     if not raw.get("enabled"):
         return None
     light = raw.get("light", "room")
     if light not in ("room", "led", "none"):
-        raise HTTPException(status_code=400, detail="dic.light must be room, led or none")
+        raise HTTPException(status_code=400, detail="bf.light must be room, led or none")
     out: dict = {"enabled": True, "light": light}
     every = raw.get("every_seconds")
     if every is not None:
@@ -102,17 +102,28 @@ def _parse_dic_config(raw) -> dict | None:
             every = float(every)
         except (TypeError, ValueError):
             raise HTTPException(
-                status_code=400, detail="dic.every_seconds must be a number"
+                status_code=400, detail="bf.every_seconds must be a number"
             ) from None
         if every <= 0:
-            raise HTTPException(status_code=400, detail="dic.every_seconds must be > 0")
+            raise HTTPException(status_code=400, detail="bf.every_seconds must be > 0")
     out["every_seconds"] = every
+
+    def xy(pos, what: str) -> dict:
+        try:
+            return {"x": float(pos["x"]), "y": float(pos["y"])}
+        except (TypeError, KeyError, ValueError):
+            raise HTTPException(status_code=400, detail=f"{what} must be {{x, y}}") from None
+
+    positions = raw.get("positions")
+    if positions is not None:
+        if not isinstance(positions, list):
+            raise HTTPException(status_code=400, detail="bf.positions must be a list of {x, y}")
+        out["positions"] = [xy(p, "each of bf.positions") for p in positions]
     pos = raw.get("position")
     if pos is not None:
-        try:
-            out["position"] = {"x": float(pos["x"]), "y": float(pos["y"])}
-        except (TypeError, KeyError, ValueError):
-            raise HTTPException(status_code=400, detail="dic.position must be {x, y}") from None
+        out["position"] = xy(pos, "bf.position")
+    elif out.get("positions"):
+        out["position"] = dict(out["positions"][0])
     else:
         out["position"] = None
     exposure = raw.get("exposure_ms")
@@ -120,11 +131,9 @@ def _parse_dic_config(raw) -> dict | None:
         try:
             exposure = float(exposure)
         except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=400, detail="dic.exposure_ms must be a number"
-            ) from None
+            raise HTTPException(status_code=400, detail="bf.exposure_ms must be a number") from None
         if not (0 < exposure <= 10000):
-            raise HTTPException(status_code=400, detail="dic.exposure_ms must be in (0, 10000]")
+            raise HTTPException(status_code=400, detail="bf.exposure_ms must be in (0, 10000]")
     out["exposure_ms"] = exposure
     # The LED's brightness for the frame. Refused here when it is not one,
     # rather than dropped: the orchestrator reads a checkpoint through the
@@ -132,7 +141,7 @@ def _parse_dic_config(raw) -> dict | None:
     # would otherwise run at whatever the LED happened to be.
     pct = raw.get("led_intensity_pct")
     if pct is not None:
-        lo, hi = DicOverview.LED_INTENSITY_LIMITS_PCT
+        lo, hi = BfOverview.LED_INTENSITY_LIMITS_PCT
         try:
             value = float(pct)
         except (TypeError, ValueError):
@@ -140,7 +149,7 @@ def _parse_dic_config(raw) -> dict | None:
         if isinstance(pct, bool) or value is None or value != int(value) or not lo <= value <= hi:
             raise HTTPException(
                 status_code=400,
-                detail=f"dic.led_intensity_pct must be a whole percent in [{lo}, {hi}]",
+                detail=f"bf.led_intensity_pct must be a whole percent in [{lo}, {hi}]",
             )
         # Only when the plan says one: a plan that does not is the plan this
         # route has always passed on, key for key.
@@ -198,13 +207,13 @@ def _parse_laser_powers(raw) -> dict[int, float]:
 _BRIGHTFIELD_STOPS = ("manual", "timepoints", "fixed_timepoints", "duration")
 
 
-def _require_brightfield_plan(stop_condition: str, dic_cfg: dict | None) -> None:
+def _require_brightfield_plan(stop_condition: str, bf_cfg: dict | None) -> None:
     """Refuse a no-volumes run that has nothing to image or no way to end.
 
     The orchestrator refuses the same two things, but it answers in a string
     and the route would report the start as having worked.
     """
-    if dic_cfg is None:
+    if bf_cfg is None:
         raise HTTPException(
             status_code=400,
             detail="Nothing to image: a run without SPIM volumes needs the overview channel on",
@@ -1854,6 +1863,9 @@ def create_router(server) -> APIRouter:
             "use_last_frame": bool(payload.get("use_last_frame", False)),
             "capture_only": bool(payload.get("capture_only", False)),
             "use_sam": use_sam,
+            # What an embryo looks like: bright under the room light, dark
+            # under the LED. The dark finder is the export's box finder.
+            "method": "dark" if str(payload.get("method") or "bright") == "dark" else "bright",
         }
         for key, cast in (
             ("exposure_ms", float),
@@ -2908,7 +2920,7 @@ def create_router(server) -> APIRouter:
                              "561": 10}; each within the device layer's hard
                              limit for its line, or the start is refused. A
                              line left out keeps the power it has
-          dic              (dict | null) — the DIC overview channel:
+          bf              (dict | null) — the brightfield overview channel:
                              {enabled: bool, every_seconds: float|null,
                               position: {x, y}|null, exposure_ms: float|null,
                               light: room|led|none,
@@ -2916,7 +2928,7 @@ def create_router(server) -> APIRouter:
                              one bottom-camera frame of the whole field per
                              round, on its own clock; null/absent = off
           volumes          (bool, default true) — false is a brightfield-only
-                             run: the dic channel alone, no SPIM volumes. It
+                             run: the bf channel alone, no SPIM volumes. It
                              needs no embryos and no calibration, sets no
                              laser preset, and ends on manual, timepoints or
                              duration
@@ -2928,7 +2940,7 @@ def create_router(server) -> APIRouter:
         Validation:
           - interval_seconds must be > 0
           - num_slices must be >= 1
-          - dic.every_seconds, when given, must be > 0
+          - bf.every_seconds, when given, must be > 0
 
         Orchestrator access: server.agent_bridge.agent.timelapse_orchestrator
         RIG-DEFERRED: the actual acquisition + galvo/piezo motion.
@@ -2964,7 +2976,7 @@ def create_router(server) -> APIRouter:
         volumes = payload.get("volumes") is not False
         condition_value = payload.get("condition_value")
         monitoring_mode = payload.get("monitoring_mode") or None
-        dic_cfg = _parse_dic_config(payload.get("dic"))
+        bf_cfg = _parse_bf_config(payload.get("bf"))
         stop_overrides = _parse_stop_overrides(payload.get("stop_conditions"))
         laser_powers = _parse_laser_powers(payload.get("laser_powers")) if volumes else {}
         if volumes:
@@ -2973,7 +2985,7 @@ def create_router(server) -> APIRouter:
             _require_calibrated(embryo_ids, payload)
         else:
             # Nothing is scanned, so there is no geometry to have measured.
-            _require_brightfield_plan(stop_condition, dic_cfg)
+            _require_brightfield_plan(stop_condition, bf_cfg)
             # Both are about volumes: stage-watching reads them, and an
             # embryo's own ending is the ending of its volumes.
             monitoring_mode = None
@@ -3079,15 +3091,15 @@ def create_router(server) -> APIRouter:
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
         #       this is intentional — the agent path wires the plan, this route does not.
         # Only what the plan actually says goes to the orchestrator: a run
-        # without a DIC channel calls start() exactly as it always has.
+        # without a brightfield channel calls start() exactly as it always has.
         start_kwargs: dict = {
             "embryo_ids": embryo_ids,
             "stop_condition": stop_condition,
             "base_interval_seconds": interval_seconds,
             "condition_value": condition_value,
         }
-        if dic_cfg is not None:
-            start_kwargs["dic"] = dic_cfg
+        if bf_cfg is not None:
+            start_kwargs["bf"] = bf_cfg
         if stop_overrides:
             start_kwargs["stop_conditions"] = stop_overrides
         if not volumes:
@@ -3120,7 +3132,7 @@ def create_router(server) -> APIRouter:
                     "exposure_ms": exposure_ms if sent_exposure and volumes else None,
                     "laser_config": volume_geometry.get("laser_config"),
                     "laser_powers": {str(wl): pct for wl, pct in laser_powers.items()} or None,
-                    "dic": dic_cfg,
+                    "bf": bf_cfg,
                     "volumes": volumes,
                     "stop_conditions": stop_overrides or None,
                     "embryo_ids": list(embryo_ids or []),
@@ -3174,7 +3186,7 @@ def create_router(server) -> APIRouter:
                             "stop_condition": stop_condition,
                             "condition_value": condition_value,
                             "monitoring_mode": monitoring_mode or "idle",
-                            "dic": dic_cfg,
+                            "bf": bf_cfg,
                             "volumes": volumes,
                             "laser_config": volume_geometry.get("laser_config"),
                             "laser_powers": (
@@ -3235,7 +3247,7 @@ def create_router(server) -> APIRouter:
         return {
             "started": True,
             "result": result,
-            "dic": dic_cfg,
+            "bf": bf_cfg,
             "stop_conditions": stop_overrides or None,
             "tactics": seeded_tactics,
             "monitoring_mode_result": mode_result,
@@ -3372,7 +3384,7 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/devices/timelapse/status")
     async def timelapse_status():
-        """The run as it stands: status, cadence, every embryo, the DIC channel.
+        """The run as it stands: status, cadence, every embryo, the brightfield channel.
 
         What the Acquisition pane draws its embryo-wise rows from. Read-only,
         so no require_control — it is the same TimelapseState the agent's

@@ -1,7 +1,7 @@
 """Show a thing Gently keeps: in the file manager, or in Fiji.
 
 One route, for every button that says "open folder", "show file" or "open in
-Fiji". A request names *what* (a session, an embryo, a timepoint, a DIC
+Fiji". A request names *what* (a session, an embryo, a timepoint, a brightfield
 frame, a calibration image, the logs) and the store says where that is.
 **No path comes from the browser**, and nothing in a request is joined into
 one: ids are looked up, and a run or a frame is matched against the ones
@@ -38,7 +38,7 @@ WHAT: dict[str, str] = {
     "volume": "file",
     "projection": "file",
     "snapshots": "folder",
-    "dic": "file",
+    "bf": "file",
     "calibration_run": "folder",
     "calibration_image": "file",
     "removed": "folder",
@@ -191,13 +191,13 @@ def create_router(server) -> APIRouter:
                 return Path(projection)
             raise _missing(f"{eid} t{tp} is not on disk in session {sid}")
 
-        if what == "dic":
+        if what == "bf":
             _, sid = _session_dir(store, req)
-            for rec in store.list_snapshots(sid, "dic"):
+            for rec in store.list_snapshots(sid, "bf"):
                 fp = rec.get("file_path")
                 if fp and Path(fp).stem == req.stem:
                     return Path(fp)
-            raise _missing(f"No DIC frame {req.stem!r} in session {sid}")
+            raise _missing(f"No brightfield frame {req.stem!r} in session {sid}")
 
         # calibration_run, calibration_image
         _, sid, eid = _embryo(store, req)

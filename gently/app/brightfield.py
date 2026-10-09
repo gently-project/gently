@@ -377,7 +377,11 @@ def for_frame(record: dict | None) -> dict | None:
     session folder, wherever the session folder goes."""
     if not record:
         return None
-    rel = record.get("relative") or str(Path(*FOLDER) / str(record.get("record")))
+    # Forward slashes whatever the host: this string is filed in frame
+    # metadata and the export's CSV, and read back on any platform.
+    rel = str(record.get("relative") or Path(*FOLDER) / str(record.get("record"))).replace(
+        "\\", "/"
+    )
     return {
         "record": record.get("record"),
         "dark": f"{rel}/{(record.get('dark') or {}).get('file')}" if record.get("dark") else None,

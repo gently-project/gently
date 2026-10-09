@@ -1,6 +1,6 @@
-"""The DIC overview says which light it is taken under.
+"""The brightfield overview says which light it is taken under.
 
-"on dic light source, perhaps that can be configured when setting up the dic
+"on bf light source, perhaps that can be configured when setting up the bf
 - where appropriate. usually we use the room light."
 
 The bottom camera drives no light of its own (since June, by decision), so
@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gently.app.orchestration.timelapse import TimelapseOrchestrator
-from gently.app.orchestration.timelapse_models import DicOverview
+from gently.app.orchestration.timelapse_models import BfOverview
 from gently.core.file_store import FileStore
 from gently.harness.state import ExperimentState
 from gently.ui.web import auth
@@ -92,13 +92,13 @@ def _experiment():
     return ex
 
 
-def _round(client, store, **dic):
+def _round(client, store, **bf):
     orch = TimelapseOrchestrator(client, _experiment(), store=store, session_id="s1")
-    orch._dic_light_settle_s = 0.0
+    orch._bf_light_settle_s = 0.0
 
     async def go():
         msg = await orch.start(
-            base_interval_seconds=100, dic=DicOverview(enabled=True, every_seconds=100, **dic)
+            base_interval_seconds=100, bf=BfOverview(enabled=True, every_seconds=100, **bf)
         )
         assert msg.startswith("Started"), msg
         await asyncio.sleep(0.4)
@@ -109,25 +109,25 @@ def _round(client, store, **dic):
 
 
 def test_the_room_light_is_the_default():
-    assert DicOverview().light == "room"
-    assert DicOverview.from_dict({"enabled": True}).light == "room"
+    assert BfOverview().light == "room"
+    assert BfOverview.from_dict({"enabled": True}).light == "room"
 
 
 def test_a_plan_from_before_the_light_existed_does_not_choose_the_led():
     """`use_led: true` was in every plan and did nothing. It must not start
     flashing the LED at a sample now."""
-    old = DicOverview.from_dict({"enabled": True, "use_led": True})
+    old = BfOverview.from_dict({"enabled": True, "use_led": True})
     assert old.light == "room"
     assert "use_led" not in old.to_dict()
 
 
 def test_an_unknown_light_is_the_room_light():
-    assert DicOverview.from_dict({"enabled": True, "light": "sunlight"}).light == "room"
+    assert BfOverview.from_dict({"enabled": True, "light": "sunlight"}).light == "room"
 
 
 def test_the_light_survives_the_checkpoint():
-    d = DicOverview(enabled=True, light="led").to_dict()
-    assert d["light"] == "led" and DicOverview.from_dict(d).light == "led"
+    d = BfOverview(enabled=True, light="led").to_dict()
+    assert d["light"] == "led" and BfOverview.from_dict(d).light == "led"
 
 
 def test_the_room_light_goes_on_for_the_frame_and_off_before_the_volume(store):
@@ -173,7 +173,7 @@ def test_no_room_light_on_this_rig_takes_the_frame_as_it_is(store, caplog):
     assert log[0] == "room on" and log[1].startswith("capture"), log
     assert "room off" not in log, "it switched off a light it never switched on"
     assert any("did not come on" in r.message for r in caplog.records)
-    assert len(store.list_snapshots("s1", "dic")) == 1
+    assert len(store.list_snapshots("s1", "bf")) == 1
 
 
 def test_a_light_that_will_not_go_off_is_an_error_not_a_whisper(store, caplog):
@@ -208,26 +208,26 @@ def test_the_route_forwards_the_light(light):
     orch = _orch()
     r = _app(orch).post(
         "/api/devices/timelapse/start",
-        json={"interval_seconds": 300, "dic": {"enabled": True, "light": light}},
+        json={"interval_seconds": 300, "bf": {"enabled": True, "light": light}},
     )
     assert r.status_code == 200, r.text
-    assert orch.start.await_args.kwargs["dic"]["light"] == light
+    assert orch.start.await_args.kwargs["bf"]["light"] == light
 
 
 def test_the_route_refuses_a_light_it_does_not_know():
     r = _app(_orch()).post(
         "/api/devices/timelapse/start",
-        json={"interval_seconds": 300, "dic": {"enabled": True, "light": "sunlight"}},
+        json={"interval_seconds": 300, "bf": {"enabled": True, "light": "sunlight"}},
     )
-    assert r.status_code == 400 and "dic.light" in r.json()["detail"]
+    assert r.status_code == 400 and "bf.light" in r.json()["detail"]
 
 
 def test_the_pane_offers_the_three_lights_with_room_first():
-    block = HTML[HTML.index('id="op-plan-dic-light"') :][:400]
+    block = HTML[HTML.index('id="op-plan-bf-light"') :][:400]
     assert block.index('value="room" selected') < block.index('value="led"')
     assert 'value="none"' in block
 
 
 def test_the_pane_reads_and_restores_the_light():
-    assert "dicLight: v('op-plan-dic-light')," in OPERATE
-    assert "set('op-plan-dic-light', plan.dic.light);" in OPERATE
+    assert "bfLight: v('op-plan-bf-light')," in OPERATE
+    assert "set('op-plan-bf-light', plan.bf.light);" in OPERATE

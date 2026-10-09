@@ -99,6 +99,7 @@ D:/Gently3/
       intent.yaml                          # planned vs actual
       timelapse.yaml                       # checkpointed timelapse state
       acquisition.yaml                     # the plan the run was started with
+      overview_fields.yaml                 # the bottom-camera fields the overview is taken from (Bottom cam pane)
       timeline.jsonl                       # session events
       interaction_log.jsonl                # agent conversation records
       conversation.json                    # Claude API messages (resumption)
@@ -139,6 +140,9 @@ D:/Gently3/
     ml/pipelines/{id}.yaml
     ml/runs/{id}.yaml
     ml/assessments/{id}.yaml
+  .migrated_dic_to_bf                      # the overview channel's rename on disk is done (gently/core/migrations.py)
+  migrate_dic_to_bf.log.jsonl              # every file that rename moved or rewrote
+  _migration_backup/                       # the rewritten files as they were, at their relative paths
   logs/
     gently_{YYYYMMDD_HHMMSS}.log
     device_layer_{YYYYMMDD_HHMMSS}.log

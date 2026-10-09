@@ -294,7 +294,7 @@ class MicroscopyAgent:
 
         # Initialize timelapse orchestrator (if microscope connected)
         self._init_timelapse_orchestrator()
-        # A resumed session gets its run's state back: cadence, the DIC
+        # A resumed session gets its run's state back: cadence, the brightfield
         # channel, each embryo's ending and timepoint count. The checkpoint
         # was written every round and, until now, never read.
         if session_id:

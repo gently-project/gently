@@ -1,7 +1,7 @@
-"""In the film, the DIC overview is a row of the film; and a thumbnail is an
+"""In the film, the brightfield overview is a row of the film; and a thumbnail is an
 average, not a sample.
 
-"take a look at the embryo tab - say in the film view. the DIC thumbnails or
+"take a look at the embryo tab - say in the film view. the brightfield thumbnails or
 aesthetics look a bit off"
 
 Two causes. The thumbnails were made by keeping one pixel in eight, which
@@ -21,7 +21,7 @@ from gently.core.imaging import downsample_mean
 ROOT = Path(__file__).resolve().parents[1] / "gently"
 EMBRYOS = (ROOT / "ui" / "web" / "static" / "js" / "embryos.js").read_text(encoding="utf-8")
 CSS = (ROOT / "ui" / "web" / "static" / "css" / "main.css").read_text(encoding="utf-8")
-ROUTE = (ROOT / "ui" / "web" / "routes" / "dic.py").read_text(encoding="utf-8")
+ROUTE = (ROOT / "ui" / "web" / "routes" / "bf.py").read_text(encoding="utf-8")
 ORCH = (ROOT / "app" / "orchestration" / "timelapse.py").read_text(encoding="utf-8")
 
 
@@ -60,34 +60,34 @@ def test_both_thumbnail_paths_average():
 def test_the_film_draws_the_overview_as_its_first_row():
     film = EMBRYOS[EMBRYOS.index("    renderFilmstripView() {") :][:4000]
     container = film.index("let html = '<div class=\"filmstrip-container\">';")
-    row = film.index("html += this._filmDicRow(thumbSize, config);")
+    row = film.index("html += this._filmBfRow(thumbSize, config);")
     first_embryo = film.index("for (const embryo of embryos) {")
     assert container < row < first_embryo
 
 
 def test_the_row_is_a_film_row_with_film_cells():
-    fn = EMBRYOS[EMBRYOS.index("    _filmDicRow(thumbSize, config) {") :][:2200]
-    assert 'class="filmstrip-row filmstrip-dic-row"' in fn
+    fn = EMBRYOS[EMBRYOS.index("    _filmBfRow(thumbSize, config) {") :][:2200]
+    assert 'class="filmstrip-row filmstrip-bf-row"' in fn
     assert 'class="filmstrip-label"' in fn, "the label column is what lines the rows up"
     assert 'width="${thumbSize}" height="${thumbSize}"' in fn, "the same cell as an embryo's"
     assert "const shown = skip > 1 ?" in fn and "all.slice(-12)" not in fn, "every frame"
     assert "if (!all.length) return '';" in fn
 
 
-def test_a_dic_cell_opens_the_viewer_and_is_not_an_embryo_timepoint():
+def test_a_bf_cell_opens_the_viewer_and_is_not_an_embryo_timepoint():
     film = EMBRYOS[EMBRYOS.index("    renderFilmstripView() {") :][:6000]
-    assert "this.openDicViewer(Number(cell.dataset.dicIndex))" in film
-    assert "'.filmstrip-cell:not(.filmstrip-dic-cell)'" in film
+    assert "this.openBfViewer(Number(cell.dataset.bfIndex))" in film
+    assert "'.filmstrip-cell:not(.filmstrip-bf-cell)'" in film
 
 
 def test_the_block_above_gives_way_in_the_film_and_comes_back():
-    strip = EMBRYOS[EMBRYOS.index("    renderDicStrip() {") :][:1800]
+    strip = EMBRYOS[EMBRYOS.index("    renderBfStrip() {") :][:1800]
     assert "strip.hidden = all.length === 0 || inFilm || expanded;" in strip
     assert "if (inFilm) { this.renderFilmstripView(); return; }" in strip
     switch = EMBRYOS[EMBRYOS.index("    switchView(viewName) {") :][:900]
-    assert "this.renderDicStrip();" in switch
+    assert "this.renderBfStrip();" in switch
 
 
 def test_the_overview_thumbnail_is_centred_not_cropped_left():
-    block = CSS[CSS.index(".filmstrip-dic-thumb {") :][:300]
+    block = CSS[CSS.index(".filmstrip-bf-thumb {") :][:300]
     assert "object-position: center;" in block

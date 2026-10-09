@@ -134,7 +134,7 @@ class TestEveryVolume:
         c.set_led = AsyncMock(return_value={"success": True})
 
         async def go():
-            await orch.start(volumes=False, dic={"enabled": True, "light": "none"})
+            await orch.start(volumes=False, bf={"enabled": True, "light": "none"})
             await orch.stop("test done")
 
         asyncio.run(go())
@@ -285,7 +285,7 @@ class TestTheRoute:
         r = _start(
             app,
             volumes=False,
-            dic={"enabled": True, "light": "led"},
+            bf={"enabled": True, "light": "led"},
             laser_powers={"488": 4},
             laser_config="488 only",
         )
@@ -310,7 +310,7 @@ def _js(name: str) -> str:
 class TestThePane:
     def test_the_rows_live_in_the_volume_channel(self):
         body = INDEX[INDEX.index('id="op-plan-spim-body"') :]
-        body = body[: body.index('id="op-plan-dic"')]
+        body = body[: body.index('id="op-plan-bf"')]
         assert 'id="op-plan-powers"' in body
         assert body.index('id="op-plan-laser"') < body.index('id="op-plan-powers"')
 
@@ -393,7 +393,7 @@ class TestASavedTactic:
             _tactic(
                 {
                     "volumes": False,
-                    "dic": {"enabled": True, "light": "led", "led_intensity_pct": 40},
+                    "bf": {"enabled": True, "light": "led", "led_intensity_pct": 40},
                     "num_slices": 80,
                     "laser_config": "488 only",
                     "stop_conditions": {"embryo_1": "hatching"},
@@ -403,7 +403,7 @@ class TestASavedTactic:
         assert out["ok"], out
         kwargs = agent.timelapse_orchestrator.start.await_args.kwargs
         assert kwargs["volumes"] is False
-        assert kwargs["dic"]["led_intensity_pct"] == 40
+        assert kwargs["bf"]["led_intensity_pct"] == 40
         assert "laser_config" not in kwargs and "stop_conditions" not in kwargs
         agent.client.set_laser_config.assert_not_awaited()
         assert ex.embryos["embryo_1"].num_slices == 40, "a volume setting was written"

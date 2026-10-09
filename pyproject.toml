@@ -64,6 +64,10 @@ dependencies = [
 sam = [
     "segment-anything",
 ]
+# Putting brightfield exports on the Hugging Face Hub (tools/hf_brightfield_dataset.py).
+hub = [
+    "huggingface_hub>=0.30",
+]
 # PyTorch — CUDA build is per-machine, so it lives in mutually-exclusive extras
 # wired to dedicated indexes below (see [tool.uv.sources] / [[tool.uv.index]]).
 #   uv sync --extra torch-gpu   # CUDA 11.8 build (microscope / GPU box)

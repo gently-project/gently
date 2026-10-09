@@ -147,6 +147,8 @@ constraint.
 | Camera | exposure | both camera surfaces | untitled inside a block that already names the camera |
 | Marking | pending marks vs registered roster, detect/register/clear | bottom camera | renders state, calls operate.js for the verbs |
 | Roster | the embryo list | rail + Acquisition | actions declared per mount; `showFit` reads the gate's field |
+| Fields | the bottom camera's fields of view for the brightfield overview | rail + Acquisition | the other list of places a run goes back to; built on Bottom cam beside the stage pad, kept in the session (`overview_fields.yaml`), read by the plan as "taken from the fields" |
+| BrightfieldRefs | the overview frames' dark and flat | bottom camera (Overview frames block) | reads the plan's light, LED and exposure fields, which sit above it on the same pane; the flat needs the stage driven clear, so it lives where the pad is |
 | CalProgress | the frames a calibration is judging | Calibration | reads the existing image broadcast; owns no run |
 
 The Roster panel is the clearest case of rule 1 paying off: it replaced

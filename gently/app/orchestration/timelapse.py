@@ -36,8 +36,8 @@ from gently.settings import settings
 
 # Re-export models for backward compatibility
 from .timelapse_models import (
+    BfOverview,
     BurstRule,
-    DicOverview,
     IntervalRule,
     PowerRule,
     StopCondition,
@@ -147,23 +147,23 @@ class TimelapseOrchestrator:
         self._acquisition_task: asyncio.Task | None = None
         self._stop_requested = False
 
-        # The DIC overview channel (see DicOverview). A subject of its own in
+        # The brightfield overview channel (see BfOverview). A subject of its own in
         # the due-loop: one frame of the whole field on its own clock.
-        self._dic: DicOverview | None = None
-        self._dic_references: dict | None = None
+        self._bf: BfOverview | None = None
+        self._bf_references: dict | None = None
         # A light needs a moment to be a light: the room light is a relay and a
         # tube, the LED a shutter. Short, and the tests set it to nothing.
-        self._dic_light_settle_s: float = 1.0
-        self._dic_next_due_at: datetime | None = None
-        self._dic_frames = 0
-        self._dic_last_at: datetime | None = None
+        self._bf_light_settle_s: float = 1.0
+        self._bf_next_due_at: datetime | None = None
+        self._bf_frames = 0
+        self._bf_last_at: datetime | None = None
 
         # A brightfield-only run: the overview channel alone, no SPIM volumes
         # (see _start_brightfield). It has no embryos to end it, so the run
         # carries its own ending.
         self._volumes = True
         self._run_stop: StopCondition | None = None
-        self._dic_failures = 0
+        self._bf_failures = 0
 
         # The run's laser preset. Every volume routes its own lines as it
         # starts, so a preset set once on the controller lasts until the first
@@ -237,7 +237,7 @@ class TimelapseOrchestrator:
         stop_condition: str = "manual",
         base_interval_seconds: float = 120.0,
         condition_value: Any = None,
-        dic: "DicOverview | dict | None" = None,
+        bf: "BfOverview | dict | None" = None,
         stop_conditions: dict[str, Any] | None = None,
         volumes: bool = True,
         laser_config: str | None = None,
@@ -258,8 +258,8 @@ class TimelapseOrchestrator:
             Default interval between acquisitions
         condition_value : any, optional
             Value for stop condition (e.g., number of timepoints)
-        dic : DicOverview or dict, optional
-            The DIC overview channel: one bottom-camera frame of the whole
+        bf : BfOverview or dict, optional
+            The brightfield overview channel: one bottom-camera frame of the whole
             field per round, on its own clock. Off when omitted.
         stop_conditions : dict, optional
             Per-embryo overrides of ``stop_condition``, keyed by embryo id.
@@ -267,7 +267,7 @@ class TimelapseOrchestrator:
             dict ``{"stop_condition": ..., "condition_value": ...}``. Every
             other embryo keeps the run's default.
         volumes : bool
-            False for a brightfield-only run: the ``dic`` channel is imaged
+            False for a brightfield-only run: the ``bf`` channel is imaged
             on the bottom camera and no SPIM volume is taken. See
             ``_start_brightfield``.
         laser_config : str, optional
@@ -302,7 +302,7 @@ class TimelapseOrchestrator:
                 stop_cond=stop_cond,
                 stop_condition=stop_condition,
                 base_interval_seconds=base_interval_seconds,
-                dic=dic,
+                bf=bf,
                 stop_conditions=stop_conditions,
             )
         self._volumes = True
@@ -377,17 +377,17 @@ class TimelapseOrchestrator:
                 unknown_overrides,
             )
 
-        # The DIC overview. Its first frame is due now, ahead of the first
+        # The brightfield overview. Its first frame is due now, ahead of the first
         # embryo, so the series starts at t0 like the volumes do.
-        self._dic = DicOverview.from_dict(dic) if dic is not None else None
-        self._dic_frames = 0
-        self._dic_last_at = None
-        self._dic_next_due_at = None
-        if self._dic and self._dic.enabled:
-            if self._dic.position is None:
-                self._dic.position = self._subject_centroid(list(self._embryo_states))
-            self._dic_next_due_at = now
-            self._dic_references = self._find_brightfield_references()
+        self._bf = BfOverview.from_dict(bf) if bf is not None else None
+        self._bf_frames = 0
+        self._bf_last_at = None
+        self._bf_next_due_at = None
+        if self._bf and self._bf.enabled:
+            if self._bf.position is None and not self._bf.positions:
+                self._bf.position = self._subject_centroid(list(self._embryo_states))
+            self._bf_next_due_at = now
+            self._bf_references = self._find_brightfield_references()
 
         # Burst state is per-session; clear at start.
         self._burst_in_progress = None
@@ -441,7 +441,7 @@ class TimelapseOrchestrator:
                 "embryo_ids": embryo_ids,
                 "stop_condition": stop_condition,
                 "interval_seconds": base_interval_seconds,
-                "dic": self._dic.to_dict() if self._dic else None,
+                "bf": self._bf.to_dict() if self._bf else None,
             },
         )
 
@@ -473,7 +473,7 @@ class TimelapseOrchestrator:
         stop_cond: StopCondition,
         stop_condition: str,
         base_interval_seconds: float,
-        dic: "DicOverview | dict | None",
+        bf: "BfOverview | dict | None",
         stop_conditions: dict[str, Any] | None,
     ) -> str:
         """Start a run of the overview channel alone: 2D, bottom camera.
@@ -490,11 +490,11 @@ class TimelapseOrchestrator:
         - A frame that fails is the experiment failing, not a side channel:
           three in a row stop the run and say so.
         """
-        overview = DicOverview.from_dict(dic) if dic is not None else None
+        overview = BfOverview.from_dict(bf) if bf is not None else None
         if overview is None or not overview.enabled:
             return (
                 "Nothing to image: a run without SPIM volumes needs the overview "
-                "channel (dic) switched on."
+                "channel (bf) switched on."
             )
         staged = [
             c for c in stop_cond.all_conditions() if c.condition_type not in self._BRIGHTFIELD_STOPS
@@ -512,7 +512,7 @@ class TimelapseOrchestrator:
                 sorted(stop_conditions),
             )
 
-        if overview.position is None:
+        if overview.position is None and not overview.positions:
             known = self.experiment.embryos.values()
             ids = embryo_ids or [e.id for e in known if not e.should_skip]
             # None when no embryo has a position: the frame is then taken
@@ -530,11 +530,11 @@ class TimelapseOrchestrator:
         self._laser_config = None
         self._run_stop = stop_cond
         self._embryo_states = {}
-        self._dic = overview
-        self._dic_frames = 0
-        self._dic_failures = 0
-        self._dic_last_at = None
-        self._dic_next_due_at = now
+        self._bf = overview
+        self._bf_frames = 0
+        self._bf_failures = 0
+        self._bf_last_at = None
+        self._bf_next_due_at = now
         self._burst_in_progress = None
         self._exclusive_queue.clear()
         self._perception_run_id = None
@@ -557,11 +557,11 @@ class TimelapseOrchestrator:
                 "embryo_ids": [],
                 "stop_condition": stop_condition,
                 "interval_seconds": base_interval_seconds,
-                "dic": overview.to_dict(),
+                "bf": overview.to_dict(),
                 "volumes": False,
             },
         )
-        every = self._dic_every_seconds()
+        every = self._bf_every_seconds()
         logger.info("Started brightfield timelapse: one frame every %.0fs", every)
         return (
             f"Started brightfield timelapse: one bottom-camera frame every {every:.0f}s, "
@@ -576,7 +576,7 @@ class TimelapseOrchestrator:
             return None
         for cond in self._run_stop.all_conditions():
             if cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
-                if self._dic_frames >= int(cond.value):
+                if self._bf_frames >= int(cond.value):
                     return f"reached {int(cond.value)} frames"
             elif cond.condition_type == StopConditionType.DURATION:
                 if self._started_at is not None:
@@ -599,20 +599,20 @@ class TimelapseOrchestrator:
             logger.info("Brightfield timelapse completed - %s", reason)
             return True
 
-        if not self._dic_due():
+        if not self._bf_due():
             # Short, so a duration ending and a pause are both noticed.
-            await asyncio.sleep(max(0.1, min(5.0, self._dic_wait_seconds())))
+            await asyncio.sleep(max(0.1, min(5.0, self._bf_wait_seconds())))
             return False
 
-        got = await self._capture_dic_overview()
+        got = await self._capture_bf_overview()
         self._current_round += 1
         if got:
-            self._dic_failures = 0
+            self._bf_failures = 0
         else:
-            self._dic_failures += 1
-            if self._dic_failures >= 3:
+            self._bf_failures += 1
+            if self._bf_failures >= 3:
                 raise RuntimeError(
-                    f"{self._dic_failures} brightfield frames in a row could not be taken "
+                    f"{self._bf_failures} brightfield frames in a row could not be taken "
                     "or filed; the run has stopped rather than go on recording nothing"
                 )
         try:
@@ -781,7 +781,7 @@ class TimelapseOrchestrator:
         return None, min(wait_s, 5.0)
 
     # ------------------------------------------------------------------
-    # The DIC overview channel
+    # The brightfield overview channel
     # ------------------------------------------------------------------
 
     def _subject_centroid(self, embryo_ids: list[str]) -> dict[str, float] | None:
@@ -802,23 +802,23 @@ class TimelapseOrchestrator:
             return None
         return {"x": sum(xs) / len(xs), "y": sum(ys) / len(ys)}
 
-    def _dic_every_seconds(self) -> float:
-        every = self._dic.every_seconds if self._dic else None
+    def _bf_every_seconds(self) -> float:
+        every = self._bf.every_seconds if self._bf else None
         return float(every) if every else float(self._base_interval_seconds or 120.0)
 
-    def _dic_due(self) -> bool:
+    def _bf_due(self) -> bool:
         return bool(
-            self._dic
-            and self._dic.enabled
-            and self._dic_next_due_at is not None
-            and self._dic_next_due_at <= datetime.now()
+            self._bf
+            and self._bf.enabled
+            and self._bf_next_due_at is not None
+            and self._bf_next_due_at <= datetime.now()
         )
 
-    def _dic_wait_seconds(self) -> float:
+    def _bf_wait_seconds(self) -> float:
         """How long until the overview is due — so an idle loop does not sleep past it."""
-        if not (self._dic and self._dic.enabled and self._dic_next_due_at):
+        if not (self._bf and self._bf.enabled and self._bf_next_due_at):
             return 5.0
-        return max(0.0, (self._dic_next_due_at - datetime.now()).total_seconds())
+        return max(0.0, (self._bf_next_due_at - datetime.now()).total_seconds())
 
     def _find_brightfield_references(self) -> dict | None:
         """The dark and flat taken this session for the overview's light and
@@ -826,16 +826,16 @@ class TimelapseOrchestrator:
         downstream knows what to divide out. None is said aloud: the frames
         are still taken, but a run without references is a run that will be
         harder to correct later."""
-        dic = self._dic
-        if dic is None or not dic.enabled or self._store is None or not self._session_id:
+        bf = self._bf
+        if bf is None or not bf.enabled or self._store is None or not self._session_id:
             return None
         try:
             from gently.app.brightfield import ReferenceSpec, for_frame, list_records, matching
 
             spec = ReferenceSpec(
-                light=dic.light,
-                led_intensity_pct=dic.led_intensity_pct,
-                exposure_ms=dic.exposure_ms,
+                light=bf.light,
+                led_intensity_pct=bf.led_intensity_pct,
+                exposure_ms=bf.exposure_ms,
             )
             found = matching(list_records(self._store, self._session_id), spec)
         except Exception:
@@ -843,14 +843,14 @@ class TimelapseOrchestrator:
             return None
         if found is None:
             msg = (
-                f"No dark/flat references for the overview ({dic.light}"
+                f"No dark/flat references for the overview ({bf.light}"
                 + (
-                    f" {dic.led_intensity_pct}%"
-                    if dic.light == "led" and dic.led_intensity_pct
+                    f" {bf.led_intensity_pct}%"
+                    if bf.light == "led" and bf.led_intensity_pct
                     else ""
                 )
-                + (f", {dic.exposure_ms:g} ms" if dic.exposure_ms else "")
-                + "). Take them from Acquisition › DIC overview › References."
+                + (f", {bf.exposure_ms:g} ms" if bf.exposure_ms else "")
+                + "). Take them on Bottom cam › Overview frames."
             )
             logger.warning(msg)
             try:
@@ -862,8 +862,9 @@ class TimelapseOrchestrator:
             return None
         return for_frame(found)
 
-    async def _capture_dic_overview(self) -> bool:
-        """Take one overview frame and file it beside the session's snapshots.
+    async def _capture_bf_overview(self) -> bool:
+        """Take the overview frame — one per field, when the embryos do not
+        all fit in one — and file each beside the session's snapshots.
 
         A failed frame is logged and the next one is still scheduled — the
         volumes are the experiment; the overview must never take them down.
@@ -872,26 +873,63 @@ class TimelapseOrchestrator:
         ask; a brightfield-only run does, because there the frame is the
         experiment.
         """
-        dic = self._dic
-        if dic is None:
+        bf = self._bf
+        if bf is None:
             return False
-        frame = self._dic_frames + 1
-        pos = dic.position
+        frame = self._bf_frames + 1
+        fields = bf.fields()
+        got_any = False
+        last_at: datetime | None = None
+        try:
+            for i, pos in enumerate(fields, start=1):
+                got, at = await self._capture_bf_field(bf, frame, i, len(fields), pos)
+                got_any = got_any or got
+                last_at = at or last_at
+            if last_at is None:
+                # Every field failed outright: not a frame, for any run.
+                return False
+            if not got_any and not self._volumes:
+                # Not counted, and not announced: a brightfield run that ends
+                # "after 12 frames" has to have twelve.
+                return False
+            self._bf_frames = frame
+            self._bf_last_at = last_at
+            logger.info("brightfield overview frame %d acquired (%d field(s))", frame, len(fields))
+            return got_any
+        finally:
+            # The next frame is one interval after this one was DUE, not after
+            # it was done: counted from the end of the capture, "every 30 s"
+            # came out as 35, the moves and exposures added to every gap.
+            # A capture that overran the interval is followed at once.
+            every = timedelta(seconds=self._bf_every_seconds())
+            due = self._bf_next_due_at or datetime.now()
+            self._bf_next_due_at = max(due + every, datetime.now())
+
+    async def _capture_bf_field(
+        self,
+        bf: BfOverview,
+        frame: int,
+        field: int,
+        n_fields: int,
+        pos: dict[str, float] | None,
+    ) -> tuple[bool, datetime | None]:
+        """One frame of one field: move there, light, capture, light off,
+        file. Whether there is a frame to show, and when it was taken."""
         lit: str | None = None
         lit_led = False
         try:
             if pos:
                 await self.client.move_to_position(float(pos["x"]), float(pos["y"]))
-            lit = await self._dic_light_on(dic.light, frame)
+            lit = await self._bf_light_on(bf.light, frame)
             lit_led = lit == "led"
             try:
                 result = await self.client.capture_bottom_image(
-                    use_led=False, exposure_ms=dic.exposure_ms
+                    use_led=False, exposure_ms=bf.exposure_ms
                 )
             finally:
                 # Before anything else: the volumes that follow this frame are
                 # fluorescence, and a light left on is in every one of them.
-                await self._dic_light_off(lit, frame)
+                await self._bf_light_off(lit, frame)
                 lit = None
             captured_at = datetime.now()
             image_path = (result or {}).get("image_path")
@@ -904,7 +942,7 @@ class TimelapseOrchestrator:
                 if image is not None and getattr(image, "ndim", 0) == 2:
                     image_b64 = image_to_base64(normalize_to_uint8(downsample_mean(image, 512)))
             except Exception as exc:
-                logger.debug("DIC thumbnail skipped: %s", exc)
+                logger.debug("brightfield thumbnail skipped: %s", exc)
             stored: Path | None = None
             # The client's empty-capture placeholder is a 100x100 of zeros.
             real = (
@@ -915,65 +953,67 @@ class TimelapseOrchestrator:
             filing = self._store is not None and bool(self._session_id)
             if self._store is not None and self._session_id:
                 meta = {
-                    "channel": "dic",
+                    "channel": "bf",
                     "frame": frame,
-                    "round": self._current_round,
+                    "field": field,
+                    "fields": n_fields,
+                    # In a brightfield run the frame is the round; the loop's
+                    # counter runs two behind it (it starts at -1 and steps
+                    # after the capture), which read as frames gone missing.
+                    "round": frame if not self._volumes else self._current_round,
                     "position": pos,
-                    "exposure_ms": dic.exposure_ms,
-                    "light": dic.light,
-                    "led_intensity_pct": dic.led_intensity_pct if lit_led else None,
-                    "references": getattr(self, "_dic_references", None),
+                    "exposure_ms": bf.exposure_ms,
+                    "light": bf.light,
+                    "led_intensity_pct": bf.led_intensity_pct if lit_led else None,
+                    "references": getattr(self, "_bf_references", None),
                     "captured_at": captured_at.isoformat(),
                 }
                 try:
                     if image_path and Path(image_path).exists():
                         stored = self._store.register_snapshot(
-                            self._session_id, "dic", Path(image_path), metadata=meta
+                            self._session_id, "bf", Path(image_path), metadata=meta
                         )
                     elif real:
                         # No staged file to move: file the pixels themselves.
                         stored = self._store.put_snapshot(
-                            self._session_id, "dic", image, metadata=meta
+                            self._session_id, "bf", image, metadata=meta
                         )
                 except Exception as exc:
-                    logger.warning("DIC overview frame %d captured but not filed: %s", frame, exc)
+                    logger.warning(
+                        "brightfield overview frame %d captured but not filed: %s", frame, exc
+                    )
                 # Never silently. The frame used to be skipped without a word
                 # whenever the capture reported no path, which on a real device
                 # layer was every time.
                 if stored is None:
                     logger.warning(
-                        "DIC overview frame %d was NOT filed: no staged file and no image",
+                        "brightfield overview frame %d was NOT filed: no staged file and no image",
                         frame,
                     )
             got = stored is not None if filing else bool(real or image_path)
             if not got and not self._volumes:
-                # Not counted, and not announced: a brightfield run that ends
-                # "after 12 frames" has to have twelve.
-                return False
-            self._dic_frames = frame
-            self._dic_last_at = captured_at
+                return False, None
             self._emit_event(
                 EventType.IMAGE_ACQUIRED,
                 {
-                    "source": "dic",
-                    "channel": "dic",
+                    "source": "bf",
+                    "channel": "bf",
                     "embryo_id": None,
                     "frame": frame,
+                    "field": field,
+                    "fields": n_fields,
                     "image_path": str(stored or image_path or ""),
                     "image_b64": image_b64,
                     "position": pos,
                     "timestamp": captured_at.isoformat(),
                 },
             )
-            logger.info("DIC overview frame %d acquired", frame)
-            return got
+            return got, captured_at
         except Exception as exc:
-            logger.warning("DIC overview frame %d failed: %s", frame, exc)
-            return False
-        finally:
-            self._dic_next_due_at = datetime.now() + timedelta(seconds=self._dic_every_seconds())
+            logger.warning("brightfield overview frame %d, field %d failed: %s", frame, field, exc)
+            return False, None
 
-    async def _dic_light_on(self, light: str, frame: int) -> str | None:
+    async def _bf_light_on(self, light: str, frame: int) -> str | None:
         """Put the overview's light on. Returns what THIS call switched on, so
         only that is switched off again: a room light the operator had on
         stays on.
@@ -993,31 +1033,34 @@ class TimelapseOrchestrator:
                 res = await self.client.set_room_light("on")
                 if isinstance(res, dict) and res.get("success") is False:
                     logger.warning(
-                        "DIC overview frame %d: the room light did not come on (%s); "
+                        "brightfield overview frame %d: the room light did not come on (%s); "
                         "taking the frame as it is",
                         frame,
                         res.get("error") or res,
                     )
                     return None
-                await asyncio.sleep(self._dic_light_settle_s)
+                await asyncio.sleep(self._bf_light_settle_s)
                 return "room"
             if light == "led":
-                await self._dic_led_brightness(frame)
+                await self._bf_led_brightness(frame)
                 began = "led"
                 await self.client.set_led("Open")
-                await asyncio.sleep(self._dic_light_settle_s)
+                await asyncio.sleep(self._bf_light_settle_s)
                 return "led"
         except asyncio.CancelledError:
             if began is not None:
-                await self._dic_light_off(began, frame)
+                await self._bf_light_off(began, frame)
             raise
         except Exception as exc:
             logger.warning(
-                "DIC overview frame %d: could not switch the %s light on: %s", frame, light, exc
+                "brightfield overview frame %d: could not switch the %s light on: %s",
+                frame,
+                light,
+                exc,
             )
         return None
 
-    async def _dic_led_brightness(self, frame: int) -> None:
+    async def _bf_led_brightness(self, frame: int) -> None:
         """Set the LED to the plan's brightness before it opens.
 
         Every frame, not once at the start: the brightness is a property of
@@ -1025,7 +1068,7 @@ class TimelapseOrchestrator:
         panel. A series is only a series if each frame is lit the same. A
         brightness that cannot be set is said, and the frame is still taken.
         """
-        pct = self._dic.led_intensity_pct if self._dic else None
+        pct = self._bf.led_intensity_pct if self._bf else None
         if pct is None:
             return
         try:
@@ -1034,15 +1077,15 @@ class TimelapseOrchestrator:
                 raise RuntimeError(res.get("error") or res)
         except Exception as exc:
             logger.warning(
-                "DIC overview frame %d: the LED could not be set to %s%% (%s); "
+                "brightfield overview frame %d: the LED could not be set to %s%% (%s); "
                 "taking the frame at the brightness it has",
                 frame,
                 pct,
                 exc,
             )
 
-    async def _dic_light_off(self, lit: str | None, frame: int) -> None:
-        """Put out what _dic_light_on lit. Tried twice, and loud if it fails:
+    async def _bf_light_off(self, lit: str | None, frame: int) -> None:
+        """Put out what _bf_light_on lit. Tried twice, and loud if it fails:
         the next thing the run does is image fluorescence."""
         if lit is None:
             return
@@ -1058,14 +1101,14 @@ class TimelapseOrchestrator:
             except Exception as exc:
                 why = exc
             logger.warning(
-                "DIC overview frame %d: the %s light did not go off (attempt %d): %s",
+                "brightfield overview frame %d: the %s light did not go off (attempt %d): %s",
                 frame,
                 lit,
                 attempt,
                 why,
             )
         logger.error(
-            "DIC overview frame %d: the %s light is STILL ON. The volumes that follow "
+            "brightfield overview frame %d: the %s light is STILL ON. The volumes that follow "
             "are being imaged with it on.",
             frame,
             lit,
@@ -1073,27 +1116,27 @@ class TimelapseOrchestrator:
         self._emit_event(
             EventType.ERROR_OCCURRED,
             {
-                "source": "dic",
-                "message": f"The {lit} light did not switch off after the DIC overview",
+                "source": "bf",
+                "message": f"The {lit} light did not switch off after the brightfield overview",
                 "frame": frame,
             },
         )
 
-    def _dic_status(self) -> dict[str, Any] | None:
-        if self._dic is None:
+    def _bf_status(self) -> dict[str, Any] | None:
+        if self._bf is None:
             return None
-        nxt = self._dic_next_due_at
+        nxt = self._bf_next_due_at
         return {
-            **self._dic.to_dict(),
-            "frames": self._dic_frames,
-            "last_at": self._dic_last_at.isoformat() if self._dic_last_at else None,
+            **self._bf.to_dict(),
+            "frames": self._bf_frames,
+            "last_at": self._bf_last_at.isoformat() if self._bf_last_at else None,
             "next_due_at": nxt.isoformat() if nxt else None,
             "seconds_until_next": (
                 max(0.0, (nxt - datetime.now()).total_seconds()) if nxt else None
             ),
             # The dark/flat record the frames name, so the tab can say whether
             # the run is correctable and offer to take them if not.
-            "references": getattr(self, "_dic_references", None),
+            "references": getattr(self, "_bf_references", None),
         }
 
     def _reschedule(self, embryo, *, from_now: bool = True) -> None:
@@ -1312,13 +1355,13 @@ class TimelapseOrchestrator:
                 # The overview is a subject too, and it goes ahead of whichever
                 # embryo is due: one frame of the whole field on its own clock,
                 # so no embryo's cadence decides how often the field is seen.
-                if self._dic_due():
-                    await self._capture_dic_overview()
+                if self._bf_due():
+                    await self._capture_bf_overview()
                     continue
 
                 embryo, wait_s = self._pick_next_due()
                 if embryo is None:
-                    await asyncio.sleep(max(0.1, min(wait_s, self._dic_wait_seconds())))
+                    await asyncio.sleep(max(0.1, min(wait_s, self._bf_wait_seconds())))
                     continue
 
                 # Acquire this embryo. Each acquisition is awaited here —
@@ -1769,9 +1812,9 @@ class TimelapseOrchestrator:
         elif (
             self._status == TimelapseStatus.RUNNING
             and not self._volumes
-            and self._dic_next_due_at is not None
+            and self._bf_next_due_at is not None
         ):
-            next_round_time = self._dic_next_due_at
+            next_round_time = self._bf_next_due_at
             seconds_until_next = max(0, (next_round_time - datetime.now()).total_seconds())
 
         return TimelapseState(
@@ -1784,7 +1827,7 @@ class TimelapseOrchestrator:
             next_round_time=next_round_time,
             seconds_until_next_round=seconds_until_next,
             error_message=self._error_message,
-            dic=self._dic_status(),
+            bf=self._bf_status(),
             volumes=self._volumes,
         )
 
@@ -2044,8 +2087,8 @@ class TimelapseOrchestrator:
     def _brightfield_can_continue(self) -> bool:
         """A brightfield-only run that began, and did not reach its ending."""
         return bool(
-            self._dic
-            and self._dic.enabled
+            self._bf
+            and self._bf.enabled
             and self._started_at is not None
             and self._ended != "completed"
             and self._brightfield_stop_reason() is None
@@ -2062,8 +2105,8 @@ class TimelapseOrchestrator:
             logger.warning("Brightfield run: could not set the lasers to ALL OFF: %s", exc)
         now = datetime.now()
         self._embryo_states = {}
-        self._dic_next_due_at = now
-        self._dic_failures = 0
+        self._bf_next_due_at = now
+        self._bf_failures = 0
         self._burst_in_progress = None
         self._pause_start = None
         self._status = TimelapseStatus.RUNNING
@@ -2077,15 +2120,15 @@ class TimelapseOrchestrator:
                 "embryo_ids": [],
                 "stop_condition": "as before",
                 "interval_seconds": self._base_interval_seconds,
-                "dic": self._dic.to_dict() if self._dic else None,
+                "bf": self._bf.to_dict() if self._bf else None,
                 "volumes": False,
                 "continued": True,
                 "from_round": self._current_round,
             },
         )
         return (
-            f"Continued brightfield timelapse from frame {self._dic_frames}, "
-            f"every {self._dic_every_seconds():.0f}s."
+            f"Continued brightfield timelapse from frame {self._bf_frames}, "
+            f"every {self._bf_every_seconds():.0f}s."
         )
 
     async def continue_run(self) -> str:
@@ -2096,7 +2139,7 @@ class TimelapseOrchestrator:
         the loop that images them is gone, and ``start()`` would begin a new
         run. This resumes the old one: every embryo still going is due now
         (the interruption was of unknown length), numbering carries on from
-        the checkpoint (the volumes on disk are never written over), the DIC
+        the checkpoint (the volumes on disk are never written over), the brightfield
         channel keeps its clock, and the run keeps its started_at so the
         status still says how long it has been going.
         """
@@ -2122,8 +2165,8 @@ class TimelapseOrchestrator:
                 embryo.cadence_phase = "normal"
             embryo.next_due_at = now
         self._embryo_states = live
-        if self._dic and self._dic.enabled:
-            self._dic_next_due_at = now
+        if self._bf and self._bf.enabled:
+            self._bf_next_due_at = now
         self._burst_in_progress = None
         if self._session_id:
             self._trace_dir = settings.storage.traces_dir / self._session_id
@@ -2155,7 +2198,7 @@ class TimelapseOrchestrator:
                 "embryo_ids": list(live),
                 "stop_condition": "as before",
                 "interval_seconds": self._base_interval_seconds,
-                "dic": self._dic.to_dict() if self._dic else None,
+                "bf": self._bf.to_dict() if self._bf else None,
                 "continued": True,
                 "from_round": self._current_round,
             },
@@ -2693,10 +2736,10 @@ class TimelapseOrchestrator:
             "applied_rules": {eid: sorted(s) for eid, s in self._applied_rules.items()},
             "active_monitoring_modes": [m.name for m in self._active_monitoring_modes],
             "embryos": embryos,
-            "dic": self._dic.to_dict() if self._dic else None,
-            "dic_frames": self._dic_frames,
-            "dic_last_at": _iso(self._dic_last_at),
-            "dic_next_due_at": _iso(self._dic_next_due_at),
+            "bf": self._bf.to_dict() if self._bf else None,
+            "bf_frames": self._bf_frames,
+            "bf_last_at": _iso(self._bf_last_at),
+            "bf_next_due_at": _iso(self._bf_next_due_at),
             "volumes": self._volumes,
             "run_stop": _ser_stop_condition(self._run_stop),
             "laser_config": self._laser_config,
@@ -2724,11 +2767,11 @@ class TimelapseOrchestrator:
         self._dose_budget_exceeded = set(doc.get("dose_budget_exceeded") or [])
         self._burst_applied = set(doc.get("burst_applied") or [])
         self._burst_in_progress = doc.get("burst_in_progress")
-        dic_doc = doc.get("dic")
-        self._dic = DicOverview.from_dict(dic_doc) if isinstance(dic_doc, dict) else None
-        self._dic_frames = int(doc.get("dic_frames") or 0)
-        self._dic_last_at = _parse_dt(doc.get("dic_last_at"))
-        self._dic_next_due_at = _parse_dt(doc.get("dic_next_due_at"))
+        bf_doc = doc.get("bf")
+        self._bf = BfOverview.from_dict(bf_doc) if isinstance(bf_doc, dict) else None
+        self._bf_frames = int(doc.get("bf_frames") or 0)
+        self._bf_last_at = _parse_dt(doc.get("bf_last_at"))
+        self._bf_next_due_at = _parse_dt(doc.get("bf_next_due_at"))
         if started := _parse_dt(doc.get("started_at")):
             self._started_at = started
         # A checkpoint written while the run was going, and then nothing: the
