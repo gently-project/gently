@@ -61,9 +61,9 @@ class DiSPIMZstage:
     """
 
     # The software fence for the bottom-camera focus Z, in µm. The floor is
-    # 0: the rig asked for it (2026-10-09), having found focus below the old
-    # 50 µm floor. The ceiling is the objective's throw.
-    DEFAULT_LIMITS_UM: tuple[float, float] = (0.0, 250.0)
+    # -50: the rig asked for it (2026-10-09), having found focus below the
+    # old 50 µm floor and then below 0. The ceiling is the objective's throw.
+    DEFAULT_LIMITS_UM: tuple[float, float] = (-50.0, 250.0)
 
     def __init__(
         self,

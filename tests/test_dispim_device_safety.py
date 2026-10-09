@@ -964,10 +964,10 @@ class TestPositionRounding:
         assert fdrive.core._positions["FDrive"] == 1000.01
 
 
-def test_the_bottom_focus_floor_is_zero_by_default():
-    """The rig found focus below the old 50 µm floor (2026-10-09)."""
+def test_the_bottom_focus_floor_is_minus_fifty_by_default():
+    """The rig found focus below the old 50 µm floor, then below 0 (2026-10-09)."""
     from gently.hardware.dispim.devices.stage import DiSPIMZstage
 
     stage = DiSPIMZstage("ZStage", make_core())
-    assert stage.limits == (0.0, 250.0)
-    assert DiSPIMZstage.DEFAULT_LIMITS_UM == (0.0, 250.0)
+    assert stage.limits == (-50.0, 250.0)
+    assert DiSPIMZstage.DEFAULT_LIMITS_UM == (-50.0, 250.0)
