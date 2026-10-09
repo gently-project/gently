@@ -224,6 +224,14 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
             led = DiSPIMLED(core=core, name=cfg["led_name"], group_name="LED")
             devices["led"] = led
             logger.info("Created LED: %s", cfg["led_name"])
+            # The brightness the LED opens at, from now until someone moves
+            # it: the rig's default, not whatever the controller powered up
+            # holding. A LED without the property is still an LED.
+            try:
+                led.set_intensity_pct(DiSPIMLED.DEFAULT_INTENSITY_PCT)
+                logger.info("LED intensity set to %d%% at boot", DiSPIMLED.DEFAULT_INTENSITY_PCT)
+            except Exception as e:
+                logger.warning("LED intensity not set at boot: %s", e)
     except Exception as e:
         logger.warning("Could not create LED: %s", e)
 
