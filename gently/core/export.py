@@ -198,18 +198,55 @@ def _elapsed(start: str | None, now: str | None) -> str:
 AVI_CLASSIC_BYTES = 1_000_000_000
 
 
-def _fit_scale(first_frame: Any, n_frames: int, limit: int | None = None) -> float:
+def _fit_scale(sample: list, n_frames: int, limit: int | None = None) -> float:
     """The factor to shrink every frame by so ``n_frames`` of them, as
     Motion JPEG, fit in one classic AVI chunk: 1.0 when they already do.
-    Estimated from the first frame's JPEG size, with a tenth to spare."""
+
+    Measured, not guessed: the writer itself encodes ``sample`` (8-bit
+    frames spread through the run) into a scratch file, and the bytes per
+    frame it spent, times ``n_frames`` with a tenth to spare, is the size
+    the movie would be. A JPEG of one frame at some quality was off by two
+    either way: the writer's quality is its own, and the first frame of a
+    run is not a typical one."""
+    import os
+    import tempfile
+
     import cv2
+    import numpy as np
 
     if limit is None:
         limit = AVI_CLASSIC_BYTES
-    ok, jpg = cv2.imencode(".jpg", first_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-    if not ok or n_frames <= 0:
+    frames8 = [f for f in sample if f is not None and getattr(f, "ndim", 0) == 2]
+    if not frames8 or n_frames <= 0:
         return 1.0
-    estimate = int(jpg.size) * n_frames * 1.1
+    h, w = frames8[0].shape[:2]
+    fd, tmp = tempfile.mkstemp(suffix=".avi")
+    os.close(fd)
+    per: float | None = None
+    try:
+        fourcc = cv2.VideoWriter_fourcc(*"MJPG")  # type: ignore[attr-defined]
+        wr = cv2.VideoWriter(tmp, fourcc, 10, (int(w), int(h)), isColor=True)
+        if wr.isOpened():
+            n = 0
+            for f in frames8:
+                if f.shape[:2] != (h, w):
+                    f = cv2.resize(f, (int(w), int(h)))
+                wr.write(cv2.cvtColor(np.asarray(f, dtype=np.uint8), cv2.COLOR_GRAY2BGR))
+                n += 1
+            wr.release()
+            if n:
+                per = os.path.getsize(tmp) / n
+    except Exception:
+        per = None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    if per is None:
+        ok, jpg = cv2.imencode(".jpg", frames8[0], [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+        per = float(jpg.size) if ok else 0.0
+    estimate = per * n_frames * 1.1
     if estimate <= limit:
         return 1.0
     return max(0.1, (limit / estimate) ** 0.5)
@@ -283,11 +320,18 @@ def dic_movie(
 
     # One stretch for the whole run, from frames spread through it.
     sample = frames[:: max(1, len(frames) // 16)][:16]
-    lo_hi = [np.percentile(read(f), (0.5, 99.5)) for f in sample]
+    sampled = [read(f) for f in sample]
+    lo_hi = [np.percentile(img, (0.5, 99.5)) for img in sampled]
     lo = float(min(x[0] for x in lo_hi))
     hi = float(max(x[1] for x in lo_hi))
     if hi <= lo:
         hi = lo + 1.0
+    sample8 = [
+        np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        for img in sampled
+        if img.ndim == 2
+    ]
+    del sampled
 
     out = dic_dir / ("dic_corrected.avi" if corrected else "dic.avi")
     writer = None
@@ -309,7 +353,7 @@ def dic_movie(
                 np.uint8
             )
             if size is None:
-                shrink = _fit_scale(frame, len(frames))
+                shrink = _fit_scale(sample8, len(frames))
                 if shrink < 1.0:
                     logger.info(
                         "%s: %d frames would overflow a plain AVI; written at %.0f%% size",
@@ -1088,6 +1132,13 @@ def spim_movie(
     hi = float(max(x[1] for x in lo_hi))
     if hi <= lo:
         hi = lo + 1.0
+    sample8 = []
+    for path in sample:
+        vol = load(path)
+        img = vol.max(axis=0) if view == "projection" else vol[vol.shape[0] // 2]
+        sample8.append(
+            np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        )
 
     out = folder / f"spim_{view}.avi"
     writer = None
@@ -1105,7 +1156,7 @@ def spim_movie(
         nonlocal writer, size, written, shrink
         frame = np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
         if size is None:
-            shrink = _fit_scale(frame, n_total)
+            shrink = _fit_scale(sample8, n_total)
             if shrink < 1.0:
                 logger.info(
                     "%s: %d frames would overflow a plain AVI; written at %.0f%% size",

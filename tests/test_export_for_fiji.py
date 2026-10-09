@@ -401,20 +401,32 @@ class TestMovieFitsAPlainAvi:
     to fit in one chunk, at a smaller size when it must."""
 
     def test_the_scale_fits_the_frames_in_the_limit(self):
+        """Measured with the writer itself: the bytes it spends on the sample
+        frames say what the whole run would cost."""
+        import os
+        import tempfile
+
+        import cv2
+
         from gently.core.export import _fit_scale
 
         rng = np.random.default_rng(1)
-        frame = rng.integers(0, 255, (512, 512), dtype=np.uint8)  # noisy: a big JPEG
-        import cv2
-
-        _, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-        per = int(jpg.size)
-        assert _fit_scale(frame, 3, limit=per * 10) == 1.0, "three fit in ten"
-        s = _fit_scale(frame, 40, limit=per * 10)
+        frames = [rng.integers(0, 255, (256, 256), dtype=np.uint8) for _ in range(4)]  # noisy
+        fd, tmp = tempfile.mkstemp(suffix=".avi")
+        os.close(fd)
+        wr = cv2.VideoWriter(tmp, cv2.VideoWriter_fourcc(*"MJPG"), 10, (256, 256), isColor=True)
+        for f in frames:
+            wr.write(cv2.cvtColor(f, cv2.COLOR_GRAY2BGR))
+        wr.release()
+        per = os.path.getsize(tmp) / 4
+        os.remove(tmp)
+        assert _fit_scale(frames, 3, limit=int(per * 10)) == 1.0, "three fit in ten"
+        s = _fit_scale(frames, 40, limit=int(per * 10))
         assert 0.1 <= s < 1.0
-        # Shrunk by s on each side, 40 of them fit (JPEG size goes with area).
+        # Shrunk by s on each side, 40 of them fit (bytes go with area).
         assert (s * s) * per * 40 * 1.1 <= per * 10 * 1.05
-        assert _fit_scale(frame, 10**9, limit=1) == 0.1, "never below a tenth"
+        assert _fit_scale(frames, 10**9, limit=1) == 0.1, "never below a tenth"
+        assert _fit_scale([], 100, limit=1) == 1.0, "nothing to measure, nothing to shrink"
 
     def test_a_long_run_is_written_smaller_not_cut(self, tmp_path, monkeypatch):
         import cv2
