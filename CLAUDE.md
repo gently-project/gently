@@ -148,6 +148,7 @@ D:/Gently3/
     device_layer_{YYYYMMDD_HHMMSS}.log
   config/
     hardware.yaml
+    rail_cards.json                        # which Bottom cam rail cards are open — the rig's, written as pressed
     mesh/...
   incoming/{uuid}.tif                      # transient device staging
 ```

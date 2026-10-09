@@ -28,6 +28,7 @@ from .roles import create_router as create_roles_router
 from .sessions import create_router as create_sessions_router
 from .tactic_library import create_router as create_tactic_library_router
 from .temperature import create_router as create_temperature_router
+from .ui_prefs import create_router as create_ui_prefs_router
 from .volumes import create_router as create_volumes_router
 from .websocket import create_router as create_websocket_router
 
@@ -59,6 +60,7 @@ def register_all_routes(server):
         create_calibration_records_router,
         create_replay_router,
         create_reveal_router,
+        create_ui_prefs_router,
     ):
         router = factory(server)
         server.app.include_router(router)

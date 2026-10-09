@@ -3151,19 +3151,43 @@ const OperateManager = (function () {
     // Every card on the Bottom cam rail folds to its head row (Ryan: "show
     // button also needed on bottom focus, led, stage etc"). One rule for all
     // of them: `data-disclose` names the card, the head row and anything
-    // marked `.op-disc-keep` stay, the other direct children fold. The
-    // choice is remembered per card across reloads. What is used every
-    // minute opens by default; what is set once a night starts closed.
-    const DISCLOSE_KEY = 'gently.operate.rail.';
+    // marked `.op-disc-keep` stay, the other direct children fold.
+    //
+    // The choice is the RIG's, not this browser's (Ryan: "rig wide please,
+    // and dynamic - that when i show or hide, it persists"): read from
+    // /api/ui/rail-cards when the pane wakes, written through on every
+    // press, and every browser on the rig hears UI_RAIL_CARDS and follows.
+    // Until the rig has said, what is used every minute opens and what is
+    // set once a night starts closed.
     const DISCLOSE_DEFAULT = { camera: true, stage: true, led: true, focus: true, overview: false, advanced: false };
+    let _railCards = null;     // the rig's answer, once read
 
     function discloseState(key) {
-        try {
-            const v = localStorage.getItem(DISCLOSE_KEY + key);
-            if (v === '1') return true;
-            if (v === '0') return false;
-        } catch (_) { /* no storage: the default */ }
+        if (_railCards && typeof _railCards[key] === 'boolean') return _railCards[key];
         return DISCLOSE_DEFAULT[key] !== false;
+    }
+
+    function applyAllDisclosures() {
+        document.querySelectorAll('#op-pane-bottom [data-disclose]').forEach(block => {
+            applyDisclosure(block, discloseState(block.dataset.disclose));
+        });
+    }
+
+    async function loadRailCards() {
+        try {
+            const d = await getJSON('/api/ui/rail-cards');
+            _railCards = d && d.cards && typeof d.cards === 'object' ? d.cards : {};
+        } catch (_) { _railCards = _railCards || {}; }
+        applyAllDisclosures();
+    }
+
+    function saveRailCard(key, open) {
+        _railCards = Object.assign({}, _railCards || {}, { [key]: open });
+        fetch('/api/ui/rail-cards', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cards: { [key]: open } }),
+        }).then(r => { if (!r.ok) console.warn(`[gently] rail card not kept: ${r.status}`); })
+            .catch(() => { /* the card stays as pressed on this page */ });
     }
 
     function applyDisclosure(block, open) {
@@ -3189,9 +3213,17 @@ const OperateManager = (function () {
             btn.addEventListener('click', () => {
                 const open = block.dataset.open !== '1';
                 applyDisclosure(block, open);
-                try { localStorage.setItem(DISCLOSE_KEY + key, open ? '1' : '0'); } catch (_) { /* not remembered */ }
+                saveRailCard(key, open);
             });
         });
+        // Another browser pressed, or this one did and is hearing it back.
+        if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.on('UI_RAIL_CARDS', d => {
+                if (!d || !d.cards || typeof d.cards !== 'object') return;
+                _railCards = Object.assign({}, _railCards || {}, d.cards);
+                applyAllDisclosures();
+            });
+        }
     }
 
     function showPane(name) {
@@ -3636,6 +3668,8 @@ const OperateManager = (function () {
         // of the plan (cadence, ending) coming back.
         await loadFields();
         await restorePlan();
+        // The rig's choice of which rail cards are open.
+        await loadRailCards();
         await Promise.all([bz.refresh(), fd.refresh()]);
         renderLock();
         renderSubnavMeta();
