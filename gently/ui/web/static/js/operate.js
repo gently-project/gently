@@ -3148,13 +3148,12 @@ const OperateManager = (function () {
     }
 
     // ══ THE RAIL'S FOLDING CARDS ═══════════════════════════════════════════
-    // Every card on the Bottom cam rail folds to its head row (Ryan: "show
-    // button also needed on bottom focus, led, stage etc"). One rule for all
+    // Every card on the Bottom cam rail folds to its head row. One rule for all
     // of them: `data-disclose` names the card, the head row and anything
     // marked `.op-disc-keep` stay, the other direct children fold.
     //
-    // The choice is the RIG's, not this browser's (Ryan: "rig wide please,
-    // and dynamic - that when i show or hide, it persists"): read from
+    // The choice is the RIG's, not this browser's, and it is kept as it is
+    // pressed: read from
     // /api/ui/rail-cards when the pane wakes, written through on every
     // press, and every browser on the rig hears UI_RAIL_CARDS and follows.
     // Until the rig has said, what is used every minute opens and what is
@@ -3520,7 +3519,7 @@ const OperateManager = (function () {
         // every input, including the per-embryo rows that come and go with
         // the roster; the run's own stop select is populated here, once.
         const stopSel = $('op-tl-stop');
-        // A run ends after 16 hours unless told otherwise (Ryan, 2026-10-09):
+        // A run ends after 16 hours unless told otherwise (2026-10-09):
         // the night, with the morning to look at it.
         if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('duration', false);
         const planPanel = $('op-panel-adaptive');

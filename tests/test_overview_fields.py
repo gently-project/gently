@@ -1,9 +1,8 @@
 """The overview fields are set where the picture is, and kept with the session.
 
-Ryan, before the 2026-10-09 demo: "some of these features would benefit from
-being present in the bottom cam page, as opposed to being available to set
-in the acquisition page … when accessed through the acquisition page, one
-needs to go back to the cam view to live mode, and then do those things."
+Before the 2026-10-09 demo: the field positions and the dark and flat were
+set on the Acquisition pane, and each needed a trip back to the bottom
+camera's live view to be done at all.
 
 So the fields of view the brightfield overview is taken from are a list of
 their own — the same shape as the embryos' — built on the Bottom cam pane

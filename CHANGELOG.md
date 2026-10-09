@@ -442,8 +442,8 @@ campaigns, learnings, agent memory, all YAML/JSONL/TIFF.
 
 ## v1.0.0.dev1
 
-The first build cut for someone else to use. Ryan is the reader; everything
-here exists so his feedback lands on something specific.
+The first build cut for someone else to use. The first external user is the
+reader; everything here exists so their feedback lands on something specific.
 
 **The Atrium**
 

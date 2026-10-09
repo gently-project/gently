@@ -1,6 +1,6 @@
 """POST /api/motion/halt stops every positioner that exists (#109).
 
-Ryan, first words on opening the SPIM head tab: "here we need a halt button."
+The first thing asked for on opening the SPIM head tab was a halt button.
 A halt must reach the axis that is moving without being told which one, must
 skip axes this rig does not have, and must not be silent when the controller
 refuses.

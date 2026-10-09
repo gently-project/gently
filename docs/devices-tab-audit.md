@@ -140,8 +140,8 @@ So an adaptive timelapse can be started on embryos that have never been
 calibrated. It will run, and produce data from an uncalibrated stage.
 
 This is the one that matters most, because it inverts the priority the team
-actually stated. Ryan, 2026-08-07: *"the main thing is just making sure that we
-can get the calibration to work"*. Kesavan, same call: *"Calibration has to
+actually stated. The operator, 2026-08-07: *"the main thing is just making sure that we
+can get the calibration to work"*. The PI, same call: *"Calibration has to
 work. Embryo navigation has to work. Then timelapse setup has to work."* The
 workflow has a hard dependency and the code enforces none of it.
 

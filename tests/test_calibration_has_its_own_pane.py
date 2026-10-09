@@ -1,7 +1,7 @@
 """Calibration is a step in the workflow, so it is a pane in the workflow.
 
 #108. Calibrate used to be a button in the SPIM head's status bar, and its
-result appeared in a different tab entirely. Ryan, 25:30 on the 2026-08-07
+result appeared in a different tab entirely. The operator, on the 2026-08-07
 walkthrough: "after setting up the bottom camera and SPIM head, I feel like
 I'm not quite sure what to do in gently at this point." There was no next step
 on screen, because the next step was a button in the corner of the step before.

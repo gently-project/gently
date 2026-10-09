@@ -19,7 +19,7 @@
  *
  * WHY THIS EXISTS
  *
- * `LASER: ON` used to mean "an HTTP request returned 200". Ryan watched the
+ * `LASER: ON` used to mean "an HTTP request returned 200". The operator watched the
  * physical microscope on 2026-08-07 and reported the beam was not firing while
  * the UI said it was (#106). Three independent facts were being collapsed into
  * that one word:

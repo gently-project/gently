@@ -1,7 +1,7 @@
 """The XY safety envelope is operator-set, persisted, and now TWO fences (#107).
 
-Ryan: "we did notice that sometimes the embryos that we put on the coverslip
-are outside the map region." The envelope used to be four module constants
+From the rig: "we did notice that sometimes the embryos that we put on the
+coverslip are outside the map region." The envelope used to be four module constants
 that nothing above the device could change. The Map's region editor sets it.
 
 The single envelope has since come apart into two, because they protect

@@ -64,8 +64,8 @@ class TestWhatTheServerCallsThem:
         store = MagicMock()
         store.has_users.return_value = True
         store.get_role.return_value = "operator"
-        me = self._me(monkeypatch, local=True, store=store, username="ryan")
-        assert me["username"] == "ryan" and me["local"] is True
+        me = self._me(monkeypatch, local=True, store=store, username="operator")
+        assert me["username"] == "operator" and me["local"] is True
 
     def test_the_chat_and_the_connection_use_the_same_names(self):
         ws = (WEB / "routes" / "agent_ws.py").read_text(encoding="utf-8")
@@ -120,7 +120,7 @@ class TestThePage:
         [
             ({"local": True, "unnamed": "At the microscope"}, None, "At the microscope"),
             ({"local": False, "unnamed": "Guest"}, None, "Guest"),
-            ({"authenticated": True, "username": "ryan", "local": True}, None, "ryan"),
+            ({"authenticated": True, "username": "operator", "local": True}, None, "operator"),
             ({"local": True, "unnamed": "At the microscope"}, "Kesavan", "Kesavan"),
             (
                 {"local": True, "unnamed": "At the microscope"},

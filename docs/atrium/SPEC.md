@@ -192,7 +192,7 @@ reach the child.
 
 *Why:* this is what dissolves the nested switcher. Nesting is not the problem —
 nesting *without an address* is. Give the nested thing a destination and it
-stops being buried, which is exactly the failure that made Ryan ask us to build
+stops being buried, which is exactly the failure that made the operator ask us to build
 a calibration tab that already existed.
 
 *Test:* addressing a child activates it and unfolds its parent. A pressing child

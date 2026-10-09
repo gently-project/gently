@@ -11,7 +11,7 @@
 > 15fps TDR cap, the half-frame bug) all still holds and carried over.
 
 **Date:** 2026-07-18
-**Context:** v1 release prep. Ryan is the first external user; he tests on the diSPIM with live samples tomorrow morning.
+**Context:** v1 release prep. The first external user tests on the diSPIM with live samples tomorrow morning.
 **Status:** approved shape, scoped for one night.
 
 ## The problem
@@ -32,7 +32,7 @@ The data model is already correct: progress (`_states`, monotonic) is separate f
 (`_step`, free). Nothing structurally prevents backward navigation — no code path does it. So this is
 a small change, not a rewrite.
 
-**Ryan lands on the wrong surface.** The devices tab defaults to Map (`devices.js:149`); the finished
+**The operator lands on the wrong surface.** The devices tab defaults to Map (`devices.js:149`); the finished
 guided flow hides behind an unlabeled fifth button.
 
 **Z is rendered as text, not as an instrument.** The device layer already returns

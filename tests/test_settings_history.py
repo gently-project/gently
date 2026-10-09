@@ -47,7 +47,7 @@ def test_a_change_is_one_line_saying_what_from_what_to_what_and_who():
         "actions",
         reach="rig",
         via="Settings",
-        by="ryan",
+        by="operator",
         client="127.0.0.1",
         session_id="s1",
         label="Detail",
@@ -55,7 +55,7 @@ def test_a_change_is_one_line_saying_what_from_what_to_what_and_who():
     (line,) = _lines()
     assert line == e
     assert (line["key"], line["old"], line["new"]) == ("recording.fidelity", "balanced", "actions")
-    assert (line["by"], line["client"], line["session_id"]) == ("ryan", "127.0.0.1", "s1")
+    assert (line["by"], line["client"], line["session_id"]) == ("operator", "127.0.0.1", "s1")
     assert line["reach"] == "rig" and line["label"] == "Detail"
     assert line["at"][:4].isdigit() and ("+" in line["at"] or "-" in line["at"][10:]), (
         "a time with no offset means a different moment to every reader"
