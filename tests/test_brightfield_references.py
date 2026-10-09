@@ -305,9 +305,14 @@ class TestTheFramesAndTheExport:
 
 class TestThePane:
     def test_the_led_defaults_to_one_percent_and_the_panel_is_under_the_dic_fields(self):
+        """Under the plan's light, LED and exposure fields — which live on the
+        Bottom cam pane now, beside the live view and the stage pad the flat
+        needs (tests/test_overview_fields.py)."""
         assert 'id="op-plan-dic-led" type="number" min="1" max="100" step="1" value="1"' in INDEX
         assert 'id="op-bfref-host"' in INDEX and "panels/brightfield-refs.js" in INDEX
-        assert "BrightfieldRefs.mount('op-bfref-host')" in OPERATE
+        bottom = INDEX[INDEX.index('id="op-pane-bottom"') : INDEX.index('id="op-pane-spim"')]
+        assert bottom.index('id="op-plan-dic-light"') < bottom.index('id="op-bfref-host"')
+        assert "BrightfieldRefs.mount('op-bfref-host'" in OPERATE
         for needle in (
             "'op-plan-dic-light'",
             "'op-plan-dic-led'",

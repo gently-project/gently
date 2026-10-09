@@ -428,11 +428,23 @@
                        every instrument surface so selection and edits carry across
                        panes and survive a refresh (bootstrapped on load from
                        /api/embryos/current, then kept live by EMBRYOS_UPDATE). -->
-                  <aside class="op-embryos" id="op-erail" aria-label="Embryos">
+                  <aside class="op-embryos" id="op-erail" aria-label="Embryos and fields">
                     <div class="op-erail-head">
                       <span>Embryos</span><b class="op-num" id="op-erail-count">0</b>
                     </div>
                     <div class="op-erail-list" id="op-erail-list"></div>
+                    {# The fields of view the brightfield overview is taken
+                       from: a list like the embryos', because it is the same
+                       kind of thing for the other channel — the places a run
+                       goes back to. Embryos are where the SPIM volumes are
+                       taken; fields are where the bottom camera's frame is.
+                       Built here, beside the stage pad and the live view that
+                       show what a field holds, and kept in the session.
+                       panels/fields.js owns the markup. #}
+                    <div class="op-erail-head op-frail-head">
+                      <span>Fields</span><b class="op-num" id="op-frail-count">0</b>
+                    </div>
+                    <div class="op-erail-list op-frail-list" id="op-frail-list"></div>
                   </aside>
 
                   <div class="op-panearea">
@@ -515,6 +527,55 @@
                       </div>
                       <div class="op-gauge-nudge" id="op-bz-nudge"></div>
                       <div class="op-gauge-foot" id="op-bz-foot"></div>
+                    </div>
+
+                    {# The overview frames' own settings — how the bottom
+                       camera's frame is lit and exposed on the cadence — and
+                       the dark and flat references for them. Here, beside the
+                       live view, because that is where they are judged: the
+                       light and exposure are chosen by looking at the picture,
+                       and the flat needs the stage driven to an empty part of
+                       the dish, which the pad is right above. They used to sit
+                       on the Acquisition pane, two panes from the picture.
+                       The ids are the plan's: the Acquisition pane reads these
+                       fields and says them back; it holds no copy of its own. #}
+                    <div class="op-block op-block-overview" id="op-overview-host">
+                      <div class="op-block-head">Overview frames</div>
+                      <p class="op-cap">
+                        The brightfield frame a timelapse takes of each field on
+                        its cadence, lit and exposed as set here. Taken from the
+                        fields in the list on the left, or from the embryos'
+                        centroid while the list is empty.
+                      </p>
+                      {# The bottom camera drives no light of its own, so the
+                         plan says which one the frame is taken under. It is
+                         switched on for the frame and off again before the
+                         volumes; a light that was already on is left on. #}
+                      <div class="op-field"><label class="op-label" for="op-plan-dic-light">Light</label>
+                        <select class="op-sel" id="op-plan-dic-light">
+                          <option value="room" selected>room light</option>
+                          <option value="led">LED</option>
+                          <option value="none">as it is</option>
+                        </select></div>
+                      {# Set before every frame, so the series is lit the
+                         same whatever the Light panel was moved to between
+                         them. Empty leaves the LED as it is. #}
+                      <div class="op-field" id="op-plan-dic-led-field" hidden>
+                        <label class="op-label" for="op-plan-dic-led">LED brightness (%)</label>
+                        <input class="op-num-in" id="op-plan-dic-led" type="number" min="1" max="100" step="1" value="1" placeholder="as it is"></div>
+                      <div class="op-field"><label class="op-label" for="op-plan-dic-exposure">Exposure (ms)</label>
+                        <input class="op-num-in" id="op-plan-dic-exposure" type="number" min="1" max="2000" placeholder="camera's"></div>
+                      {# What the picture is showing right now is usually what
+                         the operator wants the run to take: one press copies
+                         the LED's brightness and the camera's exposure in. #}
+                      <div class="op-row op-row-wrap">
+                        <button class="op-btn op-btn-quiet" id="op-ov-match" type="button"
+                                title="Copy the LED brightness and the camera exposure the live view is using now">Use the live view's light and exposure</button>
+                      </div>
+                      {# Dark and flat-field references for the frames: taken
+                         once per session at this light and exposure.
+                         panels/brightfield-refs.js owns the markup. #}
+                      <div id="op-bfref-host"></div>
                     </div>
 
                     {# The SPIM centre governs what "centre on this embryo"
@@ -779,6 +840,11 @@
                     <div class="op-col">
                       <div class="op-block-head">Embryos <span class="op-num" id="op-roster-count">0</span></div>
                       <div class="op-roster" id="op-roster"></div>
+                      {# The same fields list as the Bottom cam rail — the
+                         other set of places this run goes back to. The
+                         plan's "taken from" reads it. #}
+                      <div class="op-block-head op-fields-head">Fields <span class="op-num" id="op-fields-count">0</span></div>
+                      <div class="op-roster" id="op-fields"></div>
                     </div>
 
                     <div class="op-col">
@@ -869,34 +935,22 @@
                               <span class="op-plan-pair">
                                 <input class="op-num-in" id="op-plan-dic-every" type="number" min="1" value="1">
                                 <span class="op-cap">round(s)</span></span></div>
+                            {# Where the frame is taken from: the embryos'
+                               centroid, or the fields list. The list itself is
+                               in the column on the left and on Bottom cam; the
+                               "here" option's text carries its size. #}
                             <div class="op-field"><label class="op-label" for="op-plan-dic-pos">Taken from</label>
                               <select class="op-sel" id="op-plan-dic-pos">
                                 <option value="centroid" selected>centroid of the embryos</option>
-                                <option value="here">where the stage is now (one field, or several)</option>
+                                <option value="here">the fields in the list</option>
                               </select></div>
                             <div class="op-cap" id="op-plan-dic-pin" hidden></div>
-                            <div class="op-field"><label class="op-label" for="op-plan-dic-exposure">Exposure (ms)</label>
-                              <input class="op-num-in" id="op-plan-dic-exposure" type="number" min="1" max="2000" placeholder="camera's"></div>
-                            {# The bottom camera drives no light of its own, so the
-                               plan says which one the frame is taken under. It is
-                               switched on for the frame and off again before the
-                               volumes; a light that was already on is left on. #}
-                            <div class="op-field"><label class="op-label" for="op-plan-dic-light">Light</label>
-                              <select class="op-sel" id="op-plan-dic-light">
-                                <option value="room" selected>room light</option>
-                                <option value="led">LED</option>
-                                <option value="none">as it is</option>
-                              </select></div>
-                            {# Set before every frame, so the series is lit the
-                               same whatever the Light panel was moved to between
-                               them. Empty leaves the LED as it is. #}
-                            <div class="op-field" id="op-plan-dic-led-field" hidden>
-                              <label class="op-label" for="op-plan-dic-led">LED brightness (%)</label>
-                              <input class="op-num-in" id="op-plan-dic-led" type="number" min="1" max="100" step="1" value="1" placeholder="as it is"></div>
-                            {# Dark and flat-field references for the frames: taken
-                               once per session at this light and exposure.
-                               panels/brightfield-refs.js owns the markup. #}
-                            <div id="op-bfref-host"></div>
+                            {# How the frame is lit and exposed, and its dark and
+                               flat, are set on the Bottom cam pane beside the live
+                               view they are judged on (the Overview frames block).
+                               Said back here so the plan reads in one place, with
+                               the way there. #}
+                            <div class="op-cap op-plan-dic-setup" id="op-plan-dic-setup"></div>
                           </div>
                         </div>
 
@@ -1821,6 +1875,7 @@
     <script src="/static/js/panels/calprogress.js"></script>
     <script src="/static/js/panels/light.js"></script>
     <script src="/static/js/panels/brightfield-refs.js"></script>
+    <script src="/static/js/panels/fields.js"></script>
     <script src="/static/js/panels/stage-pad.js"></script>
     <script src="/static/js/panels/overview-stage.js"></script>
     <script src="/static/js/acquisition-plan.js"></script>

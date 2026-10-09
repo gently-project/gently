@@ -1,11 +1,14 @@
 """Dark and flat-field references for brightfield frames, taken from the
-Acquisition pane and filed in the live session (see gently.app.brightfield).
+Bottom cam pane and filed in the live session (see gently.app.brightfield);
+and the fields of view the overview is taken from, kept with the session.
 
     GET  /api/brightfield/references?light=&led_intensity_pct=&exposure_ms=
          every record this session holds, and which one matches the spec
     POST /api/brightfield/references/dark   {exposure_ms, light, led_intensity_pct, record?}
     POST /api/brightfield/references/flat   {exposure_ms, light, led_intensity_pct,
                                              frames?, record?}
+    GET  /api/brightfield/fields            {session_id, fields: [{x, y}]}
+    PUT  /api/brightfield/fields            {fields: [{x, y}]} — the whole list, in order
 
 One capture at a time, and none while a run is live: the dark cycles the
 room light, which would land in whatever the run was imaging.
@@ -181,5 +184,57 @@ def create_router(server) -> APIRouter:
         """The empty field under the run's light, ``frames`` averaged. The
         operator has driven the stage clear of the embryos first."""
         return await _take("flat", body or {})
+
+    # ── the fields of view ──────────────────────────────────────────────
+    # The operator builds this list on the Bottom cam pane, where the stage
+    # pad and the live view are; the Acquisition pane reads it as "taken
+    # from the fields". It lives in the session so a reload, or the other
+    # pane, finds the same list. It is not a plan: nothing here starts a run.
+
+    def _fields_of(body: dict) -> list[dict]:
+        raw = body.get("fields")
+        if not isinstance(raw, list):
+            raise HTTPException(status_code=400, detail="fields must be a list of {x, y}")
+        if len(raw) > 64:
+            raise HTTPException(status_code=400, detail="at most 64 fields")
+        out = []
+        for p in raw:
+            try:
+                x, y = float(p["x"]), float(p["y"])
+            except (TypeError, KeyError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail="each of fields must be {x, y}"
+                ) from None
+            if not (x == x and y == y and abs(x) < 1e7 and abs(y) < 1e7):  # noqa: PLR0124
+                raise HTTPException(status_code=400, detail="fields must be finite stage µm")
+            out.append({"x": x, "y": y})
+        return out
+
+    @router.get("/api/brightfield/fields")
+    async def get_fields():
+        """The session's overview fields, oldest first. Empty, not an error,
+        when there is no session: the pane shows "no fields yet"."""
+        agent = _agent()
+        store = getattr(agent, "store", None) if agent else None
+        sid = getattr(agent, "session_id", None) if agent else None
+        if store is None or not sid or not hasattr(store, "get_overview_fields"):
+            return {"session_id": sid, "fields": []}
+        try:
+            fields = await asyncio.to_thread(store.get_overview_fields, sid)
+        except Exception:
+            logger.debug("overview fields unreadable", exc_info=True)
+            fields = []
+        return {"session_id": sid, "fields": fields}
+
+    @router.put("/api/brightfield/fields", dependencies=[Depends(require_control)])
+    async def put_fields(body: dict = Body(default={})):  # noqa: B008
+        """Replace the list. The client sends the whole list every time, so
+        order and removals need no verbs of their own."""
+        store, sid = _store_and_session()
+        fields = _fields_of(body or {})
+        if not hasattr(store, "save_overview_fields"):
+            raise HTTPException(status_code=503, detail="This store cannot keep fields")
+        await asyncio.to_thread(store.save_overview_fields, sid, fields)
+        return {"session_id": sid, "fields": fields}
 
     return router

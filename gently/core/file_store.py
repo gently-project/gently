@@ -647,6 +647,30 @@ class FileStore:
         doc = _read_yaml(sd / "acquisition.yaml")
         return doc if isinstance(doc, dict) else None
 
+    # ==================================================================
+    # Overview fields — the bottom camera's fields of view for the
+    # brightfield overview, as the operator set them on the Bottom cam pane
+    # ==================================================================
+
+    def save_overview_fields(self, session_id: str, fields: list[dict]) -> Path:
+        """Write ``overview_fields.yaml``: each field {x, y} in stage µm, in
+        the order the frames are taken. Kept in the session so a reload, or
+        the Acquisition pane, finds the same list the operator built while
+        looking at the dish."""
+        sd = self._require_session_dir(session_id)
+        path = sd / "overview_fields.yaml"
+        _write_yaml(path, {"fields": [dict(f) for f in fields]})
+        return path
+
+    def get_overview_fields(self, session_id: str) -> list[dict]:
+        """The session's overview fields, oldest first; empty when none."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        doc = _read_yaml(sd / "overview_fields.yaml")
+        fields = doc.get("fields") if isinstance(doc, dict) else None
+        return [dict(f) for f in fields if isinstance(f, dict)] if isinstance(fields, list) else []
+
     def append_temperature_sample(self, session_id: str, sample: dict) -> None:
         """Append one temperature reading to the session's temperature.jsonl."""
         sd = self._require_session_dir(session_id)

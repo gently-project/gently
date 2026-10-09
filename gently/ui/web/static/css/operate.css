@@ -123,6 +123,39 @@
     flex-direction: column;
     gap: var(--op-1);
 }
+/* The fields list shares the rail with the embryos'. The embryos keep the
+   room — there are more of them, and they are selected from — and the fields
+   take what they need up to a cap, each list scrolling on its own. */
+.op-frail-head { border-top: 1px solid var(--op-rule); }
+.op-frail-list { flex: 0 1 auto; max-height: 42%; }
+
+/* ── Fields panel (panels/fields.js) ─────────────────────────────────────
+   The roster's row, so the two lists read as one kind of thing. */
+.fp-row { cursor: default; }
+.fp-row.is-here {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.fp-here {
+    margin-left: 6px;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+}
+.fp-note { font-size: 0.68rem; color: var(--op-ink-dim); padding: 2px var(--op-2) 0; }
+.fp-empty { font-size: 0.7rem; }
+.fp-add { margin-top: var(--op-1); align-self: stretch; width: 100%; }
+.fp-add:disabled { opacity: 0.45; cursor: not-allowed; }
+.op-fields-head { margin-top: var(--op-2); }
+
+/* The Overview frames block on the Bottom cam rail: the plan's own
+   fields, so the inputs are the plan's inputs, narrowed to the rail. */
+.op-block-overview .op-num-in, .op-block-overview .op-sel { width: 96px; }
+.op-block-overview .op-cap { margin: 0; }
+.op-plan-dic-setup .op-btn { margin-left: 2px; }
+/* "the 2 fields in the list" has to fit: the plan's other selects are this wide. */
+#op-plan-dic-pos { min-width: 190px; }
 
 /* ── pane shell ─────────────────────────────────────────────────────────── */
 .op-pane {
@@ -1794,11 +1827,6 @@
 .sp-steps .is-on { border-color: var(--accent); color: var(--op-ink); }
 .sp-note { max-width: 320px; }
 
-/* The DIC overview's pinned positions: one field, or several. */
-#op-plan-dic-pin { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
-.op-dic-pin { display: inline-flex; align-items: center; gap: 4px; }
-.op-dic-pin-x, .op-dic-pin-add {
-    font: inherit; font-size: 11px; line-height: 1.2; padding: 1px 6px; border-radius: 6px;
-    border: 1px solid var(--border, #cbd5e1); background: transparent; color: inherit; cursor: pointer;
-}
-.op-dic-pin-x:hover, .op-dic-pin-add:hover { border-color: var(--accent, #3b82f6); color: var(--accent, #3b82f6); }
+/* What the plan's "taken from the fields" means, under the select. The
+   fields themselves are the list in the left column (panels/fields.js). */
+#op-plan-dic-pin[hidden] { display: none; }

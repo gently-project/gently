@@ -237,7 +237,8 @@ def test_typing_in_the_pane_marks_the_plan_dirty_inside_wire():
 
 
 def test_fill_is_the_inverse_of_read():
-    fn = OPERATE[OPERATE.index("function fillPlan(plan)") :][:2600]
+    fn = OPERATE[OPERATE.index("function fillPlan(plan)") :]
+    fn = fn[: fn.index("\n    }")]
     for field in (
         "op-tl-interval",
         "op-plan-unit",

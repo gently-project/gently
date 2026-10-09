@@ -82,13 +82,17 @@ def test_every_input_re_says_the_plan():
     assert "addEventListener('change'" in wiring
 
 
-def test_taken_from_here_captures_the_stage_when_chosen_not_at_start():
+def test_taken_from_the_fields_captures_the_stage_when_chosen_not_at_start():
+    """The fields are a list of their own now (panels/fields.js, built on
+    Bottom cam). Choosing "the fields" on Acquisition with none in the list
+    still makes one from where the stage is at that moment — through the
+    same door the rail's button uses, so it is kept and published too."""
     wiring = _wire_body()
-    assert "_dicPins = [{ x: _xy.x, y: _xy.y }]" in wiring
-    assert "No stage position known yet" in wiring
-    # and when the embryos do not all fit in one field, another position is
-    # added from where the stage is at that moment
-    assert "data-dic-pin-add" in wiring and "_dicPins.push({ x: _xy.x, y: _xy.y })" in wiring
+    assert "!_dicPins.length && !addFieldHere()" in wiring
+    add = OPERATE[OPERATE.index("function addFieldHere()") :]
+    add = add[: add.index("\n    }")]
+    assert "No stage position known yet" in add
+    assert "_dicPins.push({ x: _xy.x, y: _xy.y })" in add
 
 
 def test_the_sentence_sits_beside_start_not_atop_a_scrolling_panel():

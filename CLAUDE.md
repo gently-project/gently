@@ -99,6 +99,7 @@ D:/Gently3/
       intent.yaml                          # planned vs actual
       timelapse.yaml                       # checkpointed timelapse state
       acquisition.yaml                     # the plan the run was started with
+      overview_fields.yaml                 # the bottom-camera fields the overview is taken from (Bottom cam pane)
       timeline.jsonl                       # session events
       interaction_log.jsonl                # agent conversation records
       conversation.json                    # Claude API messages (resumption)

@@ -3,9 +3,11 @@
  *
  *     BrightfieldRefs.mount('op-bfref-host');
  *
- * Lives under the DIC overview fields of the Acquisition pane and reads the
- * light, LED brightness and exposure from them, so the references are taken
- * for exactly the frames the plan will take. Two steps, in order:
+ * Lives in the Bottom cam pane's Overview frames block, under the plan's
+ * light, LED brightness and exposure fields, and reads them, so the
+ * references are taken for exactly the frames the plan will take — and
+ * beside the live view and the stage pad, because the flat needs the stage
+ * driven to an empty part of the dish first. Two steps, in order:
  *
  *   1. Dark — the room light is cycled on and off (its state has no
  *      read-back), the LED closed, one frame taken.
@@ -24,6 +26,7 @@ const BrightfieldRefs = (() => {
     let last = { dark: null, flat: null };
     let working = null;       // 'dark' | 'flat' while a capture runs
     let timer = null;
+    let onChange = null;      // told after every refresh: the plan's summary line follows
 
     const $ = id => document.getElementById(id);
     const esc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
@@ -60,6 +63,20 @@ const BrightfieldRefs = (() => {
             state = { records: [], match: null, busy: false, error: String(e) };
         }
         render();
+        if (typeof onChange === 'function') { try { onChange(status()); } catch (_) { /* theirs */ } }
+    }
+
+    /**
+     * Whether references exist for the frames the plan will take, for a
+     * surface that only has to say so (the Acquisition pane's summary).
+     */
+    function status() {
+        const m = state.match_record;
+        return {
+            have: !!m,
+            when: m ? ((m.flat && m.flat.taken_at) || (m.dark && m.dark.taken_at) || null) : null,
+            spec: spec(),
+        };
     }
 
     function fmtStats(st) {
@@ -94,7 +111,7 @@ const BrightfieldRefs = (() => {
                         ${img('dark')}
                     </div>
                     <div class="bf-step">
-                        <div class="bf-step-head"><b>2. Flat</b> <span class="bf-cap">first drive the stage so <u>no embryo</u> is in the bottom camera's view; then five frames are averaged under the plan's light.</span></div>
+                        <div class="bf-step-head"><b>2. Flat</b> <span class="bf-cap">first drive the stage (the pad above) so <u>no embryo</u> is in the bottom camera's view; then five frames are averaged under the light set above.</span></div>
                         <div class="bf-row">
                             <button class="op-btn" type="button" data-bf="flat" ${working || !last.dark && !record ? 'disabled' : ''} title="${!last.dark && !record ? 'Take the dark first' : ''}">${working === 'flat' ? 'Taking the flat…' : last.flat ? 'Retake flat' : 'Take flat'}</button>
                             ${last.flat ? `<span class="bf-cap">${fmtStats(last.flat.stats)} · ${last.flat.frames} frames</span>` : ''}
@@ -140,9 +157,10 @@ const BrightfieldRefs = (() => {
         }
     }
 
-    function mount(hostId) {
+    function mount(hostId, opts) {
         host = $(hostId);
         if (!host) return;
+        onChange = opts && typeof opts.onChange === 'function' ? opts.onChange : null;
         ['op-plan-dic-light', 'op-plan-dic-led', 'op-plan-dic-exposure'].forEach(id => {
             const el = $(id);
             if (el) el.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(refresh, 150); });
@@ -159,7 +177,7 @@ const BrightfieldRefs = (() => {
         refresh();
     }
 
-    return { mount, refresh, spec };
+    return { mount, refresh, spec, status };
 })();
 
 if (typeof module !== 'undefined') module.exports = BrightfieldRefs;
