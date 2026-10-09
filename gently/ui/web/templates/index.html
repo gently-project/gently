@@ -414,9 +414,9 @@
                     <button class="view-btn active" data-view="bottom" title="Bottom camera">Bottom cam</button>
                     <button class="view-btn" data-view="spim" title="SPIM head">SPIM head</button>
                     <!-- #108: the step between finding the embryo and setting up the
-                         run. Ryan on 2026-08-07: "you find the embryos on the bottom
-                         camera, you find them with the SPIM head, you calibrate it,
-                         and then you set up your acquisition parameters." -->
+                         run, as the operator described it on the 2026-08-07 walkthrough:
+                         find the embryos on the bottom camera, find them with the SPIM
+                         head, calibrate, then set up the acquisition parameters. -->
                     <button class="view-btn" data-view="cal" title="Calibration">Calibration</button>
                     <button class="view-btn" data-view="acquire" title="Acquisition setup">Acquisition</button>
                   </div>
@@ -488,8 +488,7 @@
 
                   <aside class="op-inst">
                     {# Every card on this rail folds: a head row with a
-                       Show/Hide, and what it holds beneath (Ryan: "show button
-                       also needed on bottom focus, led, stage etc"). One rule,
+                       Show/Hide, and what it holds beneath. One rule,
                        in operate.js (wireDisclosures): `data-disclose` names
                        the card, the first .op-disc-head (or the gauge's head)
                        stays, `.op-disc-keep` stays, the rest folds. The choice
@@ -679,8 +678,8 @@
                     <div class="op-gauge" id="op-gauge-fd" data-status="unknown">
                       <div class="op-gauge-head">
                         <span class="op-gauge-name">Sample → objective</span>
-                        <!-- #109. Ryan, first words on opening this tab: "here we
-                             need a halt button." Always enabled: halting a still
+                        <!-- #109. The first thing asked for on opening this tab was a
+                             halt button. Always enabled: halting a still
                              axis costs nothing, and a stop that is greyed out when
                              you reach for it is not a stop. -->
                         <!-- The head fully up, to the F-drive's top limit — the load
@@ -731,9 +730,9 @@
                      list; nothing here is sequenced after anything else. -->
                 <!-- #108. Between SPIM head and Acquisition, because that is where
                      it sits in the work: find the embryo, then calibrate it, then set
-                     up the run. Ryan at 25:30 on the walkthrough: "after setting up
-                     the bottom camera and SPIM head, I feel like I'm not quite sure
-                     what to do in gently at this point." This is what came next. -->
+                     up the run. On the walkthrough, after setting up the bottom camera
+                     and SPIM head, the operator was not sure what to do next in
+                     Gently. This is what came next. -->
                 <section class="op-pane" id="op-pane-cal" data-pane="cal" hidden>
                   <div class="op-lock" id="op-lock-cal" hidden>
                     <span class="op-lock-txt">Sample at objective · XY locked ·
@@ -1162,8 +1161,8 @@
                                 <span class="devices-readout-value" id="devices-map-y">—</span>
                             </div>
                         </div>
-                        <!-- #107. Ryan: "sometimes the embryos that we put on the
-                             coverslip are outside the map region." The region is the
+                        <!-- #107. Embryos put on the coverslip are sometimes outside
+                             the map region. The region is the
                              XY safety envelope; this is the only place it is edited. -->
                         <button class="devices-region-btn" id="devices-region-edit" type="button">Edit region</button>
 

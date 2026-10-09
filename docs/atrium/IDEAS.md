@@ -152,7 +152,7 @@ than builds · full keyboard operability with no agent.
   a frame half off the viewport is as half-rendered as content escaping its frame
 - Deck gauges truncate at the fixed panel width
 - Window title and gauge state the same value twice (`EMBRYOS · 5` / `5 · e02 sel`)
-- Index weights (`crit .65 / freq .35`) are a guess — they come from watching Ryan
+- Index weights (`crit .65 / freq .35`) are a guess — they come from watching the first external user
 
 ## Bugs found while building (each one a design lesson)
 
@@ -192,7 +192,7 @@ than builds · full keyboard operability with no agent.
 ## Where this sits relative to the release
 
 **Part of `1.0.0.dev1`.** Strategic call by pskeshu, 2026-08-24: this surface is
-as important as the six issues from Ryan's walkthrough (#105–#110), not the
+as important as the six issues from the 2026-08-07 walkthrough (#105–#110), not the
 release after. dev1 therefore carries two shapes of work — bug fixes with a
 known end, and a paradigm still being invented — and its acceptance test grows
-accordingly: Ryan completes the walkthrough *and* reacts to the surface.
+accordingly: the operator completes the walkthrough *and* reacts to the surface.

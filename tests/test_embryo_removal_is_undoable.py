@@ -83,11 +83,13 @@ class TestTheStore:
         assert after == before
 
     def test_the_record_says_what_it_held(self, store):
-        record = store.set_aside_embryo("s1", "embryo_1", by={"by": "ryan", "client": "10.0.0.2"})
+        record = store.set_aside_embryo(
+            "s1", "embryo_1", by={"by": "operator", "client": "10.0.0.2"}
+        )
         assert record["embryo_id"] == "embryo_1"
         assert record["timepoints"] == 3
         assert record["calibrated"] is True
-        assert record["removed_by"] == {"by": "ryan", "client": "10.0.0.2"}
+        assert record["removed_by"] == {"by": "operator", "client": "10.0.0.2"}
         on_disk = yaml.safe_load(
             (_removed_dir(store) / record["folder"] / "removed.yaml").read_text("utf-8")
         )

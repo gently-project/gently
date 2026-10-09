@@ -1,7 +1,7 @@
 """Which cards on the Bottom cam rail are open is the rig's choice.
 
-Ryan, 2026-10-09: "rig wide please, and dynamic - that when i show or hide,
-it persists." The states live in ``<storage>/config/rail_cards.json``
+The choice is the rig's and is kept as it is pressed (2026-10-09). The
+states live in ``<storage>/config/rail_cards.json``
 (routes/ui_prefs.py), every press writes one card through, each change is
 a line in the settings history, and every browser hears UI_RAIL_CARDS.
 """

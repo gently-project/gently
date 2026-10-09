@@ -8,7 +8,7 @@
  *
  * WHY
  *
- * Ryan asked for exposure on the 2026-08-07 walkthrough (#110): "in
+ * Exposure was asked for on the 2026-08-07 walkthrough (#110): "in
  * Micro-Manager sometimes there's a default like very low exposure time, and
  * that can make it a little more challenging to find the embryos". There was no
  * exposure control anywhere in Operate, on either surface.

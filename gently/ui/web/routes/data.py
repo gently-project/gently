@@ -1482,7 +1482,7 @@ def create_router(server) -> APIRouter:
     async def beam_set(payload: dict = Body(...)):  # noqa: B008
         """Arm or disarm the beam. Body: {"enabled": bool, "side"?: "a"|"b"|"both"}.
 
-        Never called implicitly. Ryan, on the 2026-08-07 walkthrough: "I would
+        Never called implicitly. The operator, on the 2026-08-07 walkthrough: "I would
         probably not turn the laser on. Typically I leave the laser off in
         Micro-Manager until I'm ready to do this stuff." Arming is an act the
         operator performs, not a side effect of asking for something else.

@@ -374,8 +374,7 @@ class BfOverview:
     # The light the frame is taken under. The bottom camera drives no light
     # of its own, so without this the overview was whatever the room happened
     # to be: in the dark, a dark frame. "led" is the transmitted-light LED,
-    # open for the capture only, and the default (Ryan, 2026-10-09: "light
-    # should be default to LED for BF imaging. at 1 percent"); "room" is the
+    # open for the capture only, and the default, at 1 % (2026-10-09); "room" is the
     # room light; "none" leaves the lights exactly as they are.
     light: str = "led"
     # How bright the LED is for the frame, in whole percent. Only means

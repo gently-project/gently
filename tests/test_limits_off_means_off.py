@@ -1,7 +1,7 @@
 """XY limits OFF means the controller's own limits — not a box of ours.
 
 Reported from the rig after the firmware fence was made opt-in: "greater
-freedom of movement, but still not able to cover the full extent". Ryan was
+freedom of movement, but still not able to cover the full extent". The report was
 right, and the reason was in the code all along: "off" wrote the
 `XY_STAGE_*_UM` constants into the Tiger as if they were the stage's travel.
 They are not. The comment above them says they are INSET ~850 µm from a
@@ -15,8 +15,8 @@ limit properties cannot say `-`, so it goes through the hub's serial
 passthrough — whose reply the adapter never checks, so we do.
 
 Everything here runs against a fake controller. Nothing in this file has
-touched hardware; that is Ryan's job, and the checks in
-`restore_firmware_limit_defaults` are what make it safe to hand him.
+touched hardware; that is the rig's job, and the checks in
+`restore_firmware_limit_defaults` are what make it safe to hand over.
 """
 
 from __future__ import annotations

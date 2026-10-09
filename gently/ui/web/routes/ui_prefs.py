@@ -4,12 +4,11 @@
     PUT /api/ui/rail-cards           {cards: {led: false}} — merged, kept, told
 
 The Bottom cam rail's cards fold (operate.js wireDisclosures), and which
-are open used to live in each browser's localStorage. Ryan, 2026-10-09:
-"rig wide please, and dynamic - that when i show or hide, it persists." So
-the states live here, in ``<storage>/config/rail_cards.json`` beside the
-settings history, every press writes through, every change is one line in
-the history, and every browser looking at the rig hears UI_RAIL_CARDS and
-follows.
+are open used to live in each browser's localStorage. The rig wanted them
+rig-wide and kept as they are pressed (2026-10-09). So the states live
+here, in ``<storage>/config/rail_cards.json`` beside the settings history,
+every press writes through, every change is one line in the history, and
+every browser looking at the rig hears UI_RAIL_CARDS and follows.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """Calibration closes the LED before it looks at anything.
 
-#106. Ryan, on the 2026-08-07 walkthrough, watched the physical microscope
+#106. The operator, on the 2026-08-07 walkthrough, watched the physical microscope
 while the UI reported the laser was on. Two separate faults wore that one
 symptom, and this is the second: `calibrate_embryo` never closed the LED.
 

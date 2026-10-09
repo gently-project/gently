@@ -7,7 +7,7 @@
  *
  * WHY
  *
- * The bottom camera had no zoom. Ryan, on the 2026-08-07 walkthrough, on why
+ * The bottom camera had no zoom. The operator, on the 2026-08-07 walkthrough, on why
  * two-point calibration was hard: "the embryo is a little small, so we'd
  * probably zoom in on this like in Micro-Manager to make it easier to see
  * nuclei... effectively like using the magnifying glass in ImageJ". #113 also

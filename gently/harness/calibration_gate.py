@@ -23,9 +23,9 @@ calibrated, using five made-up numbers, and report success. The data looks
 exactly like real data. That is worse than a refusal, because a refusal is
 noticed.
 
-It also inverted the order the team stated out loud on 2026-08-07 — Ryan: "the
-main thing is just making sure that we can get the calibration to work";
-Kesavan: "Calibration has to work. Embryo navigation has to work. Then
+It also inverted the order the team stated out loud on 2026-08-07 — the
+operator: "the main thing is just making sure that we can get the calibration
+to work"; the PI: "Calibration has to work. Embryo navigation has to work. Then
 timelapse setup has to work." The workflow has a hard dependency; now the code
 has one too.
 

@@ -1,7 +1,7 @@
 """Every card on the Bottom cam rail folds to its head row.
 
-Ryan, 2026-10-09, after the Overview frames block got a Show button: "show
-button also needed on bottom focus, led, stage etc." One rule for all of
+After the Overview frames block got a Show button, every other card on the
+rail wanted one (2026-10-09). One rule for all of
 them (operate.js wireDisclosures): `data-disclose` names the card, the head
 row and `.op-disc-keep` stay, the other direct children fold, and the choice
 is remembered per card. CI runs no browser, so the markup and the wiring are

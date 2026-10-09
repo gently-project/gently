@@ -1,6 +1,6 @@
 """A run's tactic says when it started and how it ended.
 
-Ryan's first night on the rig: Start at 16:45, Stop twenty seconds later to
+The first external user's first night on the rig: Start at 16:45, Stop twenty seconds later to
 change the laser preset, Start again at 16:46, and eight hours of volumes.
 Two Starts, two tactics, both honest — and the Operations tab showed them as
 "Adaptive timelapse · done" twice over, with nothing to tell a false start

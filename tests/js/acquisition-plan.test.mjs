@@ -173,8 +173,7 @@ test('the agent’s stage-based ending reads back as the pane’s own', () => {
 test('the plan says which light the overview is taken under', () => {
     // The bottom camera drives no light of its own. A night of overview
     // frames came out dark because nothing said which light to use. The
-    // default is the LED (Ryan, 2026-10-09: "light should be default to LED
-    // for BF imaging. at 1 percent").
+    // default is the LED, at 1 % (2026-10-09).
     const dflt = P.fromForm({ bf: true });
     assert.equal(dflt.bf.light, 'led', 'the LED is what this rig uses for brightfield');
     assert.match(P.describe(dflt, SUBJECTS), /from the centroid, under the LED/);

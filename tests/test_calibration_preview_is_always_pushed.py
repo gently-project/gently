@@ -8,7 +8,7 @@ was one where the algorithm had already lost confidence.
 
 That is backwards. The montage is the sweep made legible, and it is what the
 Operate pane now seats under the Calibrate button while the routine runs
-(`operate.js`, `PREVIEW_KINDS.focus_montage`). Ryan spent the 2026-08-07
+(`operate.js`, `PREVIEW_KINDS.focus_montage`). The operator spent the 2026-08-07
 walkthrough unable to tell what calibration was doing.
 
 The confident path is the one that regresses, because it is the path where the

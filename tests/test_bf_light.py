@@ -109,7 +109,7 @@ def _round(client, store, **bf):
 
 
 def test_the_led_is_the_default():
-    """Ryan, 2026-10-09: "light should be default to LED for BF imaging. at 1 percent." """
+    """The rig's default for brightfield: the LED, at 1 % (2026-10-09)."""
     assert BfOverview().light == "led"
     assert BfOverview.from_dict({"enabled": True}).light == "led"
 
@@ -224,7 +224,7 @@ def test_the_route_refuses_a_light_it_does_not_know():
 
 
 def test_the_pane_offers_the_three_lights_with_the_led_first_and_chosen():
-    """Ryan, 2026-10-09: "light should be default to LED for BF imaging. at 1 percent." """
+    """The rig's default for brightfield: the LED, at 1 % (2026-10-09)."""
     block = HTML[HTML.index('id="op-plan-bf-light"') :][:400]
     assert block.index('value="led" selected') < block.index('value="room"')
     assert 'id="op-plan-bf-led" type="number" min="1" max="100" step="1" value="1"' in HTML
