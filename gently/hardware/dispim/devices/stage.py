@@ -60,16 +60,21 @@ class DiSPIMZstage:
     Device-agnostic: any plan that moves a positioner will work with this device
     """
 
+    # The software fence for the bottom-camera focus Z, in µm. The floor is
+    # 0: the rig asked for it (2026-10-09), having found focus below the old
+    # 50 µm floor. The ceiling is the objective's throw.
+    DEFAULT_LIMITS_UM: tuple[float, float] = (0.0, 250.0)
+
     def __init__(
         self,
         name: str,
         core: pymmcore.CMMCore,
-        limits: tuple[float, float] = (50.0, 250.0),
+        limits: tuple[float, float] | None = None,
     ):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
-        self._limits = limits
+        self._limits = tuple(limits) if limits is not None else self.DEFAULT_LIMITS_UM
         self.tolerance = 0.1  # µm
 
     @property
