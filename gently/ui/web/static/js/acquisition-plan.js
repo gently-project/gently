@@ -182,7 +182,11 @@ const AcquisitionPlan = (() => {
                 // stays in the plan so validate() can say what is wrong.
                 ledPct: light === 'led' ? pct : null,
             },
-            stop: { kind: STOP_KINDS[f.stopKind] ? f.stopKind : 'manual', value: f.stopValue == null ? null : f.stopValue },
+            // A form that says nothing ends after 16 h, the pane's default;
+            // a structure says its ending for itself (fromStructure).
+            stop: STOP_KINDS[f.stopKind]
+                ? { kind: f.stopKind, value: f.stopValue == null ? null : f.stopValue }
+                : { kind: 'duration', value: f.stopValue == null ? 16 : f.stopValue },
             // An embryo's own ending is the ending of its volumes.
             overrides: volumes ? overrides : [],
             monitoringMode: f.monitoringMode || 'idle',

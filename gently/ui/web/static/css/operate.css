@@ -1676,6 +1676,23 @@
 .cp-strip[hidden] { display: none; }
 .cal-adv[hidden] { display: none; }
 .op-adv[hidden] { display: none; }
+
+/* ── The rail's folding cards (operate.js wireDisclosures) ───────────────
+   A head row that stays, a body that folds. The body carries the same
+   dashed rule the Advanced card always had, so an open card reads as one. */
+.op-disc-head { display: flex; align-items: center; justify-content: space-between; gap: var(--op-2); }
+.op-disc-head .op-block-head { margin: 0; }
+.op-disc-btn { font-size: 0.66rem; padding: 0 6px; line-height: 1.5; }
+.op-gauge-head .op-disc-btn { margin-left: var(--op-1); }
+.op-disc-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+    margin-top: var(--op-2);
+    padding-top: var(--op-2);
+    border-top: 1px dashed var(--op-rule);
+}
+.op-disc-body[hidden] { display: none; }
 .al-history[hidden] { display: none; }
 
 /* ── The acquisition plan ─────────────────────────────────────────────── */

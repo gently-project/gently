@@ -487,9 +487,22 @@
                   </div>
 
                   <aside class="op-inst">
-                    <div class="op-block">
-                      <div class="op-block-head">Camera</div>
-                      <button class="op-btn op-btn-toggle" id="op-cam-toggle" type="button">Start camera</button>
+                    {# Every card on this rail folds: a head row with a
+                       Show/Hide, and what it holds beneath (Ryan: "show button
+                       also needed on bottom focus, led, stage etc"). One rule,
+                       in operate.js (wireDisclosures): `data-disclose` names
+                       the card, the first .op-disc-head (or the gauge's head)
+                       stays, `.op-disc-keep` stays, the rest folds. The choice
+                       is remembered per card; what is used every minute opens
+                       by default, what is set once a night starts closed. #}
+                    <div class="op-block" data-disclose="camera">
+                      <div class="op-disc-head">
+                        <span class="op-block-head">Camera</span>
+                        <button class="op-btn op-btn-quiet op-disc-btn" type="button" data-disclose-toggle aria-expanded="true">Hide</button>
+                      </div>
+                      {# The one verb this pane cannot do without stays out
+                         when the card is folded. #}
+                      <button class="op-btn op-btn-toggle op-disc-keep" id="op-cam-toggle" type="button">Start camera</button>
                       <!-- Exposure joins the block that already names this
                            camera, rather than opening a second one about it. -->
                       <div id="op-cam-panel-bottom"></div>
@@ -498,22 +511,33 @@
                          while looking at the dish. panels/stage-pad.js owns the
                          markup; the server refuses while the sample is at the
                          objective and keeps the target inside the envelope. -->
-                    <div class="op-block">
-                      <div class="op-block-head">Stage</div>
+                    <div class="op-block" data-disclose="stage">
+                      <div class="op-disc-head">
+                        <span class="op-block-head">Stage</span>
+                        <button class="op-btn op-btn-quiet op-disc-btn" type="button" data-disclose-toggle aria-expanded="true">Hide</button>
+                      </div>
                       <div id="op-stage-host"></div>
                     </div>
 
                     <!-- The Light panel again, showing only the LED: this camera
                          is lit by it, and the laser has no part here. A card of
                          its own because brightness is the light's, not the
-                         camera's (docs/architecture/PANELS.md). -->
-                    <div class="op-block" id="op-led-host"></div>
+                         camera's (docs/architecture/PANELS.md). The card draws
+                         the heading; the panel is mounted untitled beneath it. -->
+                    <div class="op-block" data-disclose="led">
+                      <div class="op-disc-head">
+                        <span class="op-block-head">LED</span>
+                        <button class="op-btn op-btn-quiet op-disc-btn" type="button" data-disclose-toggle aria-expanded="true">Hide</button>
+                      </div>
+                      <div id="op-led-host"></div>
+                    </div>
 
 
-                    <div class="op-gauge" id="op-gauge-bz" data-status="unknown">
+                    <div class="op-gauge" id="op-gauge-bz" data-status="unknown" data-disclose="focus">
                       <div class="op-gauge-head">
                         <span class="op-gauge-name">Bottom focus</span>
                         <span class="op-gauge-read"><b class="op-num" id="op-bz-pos">—</b><i>µm</i></span>
+                        <button class="op-btn op-btn-quiet op-disc-btn" type="button" data-disclose-toggle aria-expanded="true">Hide</button>
                       </div>
                       <div class="op-gauge-body">
                         <div class="op-gauge-track" id="op-bz-track" tabindex="0" role="slider"
@@ -542,14 +566,13 @@
                     {# Behind a disclosure like the SPIM centre below it: set
                        once a night, then read. The line under the heading
                        says what is set, so the block is a fact when closed. #}
-                    <div class="op-block op-block-overview" id="op-overview-host">
-                      <div class="op-row op-row-wrap">
+                    <div class="op-block op-block-overview" id="op-overview-host" data-disclose="overview">
+                      <div class="op-disc-head">
                         <span class="op-block-head" title="The brightfield frame a timelapse takes of each field on its cadence. Taken from the fields in the list on the left, or from the embryos' centroid while the list is empty.">Overview frames</span>
-                        <button class="op-btn op-btn-quiet" id="op-ov-more" type="button"
-                                aria-expanded="false" aria-controls="op-ov-body">Show</button>
+                        <button class="op-btn op-btn-quiet op-disc-btn" type="button" data-disclose-toggle aria-expanded="false" aria-controls="op-ov-body">Show</button>
                       </div>
-                      <div class="op-cap" id="op-ov-summary"></div>
-                      <div class="op-adv" id="op-ov-body" hidden>
+                      <div class="op-cap op-disc-keep" id="op-ov-summary"></div>
+                      <div class="op-disc-body" id="op-ov-body" hidden>
                       {# The bottom camera drives no light of its own, so the
                          plan says which one the frame is taken under. It is
                          switched on for the frame and off again before the
@@ -588,10 +611,10 @@
                        when someone re-seats the head — rarely, and never by
                        accident. The offset itself, when set, is always visible
                        on the bar under the frame. #}
-                    <div class="op-block">
-                      <div class="op-row op-row-wrap">
+                    <div class="op-block" data-disclose="advanced">
+                      <div class="op-disc-head">
                         <span class="op-block-head">Advanced</span>
-                        <button class="op-btn op-btn-quiet" id="op-adv-more" type="button"
+                        <button class="op-btn op-btn-quiet op-disc-btn" id="op-adv-more" type="button" data-disclose-toggle
                                 aria-expanded="false" aria-controls="op-adv">Show</button>
                       </div>
                       <div class="op-adv" id="op-adv" hidden>
@@ -962,7 +985,7 @@
                         <div class="op-field"><label class="op-label" for="op-tl-stop">The run</label>
                           <span class="op-plan-pair">
                             <select class="op-sel" id="op-tl-stop"></select>
-                            <input class="op-num-in" id="op-tl-condval" type="number" min="1" value="10" hidden>
+                            <input class="op-num-in" id="op-tl-condval" type="number" min="1" value="16">
                           </span></div>
                         {# Per-embryo endings. Rows follow the roster; "as the run"
                            means no override, which is what most rows say. #}
