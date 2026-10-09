@@ -373,10 +373,11 @@ class BfOverview:
     exposure_ms: float | None = None
     # The light the frame is taken under. The bottom camera drives no light
     # of its own, so without this the overview was whatever the room happened
-    # to be: in the dark, a dark frame. "room" is what this rig usually uses;
-    # "led" is the transmitted-light LED, open for the capture only; "none"
-    # leaves the lights exactly as they are.
-    light: str = "room"
+    # to be: in the dark, a dark frame. "led" is the transmitted-light LED,
+    # open for the capture only, and the default (Ryan, 2026-10-09: "light
+    # should be default to LED for BF imaging. at 1 percent"); "room" is the
+    # room light; "none" leaves the lights exactly as they are.
+    light: str = "led"
     # How bright the LED is for the frame, in whole percent. Only means
     # anything under "led". None leaves the LED at whatever it was last set to.
     led_intensity_pct: int | None = None
@@ -453,7 +454,7 @@ class BfOverview:
             exposure_ms=float(exposure) if exposure is not None else None,
             # `use_led` in an older plan or checkpoint never did anything (the
             # camera ignored it), so it does not choose the LED now either.
-            light=str(d.get("light")) if d.get("light") in cls.LIGHTS else "room",
+            light=str(d.get("light")) if d.get("light") in cls.LIGHTS else "led",
             led_intensity_pct=cls._led_intensity(d.get("led_intensity_pct")),
         )
 
@@ -479,7 +480,7 @@ class TimelapseState:
     embryos: dict[str, Any]
     total_timepoints: int = 0
     current_round: int = 0
-    interval_seconds: float = 120.0
+    interval_seconds: float = 30.0
     next_round_time: datetime | None = None
     seconds_until_next_round: float | None = None
     error_message: str | None = None

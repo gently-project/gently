@@ -32,7 +32,7 @@ const BrightfieldRefs = (() => {
     const esc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
 
     function spec() {
-        const light = ($('op-plan-bf-light') || {}).value || 'room';
+        const light = ($('op-plan-bf-light') || {}).value || 'led';
         const pct = ($('op-plan-bf-led') || {}).value;
         const exp = ($('op-plan-bf-exposure') || {}).value;
         return {

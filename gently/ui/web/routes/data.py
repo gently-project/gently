@@ -92,7 +92,7 @@ def _parse_bf_config(raw) -> dict | None:
         raise HTTPException(status_code=400, detail="bf must be an object")
     if not raw.get("enabled"):
         return None
-    light = raw.get("light", "room")
+    light = raw.get("light", "led")
     if light not in ("room", "led", "none"):
         raise HTTPException(status_code=400, detail="bf.light must be room, led or none")
     out: dict = {"enabled": True, "light": light}
@@ -2946,7 +2946,7 @@ def create_router(server) -> APIRouter:
         RIG-DEFERRED: the actual acquisition + galvo/piezo motion.
         """
         # --- Validate ---
-        raw_interval = payload.get("interval_seconds", 120.0)
+        raw_interval = payload.get("interval_seconds", 30.0)
         try:
             interval_seconds = float(raw_interval)
         except (TypeError, ValueError):

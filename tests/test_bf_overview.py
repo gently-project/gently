@@ -52,6 +52,7 @@ def _client(tmp_path: Path):
     c.get_room_light_status = AsyncMock(return_value={"success": True, "state": "on"})
     c.set_room_light = AsyncMock(return_value={"success": True})
     c.set_led = AsyncMock(return_value={"success": True})
+    c.set_led_intensity = AsyncMock(return_value={"success": True})
 
     frames = {"n": 0}
 
@@ -105,12 +106,16 @@ def _experiment(calibrated=True):
 
 
 def _orchestrator(tmp_path, *, session_id="s1", store=True):
-    return TimelapseOrchestrator(
+    orch = TimelapseOrchestrator(
         _client(tmp_path),
         _experiment(),
         store=_store(tmp_path) if store else None,
         session_id=session_id,
     )
+    # The default light is the LED, which is given a moment to settle before
+    # the frame; these runs are a few hundred milliseconds long.
+    orch._bf_light_settle_s = 0.0
+    return orch
 
 
 async def _run(orch, seconds, **start_kwargs):

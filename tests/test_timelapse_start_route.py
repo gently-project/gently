@@ -5,7 +5,7 @@ Verifies:
   - monitoring_mode is forwarded to orchestrator.enable_monitoring_mode
   - interval_seconds <= 0 → 400
   - num_slices < 1 → 400
-  - missing interval_seconds uses default 120.0 (no error)
+  - missing interval_seconds uses default 30.0 (no error)
   - orchestrator not initialised → 503
   - require_control gate (403 without override)
 
@@ -95,7 +95,7 @@ def test_timelapse_start_calls_start_with_correct_args():
 
 
 def test_timelapse_start_uses_default_interval():
-    """Omitting interval_seconds uses the default (120.0) without error."""
+    """Omitting interval_seconds uses the default (30.0) without error."""
     orch = _make_orchestrator()
     r = _app(orch).post(
         "/api/devices/timelapse/start",
@@ -103,7 +103,7 @@ def test_timelapse_start_uses_default_interval():
     )
     assert r.status_code == 200
     _, kwargs = orch.start.call_args
-    assert kwargs["base_interval_seconds"] == 120.0
+    assert kwargs["base_interval_seconds"] == 30.0
 
 
 def test_timelapse_start_result_in_response():
@@ -320,7 +320,7 @@ def test_bf_channel_is_forwarded_validated():
         "every_seconds": 600.0,
         "position": {"x": -500.0, "y": -400.0},
         "exposure_ms": 8.0,
-        "light": "room",
+        "light": "led",
     }
     assert r.json()["bf"] == bf
 

@@ -43,7 +43,7 @@ RECORD = "brightfield.yaml"
 class ReferenceSpec:
     """What a reference is good for: the light and exposure of the frames."""
 
-    light: str = "room"  # room | led | none
+    light: str = "led"  # led | room | none
     led_intensity_pct: int | None = None
     exposure_ms: float | None = None
 

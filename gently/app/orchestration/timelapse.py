@@ -139,7 +139,7 @@ class TimelapseOrchestrator:
         self._error_message: str | None = None
 
         # Round-based scheduling (global timing for all embryos)
-        self._base_interval_seconds: float = 120.0
+        self._base_interval_seconds: float = 30.0
         self._total_pause_duration: timedelta = timedelta(0)
         self._pause_start: datetime | None = None
 
@@ -235,7 +235,7 @@ class TimelapseOrchestrator:
         self,
         embryo_ids: list[str] | None = None,
         stop_condition: str = "manual",
-        base_interval_seconds: float = 120.0,
+        base_interval_seconds: float = 30.0,
         condition_value: Any = None,
         bf: "BfOverview | dict | None" = None,
         stop_conditions: dict[str, Any] | None = None,
