@@ -71,7 +71,7 @@ def plan_from_session(store: Any, session_id: str) -> tuple[dict[str, Any] | Non
     ``acquisition.yaml`` when the run was started after it existed; else a
     plan read off the checkpoint and the latest volume sidecar; else nothing.
     The shape is the plan `structure` the pane, the templates and the seeded
-    tactic share (cadence_s, num_slices, exposure_ms, laser_config, dic,
+    tactic share (cadence_s, num_slices, exposure_ms, laser_config, bf,
     stop_condition, stop_conditions, monitoring_mode).
     """
     if store is None or not session_id:
@@ -122,7 +122,7 @@ def _plan_from_checkpoint(store: Any, session_id: str) -> dict[str, Any] | None:
     except Exception:
         params = None
     params = params if isinstance(params, dict) else {}
-    dic = doc.get("dic") if isinstance(doc.get("dic"), dict) else None
+    bf = doc.get("bf") if isinstance(doc.get("bf"), dict) else None
     modes = doc.get("active_monitoring_modes") or []
     return {
         "cadence_s": interval,
@@ -133,7 +133,7 @@ def _plan_from_checkpoint(store: Any, session_id: str) -> dict[str, Any] | None:
         "num_slices": params.get("num_slices"),
         "exposure_ms": params.get("exposure_ms"),
         "laser_config": None,
-        "dic": dic if dic and dic.get("enabled") else None,
+        "bf": bf if bf and bf.get("enabled") else None,
         # Absent in a checkpoint from before brightfield-only runs: a volume run.
         "volumes": doc.get("volumes") is not False,
         "stop_conditions": overrides,

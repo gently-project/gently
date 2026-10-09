@@ -33,7 +33,7 @@ from fastapi.testclient import TestClient
 
 import gently.ui.web.auth as auth
 from gently.app.orchestration.timelapse import TimelapseOrchestrator
-from gently.app.orchestration.timelapse_models import DicOverview, TimelapseStatus
+from gently.app.orchestration.timelapse_models import BfOverview, TimelapseStatus
 from gently.harness.state import ExperimentState
 from gently.ui.web.routes.data import create_router
 
@@ -104,7 +104,7 @@ def _orch(client=None, *, embryos=2):
     orch = TimelapseOrchestrator(
         client or _client(), _experiment(embryos), store=None, session_id=None
     )
-    orch._dic_light_settle_s = 0.0
+    orch._bf_light_settle_s = 0.0
     return orch
 
 
@@ -114,7 +114,7 @@ def _names(orch):
 
 async def _go(orch, seconds=0.5, *, stop=True, **kwargs):
     kwargs.setdefault("base_interval_seconds", 0.1)
-    kwargs.setdefault("dic", dict(LED))
+    kwargs.setdefault("bf", dict(LED))
     msg = await orch.start(volumes=False, **kwargs)
     if not msg.startswith("Started"):
         return msg
@@ -173,10 +173,10 @@ class TestOnlyTheBottomCamera:
         """Between the LED opening and the frame there is a settle. A stop
         that landed in it left the LED open, with no run left to close it."""
         orch = _orch()
-        orch._dic_light_settle_s = 5.0
+        orch._bf_light_settle_s = 5.0
 
         async def go():
-            await orch.start(volumes=False, base_interval_seconds=60, dic=dict(LED))
+            await orch.start(volumes=False, base_interval_seconds=60, bf=dict(LED))
             await asyncio.sleep(0.2)  # the LED is open and settling
             assert orch.client.log[-1] == ("led", "Open"), orch.client.log
             await orch.stop("operator")
@@ -197,7 +197,7 @@ class TestOnlyTheBottomCamera:
         state = asyncio.run(go())
         d = state.to_dict()
         assert d["volumes"] is False
-        assert d["dic"]["frames"] >= 1
+        assert d["bf"]["frames"] >= 1
         assert d["seconds_until_next_round"] is not None, "the next frame has a time"
         assert d["active_embryos"] == 0
 
@@ -223,7 +223,7 @@ class TestOnlyTheBottomCamera:
         orch = TimelapseOrchestrator(
             _client(), _experiment(calibrated=True), store=None, session_id=None
         )
-        orch._dic_light_settle_s = 0.0
+        orch._bf_light_settle_s = 0.0
 
         async def go():
             await _go(orch, 0.2)
@@ -262,7 +262,7 @@ class TestTheFieldNotTheEmbryos:
 
     def test_a_pinned_position_wins(self):
         orch = _orch(embryos=2)
-        asyncio.run(_go(orch, 0.3, dic={**LED, "position": {"x": -7.0, "y": 9.0}}))
+        asyncio.run(_go(orch, 0.3, bf={**LED, "position": {"x": -7.0, "y": 9.0}}))
         assert {e for e in orch.client.log if e[0] == "move"} == {("move", -7.0, 9.0)}
 
     def test_uncalibrated_embryos_are_no_obstacle_and_are_left_untouched(self):
@@ -288,7 +288,7 @@ class TestHowItEnds:
         asyncio.run(_go(orch, 0.9, stop=False, stop_condition="timepoints:3"))
         assert orch._status == TimelapseStatus.COMPLETED
         assert _names(orch).count("capture") == 3
-        assert orch.get_status().dic["frames"] == 3
+        assert orch.get_status().bf["frames"] == 3
 
     def test_the_count_can_come_beside_the_word(self):
         orch = _orch()
@@ -329,8 +329,8 @@ class TestHowItEnds:
 
     def test_without_the_channel_there_is_nothing_to_image(self):
         orch = _orch()
-        for dic in (None, {"enabled": False}):
-            msg = asyncio.run(_go(orch, 0.1, dic=dic))
+        for bf in (None, {"enabled": False}):
+            msg = asyncio.run(_go(orch, 0.1, bf=bf))
             assert msg.startswith("Nothing to image"), msg
         assert orch.client.log == []
 
@@ -339,7 +339,7 @@ class TestHowItEnds:
 
         async def go():
             await _go(orch, 0.1, stop=False)
-            again = await orch.start(volumes=False, dic=dict(LED))
+            again = await orch.start(volumes=False, bf=dict(LED))
             await orch.stop("test done")
             return again
 
@@ -362,7 +362,7 @@ class TestAFrameThatFails:
     def test_a_frame_that_was_not_taken_is_not_counted(self):
         orch = _orch(_client(frames=False))
         asyncio.run(_go(orch, 0.8, stop=False, stop_condition="timepoints:2"))
-        assert orch.get_status().dic["frames"] == 0
+        assert orch.get_status().bf["frames"] == 0
 
     def test_the_led_is_closed_even_after_a_frame_that_failed(self):
         orch = _orch(_client(frames=False))
@@ -381,7 +381,7 @@ class TestAFrameThatFails:
         orch = _orch(_client(frames=sometimes))
         asyncio.run(_go(orch, 0.9))
         assert orch._status == TimelapseStatus.IDLE, "stopped by the test, not by failing"
-        assert orch.get_status().dic["frames"] >= 3
+        assert orch.get_status().bf["frames"] >= 3
 
     def test_in_a_volume_run_a_failed_overview_is_still_only_logged(self):
         """The rule is the brightfield run's. Beside volumes the overview is a
@@ -389,10 +389,10 @@ class TestAFrameThatFails:
         orch = TimelapseOrchestrator(
             _client(frames=False), _experiment(calibrated=True), store=None, session_id=None
         )
-        orch._dic_light_settle_s = 0.0
+        orch._bf_light_settle_s = 0.0
 
         async def go():
-            await orch.start(base_interval_seconds=0.1, dic={**LED, "every_seconds": 0.1})
+            await orch.start(base_interval_seconds=0.1, bf={**LED, "every_seconds": 0.1})
             await asyncio.sleep(0.7)
             status = orch._status
             await orch.stop("test done")
@@ -410,7 +410,7 @@ class TestAFrameThatFails:
 class TestTheLedsBrightness:
     def test_it_is_set_before_every_frame_and_before_the_led_opens(self):
         orch = _orch()
-        asyncio.run(_go(orch, 0.45, dic={**LED, "led_intensity_pct": 40}))
+        asyncio.run(_go(orch, 0.45, bf={**LED, "led_intensity_pct": 40}))
         seq = [e for e in orch.client.log if e[0] in ("brightness", "led", "capture")]
         frames = [i for i, e in enumerate(seq) if e[0] == "capture"]
         assert len(frames) >= 2
@@ -425,7 +425,7 @@ class TestTheLedsBrightness:
 
     def test_it_means_nothing_under_the_room_light(self):
         orch = _orch()
-        asyncio.run(_go(orch, 0.3, dic={"enabled": True, "light": "room", "led_intensity_pct": 40}))
+        asyncio.run(_go(orch, 0.3, bf={"enabled": True, "light": "room", "led_intensity_pct": 40}))
         assert "brightness" not in _names(orch)
         assert "led" not in _names(orch)
 
@@ -433,20 +433,20 @@ class TestTheLedsBrightness:
         c = _client()
         c.set_led_intensity = AsyncMock(return_value={"success": False, "error": "no LED"})
         orch = _orch(c)
-        asyncio.run(_go(orch, 0.3, dic={**LED, "led_intensity_pct": 40}))
+        asyncio.run(_go(orch, 0.3, bf={**LED, "led_intensity_pct": 40}))
         assert "capture" in _names(orch)
 
     def test_it_is_in_the_plan_and_survives_the_round_trip(self):
-        dic = DicOverview.from_dict({**LED, "led_intensity_pct": 40})
-        assert dic.led_intensity_pct == 40
-        assert DicOverview.from_dict(dic.to_dict()).led_intensity_pct == 40
+        bf = BfOverview.from_dict({**LED, "led_intensity_pct": 40})
+        assert bf.led_intensity_pct == 40
+        assert BfOverview.from_dict(bf.to_dict()).led_intensity_pct == 40
 
     @pytest.mark.parametrize("bad", [0, 101, -5, 12.5, "bright", True, None])
     def test_what_is_not_a_brightness_is_none(self, bad):
-        assert DicOverview.from_dict({**LED, "led_intensity_pct": bad}).led_intensity_pct is None
+        assert BfOverview.from_dict({**LED, "led_intensity_pct": bad}).led_intensity_pct is None
 
     def test_a_plan_from_before_it_existed_has_none(self):
-        assert DicOverview.from_dict({"enabled": True, "light": "led"}).led_intensity_pct is None
+        assert BfOverview.from_dict({"enabled": True, "light": "led"}).led_intensity_pct is None
 
 
 # ---------------------------------------------------------------------------
@@ -464,14 +464,14 @@ class TestCarryingOn:
     def test_the_checkpoint_says_it_is_a_brightfield_run_and_how_it_ends(self):
         orch = _orch()
         asyncio.run(
-            _go(orch, 0.3, stop_condition="timepoints:50", dic={**LED, "led_intensity_pct": 30})
+            _go(orch, 0.3, stop_condition="timepoints:50", bf={**LED, "led_intensity_pct": 30})
         )
         doc, fresh = self._restored(orch)
         assert doc["volumes"] is False
         assert fresh._volumes is False
         assert fresh._run_stop.describe() == "50 timepoints"
-        assert fresh._dic.led_intensity_pct == 30
-        assert fresh._dic_frames == orch._dic_frames >= 1
+        assert fresh._bf.led_intensity_pct == 30
+        assert fresh._bf_frames == orch._bf_frames >= 1
 
     def test_a_checkpoint_from_before_is_a_volume_run(self):
         fresh = _orch()
@@ -484,7 +484,7 @@ class TestCarryingOn:
 
         async def go():
             await _go(orch, 0.3, stop_condition="timepoints:50")
-            before = orch._dic_frames
+            before = orch._bf_frames
             assert orch.can_continue()
             orch.client.log.clear()
             said = await orch.continue_run()
@@ -494,7 +494,7 @@ class TestCarryingOn:
 
         before, said = asyncio.run(go())
         assert said.startswith(f"Continued brightfield timelapse from frame {before}")
-        assert orch._dic_frames > before
+        assert orch._bf_frames > before
         assert ("lasers", "ALL OFF") in orch.client.log, "the lasers are put off again"
         assert "volume" not in _names(orch)
 
@@ -531,7 +531,7 @@ BODY = {
     "interval_seconds": 300,
     "stop_condition": "timepoints:12",
     "volumes": False,
-    "dic": {**LED, "led_intensity_pct": 40, "exposure_ms": 20},
+    "bf": {**LED, "led_intensity_pct": 40, "exposure_ms": 20},
 }
 
 
@@ -542,8 +542,8 @@ class TestTheRoute:
         assert r.status_code == 200, r.text
         kwargs = orch.start.await_args.kwargs
         assert kwargs["volumes"] is False
-        assert kwargs["dic"]["led_intensity_pct"] == 40
-        assert kwargs["dic"]["light"] == "led"
+        assert kwargs["bf"]["led_intensity_pct"] == 40
+        assert kwargs["bf"]["light"] == "led"
         assert kwargs["stop_condition"] == "timepoints:12"
 
     def test_uncalibrated_embryos_do_not_refuse_it(self):
@@ -574,10 +574,10 @@ class TestTheRoute:
         orch.enable_monitoring_mode.assert_not_called()
         assert "stop_conditions" not in orch.start.await_args.kwargs
 
-    @pytest.mark.parametrize("dic", [None, {"enabled": False}])
-    def test_with_nothing_to_image_it_is_a_400(self, dic):
+    @pytest.mark.parametrize("bf", [None, {"enabled": False}])
+    def test_with_nothing_to_image_it_is_a_400(self, bf):
         app, orch, _ = _route()
-        r = app.post("/api/devices/timelapse/start", json={**BODY, "dic": dic})
+        r = app.post("/api/devices/timelapse/start", json={**BODY, "bf": bf})
         assert r.status_code == 400 and "Nothing to image" in r.json()["detail"]
         orch.start.assert_not_awaited()
 
@@ -599,7 +599,7 @@ class TestTheRoute:
     @pytest.mark.parametrize("pct", [0, 101, 12.5, "bright", True])
     def test_a_brightness_that_is_not_one_is_refused_not_dropped(self, pct):
         app, orch, _ = _route()
-        body = {**BODY, "dic": {**LED, "led_intensity_pct": pct}}
+        body = {**BODY, "bf": {**LED, "led_intensity_pct": pct}}
         r = app.post("/api/devices/timelapse/start", json=body)
         assert r.status_code == 400 and "led_intensity_pct" in r.json()["detail"]
         orch.start.assert_not_awaited()
@@ -647,7 +647,7 @@ class TestTheTool:
         assert kwargs["volumes"] is False
         assert kwargs["base_interval_seconds"] == 300
         assert (kwargs["stop_condition"], kwargs["condition_value"]) == ("duration", 12)
-        assert kwargs["dic"] == {
+        assert kwargs["bf"] == {
             "enabled": True,
             "light": "led",
             "exposure_ms": None,
@@ -710,11 +710,11 @@ class TestThePane:
         assert "volumes: !($('op-plan-spim') && !$('op-plan-spim').checked)" in _js("readPlan")
 
     def test_the_brightness_is_asked_for_and_read(self):
-        assert 'id="op-plan-dic-led"' in INDEX and 'min="1" max="100"' in INDEX
-        assert "dicLedPct: v('op-plan-dic-led')" in _js("readPlan")
+        assert 'id="op-plan-bf-led"' in INDEX and 'min="1" max="100"' in INDEX
+        assert "bfLedPct: v('op-plan-bf-led')" in _js("readPlan")
 
     def test_a_restored_plan_clears_a_brightness_it_does_not_have(self):
-        assert "led.value = plan.dic.ledPct != null ? plan.dic.ledPct : ''" in _js("fillPlan")
+        assert "led.value = plan.bf.ledPct != null ? plan.bf.ledPct : ''" in _js("fillPlan")
 
     def test_a_brightfield_run_is_not_refused_for_having_no_embryos(self):
         assert "if (plan.spim.enabled && !haveSubjects()) return;" in _js("startRun")
@@ -723,7 +723,7 @@ class TestThePane:
         body = _js("renderChannels")
         for host in (
             "op-plan-spim-body",
-            "op-plan-dic-every-field",
+            "op-plan-bf-every-field",
             "op-plan-overrides",
             "op-plan-watch-sec",
             "op-plan-watch-field",
@@ -760,13 +760,13 @@ class TestOnDisk:
 
     def _run(self, store, **kwargs):
         orch = TimelapseOrchestrator(_client(), _experiment(), store=store, session_id="s1")
-        orch._dic_light_settle_s = 0.0
+        orch._bf_light_settle_s = 0.0
         asyncio.run(_go(orch, 0.9, stop=False, **kwargs))
         return orch
 
     def test_every_frame_is_filed_and_says_how_it_was_lit(self, store):
-        self._run(store, stop_condition="timepoints:3", dic={**LED, "led_intensity_pct": 40})
-        frames = store.list_snapshots("s1", "dic")
+        self._run(store, stop_condition="timepoints:3", bf={**LED, "led_intensity_pct": 40})
+        frames = store.list_snapshots("s1", "bf")
         assert len(frames) == 3
         assert sorted(f["metadata"]["frame"] for f in frames) == [1, 2, 3]
         for f in frames:
@@ -783,6 +783,6 @@ class TestOnDisk:
         fresh = TimelapseOrchestrator(_client(), _experiment(), store=store, session_id="s1")
         assert fresh.load_state().startswith("Restored")
         assert fresh._volumes is False
-        assert fresh._dic_frames == ran._dic_frames == 2
+        assert fresh._bf_frames == ran._bf_frames == 2
         assert fresh._ended == "completed"
         assert not fresh.can_continue()

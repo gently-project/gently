@@ -70,10 +70,10 @@ def _session(store, sid="s1"):
     for frame, when in ((2, "2026-10-04T22:00:00"), (1, "2026-10-04T21:30:00")):
         store.put_snapshot(
             sid,
-            "dic",
+            "bf",
             np.zeros((6, 9), dtype=np.uint16),
             metadata={
-                "channel": "dic",
+                "channel": "bf",
                 "frame": frame,
                 "captured_at": when,
                 "position": {"x": -440.0, "y": -320.0},
@@ -85,7 +85,7 @@ def _session(store, sid="s1"):
             "interval_seconds": 600,
             "num_slices": 4,
             "stop_condition": {"kind": "hatching"},
-            "dic": {"enabled": True, "every_seconds": 1800, "light": "led"},
+            "bf": {"enabled": True, "every_seconds": 1800, "light": "led"},
         },
     )
     sd = store._session_dir(sid)
@@ -140,7 +140,7 @@ class TestTheLayout:
         assert out == Path(store.root) / "exports" / store._session_dir(sid).name
         assert sorted(p.name for p in out.iterdir() if p.is_dir()) == [
             "A_embryo_1",
-            "dic",
+            "bf",
             "embryo_3",
             "metadata",
             "ref-2_embryo_2",
@@ -151,8 +151,8 @@ class TestTheLayout:
         out = export_session(store, sid)
         vols = sorted(p.name for p in (out / "A_embryo_1" / "volumes").iterdir())
         assert vols == ["A_embryo_1_t0001.tif", "A_embryo_1_t0002.tif", "A_embryo_1_t0003.tif"]
-        dic = sorted(p.name for p in (out / "dic").iterdir() if p.suffix == ".tif")
-        assert dic == ["dic_f0001_20261004-213000.tif", "dic_f0002_20261004-220000.tif"]
+        bf = sorted(p.name for p in (out / "bf").iterdir() if p.suffix == ".tif")
+        assert bf == ["bf_f0001_20261004-213000.tif", "bf_f0002_20261004-220000.tif"]
         import tifffile
 
         assert tifffile.imread(out / "A_embryo_1" / "volumes" / "A_embryo_1_t0002.tif").max() == 2
@@ -208,8 +208,8 @@ class TestTheRecord:
         vols = _rows(out / "A_embryo_1" / "volumes.csv")
         assert vols[0]["file"] == "volumes/A_embryo_1_t0001.tif" and vols[0]["z"] == "4"
         assert vols[0]["laser_488_pct"] == "3.0" and vols[0]["exposure_ms"] == "10.0"
-        dic = _rows(out / "dic" / "dic.csv")
-        assert [d["frame"] for d in dic] == ["1", "2"] and dic[0]["x_um"] == "-440.0"
+        bf = _rows(out / "bf" / "bf.csv")
+        assert [d["frame"] for d in bf] == ["1", "2"] and bf[0]["x_um"] == "-440.0"
 
     def test_the_readme_points_back_at_the_originals(self, store):
         sid = _session(store)
@@ -235,7 +235,7 @@ class TestTheRecord:
                 "stop_condition": "duration:12h",
                 "condition_value": None,
                 "num_slices": None,
-                "dic": {"enabled": True, "every_seconds": 1800, "light": "led"},
+                "bf": {"enabled": True, "every_seconds": 1800, "light": "led"},
             },
         )
         text = (export_session(store, sid) / "README.txt").read_text(encoding="utf-8")
@@ -327,8 +327,8 @@ class TestThePane:
         assert "Copies, not links" in REVIEW_JS
 
 
-class TestDicMovie:
-    """ "can you make an avi for the dic dataset?" — dic/dic.avi, every frame
+class TestBfMovie:
+    """ "can you make an avi for the bf dataset?" — bf/bf.avi, every frame
     in time order, Motion JPEG so Fiji opens it."""
 
     def _frames(self, path):
@@ -346,43 +346,43 @@ class TestDicMovie:
         cap.release()
         return n, shape
 
-    def test_the_export_has_the_dic_frames_as_a_movie(self, store):
+    def test_the_export_has_the_bf_frames_as_a_movie(self, store):
         sid = _session(store)
         out = export_session(store, sid)
-        n, shape = self._frames(out / "dic" / "dic.avi")
+        n, shape = self._frames(out / "bf" / "bf.avi")
         # Motion JPEG rounds an odd width down (9 -> 8); the camera's are even.
         assert n == 2 and shape[0] == 6 and shape[1] in (8, 9)
         text = (out / "README.txt").read_text(encoding="utf-8")
-        assert "dic/dic.avi" in text and "Motion JPEG" in text
+        assert "bf/bf.avi" in text and "Motion JPEG" in text
 
-    def test_no_dic_frames_no_movie(self, store):
+    def test_no_bf_frames_no_movie(self, store):
         sid = "bare"
         store.create_session(sid, name="bare")
         store.register_embryo(sid, "embryo_1", position_x=0.0, position_y=0.0, role="test")
         out = export_session(store, sid)
-        assert not (out / "dic" / "dic.avi").exists()
+        assert not (out / "bf" / "bf.avi").exists()
 
     def test_a_folder_of_frames_is_enough(self, tmp_path):
         """An export made before there was a movie, or any folder of
-        dic_f*.tif frames, can have one made after the fact."""
+        bf_f*.tif frames, can have one made after the fact."""
         import tifffile
 
-        from gently.core.export import dic_movie
+        from gently.core.export import bf_movie
 
-        d = tmp_path / "dic"
+        d = tmp_path / "bf"
         d.mkdir()
         rng = np.random.default_rng(0)
         for i in (3, 1, 2):
             tifffile.imwrite(
-                d / f"dic_f{i:04d}_20261006-10{i:02d}00.tif",
+                d / f"bf_f{i:04d}_20261006-10{i:02d}00.tif",
                 rng.integers(60, 1000, (16, 20), dtype=np.uint16),
             )
         seen = []
-        out = dic_movie(d, progress=lambda i, n, what: seen.append((i, n, what)))
-        assert out == d / "dic.avi"
+        out = bf_movie(d, progress=lambda i, n, what: seen.append((i, n, what)))
+        assert out == d / "bf.avi"
         assert self._frames(out) == (3, (16, 20, 3))
         assert [s[:2] for s in seen] == [(1, 3), (2, 3), (3, 3)]
-        assert seen[0][2].endswith("dic_f0001_20261006-100100.tif")
+        assert seen[0][2].endswith("bf_f0001_20261006-100100.tif")
 
     def test_the_progress_counts_the_movie(self, store):
         sid = _session(store)
@@ -391,7 +391,7 @@ class TestDicMovie:
         totals = {t for _, t, _ in seen}
         assert len(totals) == 1
         assert seen[-1][0] == seen[-1][1]
-        assert any(w.startswith("dic.avi") for _, _, w in seen)
+        assert any(w.startswith("bf.avi") for _, _, w in seen)
 
 
 class TestMovieFitsAPlainAvi:
@@ -433,19 +433,19 @@ class TestMovieFitsAPlainAvi:
         import tifffile
 
         from gently.core import export as export_mod
-        from gently.core.export import dic_movie
+        from gently.core.export import bf_movie
 
-        d = tmp_path / "dic"
+        d = tmp_path / "bf"
         d.mkdir()
         rng = np.random.default_rng(0)
         for i in range(1, 7):
             tifffile.imwrite(
-                d / f"dic_f{i:04d}_20261006-10{i:02d}00.tif",
+                d / f"bf_f{i:04d}_20261006-10{i:02d}00.tif",
                 rng.integers(60, 1000, (200, 240), dtype=np.uint16),
             )
         # A limit so small that six frames must shrink to fit it.
         monkeypatch.setattr(export_mod, "AVI_CLASSIC_BYTES", 40_000)
-        out = dic_movie(d, label=False)
+        out = bf_movie(d, label=False)
         cap = cv2.VideoCapture(str(out))
         n, w, h = 0, int(cap.get(3)), int(cap.get(4))
         while cap.read()[0]:
@@ -453,27 +453,27 @@ class TestMovieFitsAPlainAvi:
         cap.release()
         assert n == 6, "every frame is there"
         assert w < 240 and h < 200, "at a smaller size"
-        assert (d / "dic.avi").stat().st_size < 60_000
+        assert (d / "bf.avi").stat().st_size < 60_000
         # With room to spare, full size as before.
         monkeypatch.setattr(export_mod, "AVI_CLASSIC_BYTES", 1_000_000_000)
-        out = dic_movie(d, label=False)
+        out = bf_movie(d, label=False)
         cap = cv2.VideoCapture(str(out))
         assert (int(cap.get(3)), int(cap.get(4))) == (240, 200)
         cap.release()
 
 
-class TestCorrectedDicMovie:
+class TestCorrectedBfMovie:
     """ "can you also output the flat fielded movie? using the flat field
-    image?" — dic_corrected.avi: each frame with the dark and flat dic.csv
-    names for it divided out, beside dic.avi."""
+    image?" — bf_corrected.avi: each frame with the dark and flat bf.csv
+    names for it divided out, beside bf.avi."""
 
     @staticmethod
-    def _dic_folder(tmp_path):
+    def _bf_folder(tmp_path):
         """Three frames lit through a strong left-to-right gradient, with the
-        dark and flat that explain it, and a dic.csv that names them."""
+        dark and flat that explain it, and a bf.csv that names them."""
         import tifffile
 
-        d = tmp_path / "dic"
+        d = tmp_path / "bf"
         (d / "references" / "r1").mkdir(parents=True)
         h, w = 16, 32
         dark = np.full((h, w), 100, dtype=np.uint16)
@@ -488,18 +488,18 @@ class TestCorrectedDicMovie:
             t = np.full((h, w), 0.5)
             t[5:11, 12:20] = 0.2
             frame = (dark + t * gain).astype(np.uint16)
-            name = f"dic_f{i:04d}_20261006-10{i:02d}00.tif"
+            name = f"bf_f{i:04d}_20261006-10{i:02d}00.tif"
             tifffile.imwrite(d / name, frame)
             rows.append(
                 {
-                    "file": f"dic/{name}",
+                    "file": f"bf/{name}",
                     "frame": i,
                     "captured_at": f"2026-10-06T10:{i:02d}:00",
                     "dark": "references/r1/dark.tif",
                     "flat": "references/r1/flat.tif",
                 }
             )
-        with open(d / "dic.csv", "w", newline="", encoding="utf-8") as f:
+        with open(d / "bf.csv", "w", newline="", encoding="utf-8") as f:
             wr = csv.DictWriter(f, fieldnames=list(rows[0]))
             wr.writeheader()
             wr.writerows(rows)
@@ -516,12 +516,12 @@ class TestCorrectedDicMovie:
         return frame[:, :, 0].astype(float)
 
     def test_the_gradient_is_divided_out(self, tmp_path):
-        from gently.core.export import dic_movie
+        from gently.core.export import bf_movie
 
-        d = self._dic_folder(tmp_path)
-        raw = dic_movie(d, label=False)
-        fixed = dic_movie(d, label=False, corrected=True)
-        assert raw == d / "dic.avi" and fixed == d / "dic_corrected.avi"
+        d = self._bf_folder(tmp_path)
+        raw = bf_movie(d, label=False)
+        fixed = bf_movie(d, label=False, corrected=True)
+        assert raw == d / "bf.avi" and fixed == d / "bf_corrected.avi"
         r, c = self._first_frame(raw), self._first_frame(fixed)
         # Raw: the left edge is dark and the right bright. Corrected: level.
         assert r[:, :4].mean() + 100 < r[:, -4:].mean()
@@ -530,13 +530,13 @@ class TestCorrectedDicMovie:
     def test_without_references_there_is_nothing_to_correct(self, tmp_path):
         import tifffile
 
-        from gently.core.export import dic_movie
+        from gently.core.export import bf_movie
 
-        d = tmp_path / "dic"
+        d = tmp_path / "bf"
         d.mkdir()
-        tifffile.imwrite(d / "dic_f0001.tif", np.full((8, 8), 300, dtype=np.uint16))
-        assert dic_movie(d, corrected=True) is None
-        assert not (d / "dic_corrected.avi").exists()
+        tifffile.imwrite(d / "bf_f0001.tif", np.full((8, 8), 300, dtype=np.uint16))
+        assert bf_movie(d, corrected=True) is None
+        assert not (d / "bf_corrected.avi").exists()
 
     def test_the_export_writes_both_when_the_session_had_references(self, store):
         import tifffile
@@ -562,11 +562,11 @@ class TestCorrectedDicMovie:
         )
         seen = []
         out = export_session(store, sid, progress=lambda d, t, w: seen.append((d, t, w)))
-        assert (out / "dic" / "dic.avi").exists()
-        assert (out / "dic" / "dic_corrected.avi").exists()
+        assert (out / "bf" / "bf.avi").exists()
+        assert (out / "bf" / "bf_corrected.avi").exists()
         assert seen[-1][0] == seen[-1][1]
-        assert any(w.startswith("dic_corrected.avi") for _, _, w in seen)
-        assert "dic_corrected.avi" in (out / "README.txt").read_text(encoding="utf-8")
+        assert any(w.startswith("bf_corrected.avi") for _, _, w in seen)
+        assert "bf_corrected.avi" in (out / "README.txt").read_text(encoding="utf-8")
 
 
 class TestSpimMovie:
@@ -636,23 +636,23 @@ class TestMovieButton:
             time.sleep(0.05)
         return job
 
-    def test_a_dic_movie_of_an_export_on_disk(self, store):
+    def test_a_bf_movie_of_an_export_on_disk(self, store):
         sid = _session(store)
         out = export_session(store, sid)
         c = _client(store)
         assert c.get("/api/movies").json()["state"] == "idle"
-        r = c.post("/api/movies", json={"kind": "dic", "folder": str(out)})
+        r = c.post("/api/movies", json={"kind": "bf", "folder": str(out)})
         assert r.status_code == 200, r.text
         job = self._wait(c)
         assert job["state"] == "done", job
-        # The export's root was given; its dic/ folder is where the frames are.
-        assert Path(job["folder"]) == out / "dic"
-        assert job["outputs"] == ["dic.avi"]  # no references in this session…
+        # The export's root was given; its bf/ folder is where the frames are.
+        assert Path(job["folder"]) == out / "bf"
+        assert job["outputs"] == ["bf.avi"]  # no references in this session…
         assert "no dark and flat" in job["note"]  # …and it says so
         assert job["done"] == job["total"]
         # and the folder is a thing the file manager can be pointed at
         r = c.post("/api/reveal", json={"what": "movie", "action": "path"})
-        assert r.status_code == 200 and Path(r.json()["path"]) == out / "dic"
+        assert r.status_code == 200 and Path(r.json()["path"]) == out / "bf"
 
     def test_a_spim_movie_of_a_volumes_folder(self, store):
         sid = _session(store)
@@ -671,8 +671,8 @@ class TestMovieButton:
         "body, status",
         [
             ({"kind": "gif", "folder": "C:/x"}, 400),
-            ({"kind": "dic"}, 400),
-            ({"kind": "dic", "folder": "relative/here"}, 400),
+            ({"kind": "bf"}, 400),
+            ({"kind": "bf", "folder": "relative/here"}, 400),
             ({"kind": "spim", "folder": "<missing>"}, 404),
         ],
     )
@@ -684,18 +684,18 @@ class TestMovieButton:
 
     def test_a_folder_without_the_right_files(self, store, tmp_path):
         c = _client(store)
-        r = c.post("/api/movies", json={"kind": "dic", "folder": str(tmp_path)})
+        r = c.post("/api/movies", json={"kind": "bf", "folder": str(tmp_path)})
         assert r.status_code == 400 and "brightfield frames" in r.json()["detail"]
         r = c.post("/api/movies", json={"kind": "spim", "folder": str(tmp_path)})
         assert r.status_code == 400 and "volumes" in r.json()["detail"]
 
     def test_one_at_a_time(self, store):
         sessions_routes._MOVIES.update({"state": "running"})
-        r = _client(store).post("/api/movies", json={"kind": "dic", "folder": "C:/"})
+        r = _client(store).post("/api/movies", json={"kind": "bf", "folder": "C:/"})
         assert r.status_code == 409
 
     def test_without_control_no_movie(self, store):
-        r = _client(store, control=False).post("/api/movies", json={"kind": "dic", "folder": "C:/"})
+        r = _client(store, control=False).post("/api/movies", json={"kind": "bf", "folder": "C:/"})
         assert r.status_code == 403
 
     def test_no_movie_yet_is_nothing_to_show(self, store):
@@ -704,7 +704,7 @@ class TestMovieButton:
 
     def test_the_page_has_the_two_buttons_with_their_own_forms(self):
         for needle in (
-            "askMovie('dic')",
+            "askMovie('bf')",
             "askMovie('spim')",
             "session-movie-corrected",
             'name="session-movie-view"',
@@ -726,10 +726,10 @@ class TestEmbryoCrops:
     def _field(tmp_path, n_frames=3, embryos=((20, 50, 30, 50), (70, 100, 110, 135))):
         """Frames of a bright field with two dark embryos (rows and columns
         given as y0, y1, x0, x1), the dark and flat that explain the field,
-        and the dic.csv that names them."""
+        and the bf.csv that names them."""
         import tifffile
 
-        d = tmp_path / "dic"
+        d = tmp_path / "bf"
         (d / "references" / "r1").mkdir(parents=True)
         h, w = 120, 160
         dark = np.full((h, w), 100, dtype=np.uint16)
@@ -743,18 +743,18 @@ class TestEmbryoCrops:
             for y0, y1, x0, x1 in embryos:
                 t[y0:y1, x0:x1] = 0.15  # by default A: 30 tall x 20 wide, B: 30 x 25
             frame = (dark + t * gain).astype(np.uint16)
-            name = f"dic_f{i:04d}_20261006-10{i:02d}00.tif"
+            name = f"bf_f{i:04d}_20261006-10{i:02d}00.tif"
             tifffile.imwrite(d / name, frame)
             rows.append(
                 {
-                    "file": f"dic/{name}",
+                    "file": f"bf/{name}",
                     "frame": i,
                     "captured_at": f"2026-10-06T10:{i:02d}:00",
                     "dark": "references/r1/dark.tif",
                     "flat": "references/r1/flat.tif",
                 }
             )
-        with open(d / "dic.csv", "w", newline="", encoding="utf-8") as f:
+        with open(d / "bf.csv", "w", newline="", encoding="utf-8") as f:
             wr = csv.DictWriter(f, fieldnames=list(rows[0]))
             wr.writeheader()
             wr.writerows(rows)
@@ -855,12 +855,12 @@ class TestEmbryoCrops:
         import cv2
         import tifffile
 
-        from gently.core.export import dic_crops
+        from gently.core.export import bf_crops
 
         d = self._field(tmp_path)
         boxes = {"a": (25, 15, 55, 55), "b": (105, 65, 140, 105)}
         seen = []
-        root = dic_crops(
+        root = bf_crops(
             d,
             boxes,
             progress=lambda i, n, w: seen.append((i, n)),
@@ -885,7 +885,7 @@ class TestEmbryoCrops:
             assert tifffile.imread(e / "flat.tif").shape == crop.shape
             rows = list(csv.DictReader(open(e / "metadata.csv", encoding="utf-8")))
             assert [r["frame"] for r in rows] == ["1", "2", "3"]
-            assert rows[0]["source_frame"] == "dic_f0001_20261006-100100.tif"
+            assert rows[0]["source_frame"] == "bf_f0001_20261006-100100.tif"
             assert rows[0]["file_name"] == f"raw/{crops[0]}"
             assert rows[0]["corrected_file"] == f"corrected/{crops[0]}"
             assert rows[0]["dark_file"] == "dark.tif" and rows[0]["flat_file"] == "flat.tif"
@@ -914,10 +914,10 @@ class TestEmbryoCrops:
     def test_the_corrected_crop_is_level_where_the_raw_one_slopes(self, tmp_path):
         import cv2
 
-        from gently.core.export import dic_crops
+        from gently.core.export import bf_crops
 
         d = self._field(tmp_path)
-        root = dic_crops(d, {"b": (105, 65, 140, 105)}, label=False)
+        root = bf_crops(d, {"b": (105, 65, 140, 105)}, label=False)
 
         def first(path):
             cap = cv2.VideoCapture(str(path))
@@ -982,7 +982,7 @@ class TestCropsInTheExport:
         )
         seen = []
         out = export_session(store, sid, progress=lambda d, t, w: seen.append((d, t, w)))
-        emb = out / "dic" / "embryos"
+        emb = out / "bf" / "embryos"
         assert (emb / "README.md").is_file()
         assert sorted(p.name for p in emb.iterdir() if p.is_dir()) == [
             "A_embryo_1",
@@ -990,15 +990,15 @@ class TestCropsInTheExport:
         ]
         assert len(list((emb / "A_embryo_1" / "raw").glob("*.tif"))) == 2
         assert seen[-1][0] == seen[-1][1] and any(w.startswith("embryos") for _, _, w in seen)
-        assert "dic/embryos/<embryo>/" in (out / "README.txt").read_text(encoding="utf-8")
+        assert "bf/embryos/<embryo>/" in (out / "README.txt").read_text(encoding="utf-8")
 
     def test_without_a_marking_or_when_asked_not_to_it_does_not(self, store):
         sid = _session(store)
         out = export_session(store, sid)
-        assert not (out / "dic" / "embryos").exists()
+        assert not (out / "bf" / "embryos").exists()
         self._mark(store, sid)
         out = export_session(store, sid, crops=False)
-        assert not (out / "dic" / "embryos").exists()
+        assert not (out / "bf" / "embryos").exists()
 
     def test_the_route_passes_the_choice_on(self, store, monkeypatch):
         import time
@@ -1012,7 +1012,7 @@ class TestCropsInTheExport:
             if job["state"] != "running":
                 break
             time.sleep(0.05)
-        assert job["state"] == "done" and not (Path(job["path"]) / "dic" / "embryos").exists()
+        assert job["state"] == "done" and not (Path(job["path"]) / "bf" / "embryos").exists()
 
     def test_the_button_cuts_an_existing_export(self, store, monkeypatch):
         import time
@@ -1040,7 +1040,7 @@ class TestCropsInTheExport:
                 break
             time.sleep(0.05)
         assert job["state"] == "done" and job["outputs"] == ["embryos"], job
-        assert (out / "dic" / "embryos" / "A_embryo_1" / "metadata.csv").is_file()
+        assert (out / "bf" / "embryos" / "A_embryo_1" / "metadata.csv").is_file()
         r = c.post("/api/movies", json={"kind": "crops", "folder": str(out)})
         assert r.status_code == 400
 
@@ -1085,10 +1085,10 @@ class TestTwoFields:
             for field in (1, 2):
                 store.put_snapshot(
                     sid,
-                    "dic",
+                    "bf",
                     np.full((16, 20), 100 + 50 * field, dtype=np.uint16),
                     metadata={
-                        "channel": "dic",
+                        "channel": "bf",
                         "frame": frame,
                         "field": field,
                         "fields": 2,
@@ -1099,27 +1099,27 @@ class TestTwoFields:
         return sid
 
     def test_one_folder_per_field_each_a_series_of_its_own(self, store):
-        from gently.core.export import _dic_frames
+        from gently.core.export import _bf_frames
 
         sid = self._two_field_session(store)
         out = export_session(store, sid)
-        d = out / "dic"
-        assert not list(d.glob("dic_f*.tif")), "no frames loose in dic/ when there are fields"
+        d = out / "bf"
+        assert not list(d.glob("bf_f*.tif")), "no frames loose in bf/ when there are fields"
         for field in (1, 2):
             fd = d / f"field_{field}"
-            names = sorted(p.name for p in fd.glob("dic_f*.tif"))
-            assert names == [f"dic_f000{i}_20261004-210{i}0{field}.tif" for i in (1, 2, 3)]
-            rows = list(csv.DictReader(open(fd / "dic.csv", encoding="utf-8")))
+            names = sorted(p.name for p in fd.glob("bf_f*.tif"))
+            assert names == [f"bf_f000{i}_20261004-210{i}0{field}.tif" for i in (1, 2, 3)]
+            rows = list(csv.DictReader(open(fd / "bf.csv", encoding="utf-8")))
             assert [r["field"] for r in rows] == ["2", "2", "2"] if field == 2 else True
-            assert rows[0]["file"] == f"dic/field_{field}/{names[0]}"
+            assert rows[0]["file"] == f"bf/field_{field}/{names[0]}"
             assert rows[0]["dark"].startswith("../references/")
             # The references resolve from the field folder, so a corrected
-            # movie comes out of it like any dic/ folder.
-            frames = _dic_frames(fd)
+            # movie comes out of it like any bf/ folder.
+            frames = _bf_frames(fd)
             assert (fd / frames[0]["dark"]).resolve().is_file()
-            assert (fd / "dic.avi").is_file() and (fd / "dic_corrected.avi").is_file()
+            assert (fd / "bf.avi").is_file() and (fd / "bf_corrected.avi").is_file()
         text = (out / "README.txt").read_text(encoding="utf-8")
-        assert "taken from 2 positions" in text and "dic/field_2/" in text
+        assert "taken from 2 positions" in text and "bf/field_2/" in text
 
     def test_one_marking_places_the_embryos_in_every_field(self, store):
         """The marking was made at one place; a field is another. The marks

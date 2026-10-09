@@ -49,7 +49,7 @@ html[data-reveal-local="1"] .reveal-local { display: inline-flex; }
 
 .lightbox-reveal + .lightbox-close { margin-left: 0; }
 
-.dic-viewer-reveal {
+.bf-viewer-reveal {
     display: flex;
     gap: 6px;
     justify-content: center;
@@ -57,13 +57,13 @@ html[data-reveal-local="1"] .reveal-local { display: inline-flex; }
 }
 
 .lightbox-reveal .reveal-btn,
-.dic-viewer-reveal .reveal-btn {
+.bf-viewer-reveal .reveal-btn {
     border-color: rgba(255, 255, 255, 0.22);
     color: rgba(255, 255, 255, 0.8);
 }
 
 .lightbox-reveal .reveal-btn:hover,
-.dic-viewer-reveal .reveal-btn:hover {
+.bf-viewer-reveal .reveal-btn:hover {
     border-color: #fff;
     color: #fff;
 }

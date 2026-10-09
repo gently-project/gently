@@ -32,9 +32,9 @@ const BrightfieldRefs = (() => {
     const esc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
 
     function spec() {
-        const light = ($('op-plan-dic-light') || {}).value || 'room';
-        const pct = ($('op-plan-dic-led') || {}).value;
-        const exp = ($('op-plan-dic-exposure') || {}).value;
+        const light = ($('op-plan-bf-light') || {}).value || 'room';
+        const pct = ($('op-plan-bf-led') || {}).value;
+        const exp = ($('op-plan-bf-exposure') || {}).value;
         return {
             light,
             led_intensity_pct: light === 'led' && pct !== '' && pct != null ? Number(pct) : null,
@@ -161,7 +161,7 @@ const BrightfieldRefs = (() => {
         host = $(hostId);
         if (!host) return;
         onChange = opts && typeof opts.onChange === 'function' ? opts.onChange : null;
-        ['op-plan-dic-light', 'op-plan-dic-led', 'op-plan-dic-exposure'].forEach(id => {
+        ['op-plan-bf-light', 'op-plan-bf-led', 'op-plan-bf-exposure'].forEach(id => {
             const el = $(id);
             if (el) el.addEventListener('change', () => { clearTimeout(timer); timer = setTimeout(refresh, 150); });
         });

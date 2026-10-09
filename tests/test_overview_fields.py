@@ -148,9 +148,9 @@ class TestWhereThingsAre:
 
     def test_the_overview_light_exposure_and_references_are_on_bottom_cam(self):
         for needed in (
-            'id="op-plan-dic-light"',
-            'id="op-plan-dic-led"',
-            'id="op-plan-dic-exposure"',
+            'id="op-plan-bf-light"',
+            'id="op-plan-bf-led"',
+            'id="op-plan-bf-exposure"',
             'id="op-bfref-host"',
             'id="op-ov-match"',
         ):
@@ -158,12 +158,12 @@ class TestWhereThingsAre:
             assert needed not in ACQUIRE, f"{needed} is still on the Acquisition pane"
 
     def test_acquisition_keeps_the_choice_and_says_where_the_rest_is_set(self):
-        for kept in ('id="op-plan-dic"', 'id="op-plan-dic-every"', 'id="op-plan-dic-pos"'):
+        for kept in ('id="op-plan-bf"', 'id="op-plan-bf-every"', 'id="op-plan-bf-pos"'):
             assert kept in ACQUIRE
-        assert 'id="op-plan-dic-setup"' in ACQUIRE
+        assert 'id="op-plan-bf-setup"' in ACQUIRE
         assert "data-goto-pane" in OPERATE and "Change on Bottom cam" in OPERATE
         # The old "+ another field, from here" chrome is gone with the select.
-        assert "data-dic-pin-add" not in INDEX and "data-dic-pin-add" not in OPERATE
+        assert "data-bf-pin-add" not in INDEX and "data-bf-pin-add" not in OPERATE
 
     def test_the_list_is_shared_state_like_the_roster(self):
         assert "overviewFields: []" in STORE_JS
@@ -171,7 +171,7 @@ class TestWhereThingsAre:
         assert "SharedState.on('stageXY', render)" in PANEL
         body = OPERATE[OPERATE.index("function publishFields()") :]
         body = body[: body.index("\n    }")]
-        assert "structuredClone(_dicPins)" in body, "a shallow copy is the bug, not the fix"
+        assert "structuredClone(_bfPins)" in body, "a shallow copy is the bug, not the fix"
 
 
 class TestTheVerbs:
@@ -186,13 +186,13 @@ class TestTheVerbs:
     def test_a_field_is_made_one_way_from_where_the_stage_is(self):
         fn = OPERATE[OPERATE.index("function addFieldHere()") :]
         fn = fn[: fn.index("\n    }")]
-        assert "_dicPins.push({ x: _xy.x, y: _xy.y })" in fn
+        assert "_bfPins.push({ x: _xy.x, y: _xy.y })" in fn
         assert "No stage position known yet" in fn
         assert "fieldIndexAt(_xy)" in fn, "a field where one already is would be a duplicate frame"
         # The Acquisition select with an empty list goes through the same door.
         wire = OPERATE[OPERATE.index("if (_wired) return;") :]
         wire = wire[: wire.index("\n    async function ")]
-        assert "!_dicPins.length && !addFieldHere()" in wire
+        assert "!_bfPins.length && !addFieldHere()" in wire
 
     def test_going_to_a_field_passes_the_xy_interlock(self):
         fn = OPERATE[OPERATE.index("async function goToField(i)") :]
@@ -205,7 +205,7 @@ class TestTheVerbs:
         fn = fn[: fn.index("\n    }")]
         for step in ("publishFields();", "persistFields();", "renderPlan();"):
             assert step in fn, step
-        assert "pos.value = _dicPins.length ? 'here' : 'centroid'" in fn
+        assert "pos.value = _bfPins.length ? 'here' : 'centroid'" in fn
         assert "'/api/brightfield/fields'" in OPERATE and "method: 'PUT'" in OPERATE
 
     def test_the_session_fields_come_back_before_the_last_plan_does(self):
@@ -213,7 +213,7 @@ class TestTheVerbs:
         act = act[: act.index("\n    }")]
         assert act.index("await loadFields();") < act.index("await restorePlan();")
         fill = OPERATE[OPERATE.index("function fillPlan(plan)") :][:2600]
-        assert "if (!_dicPins.length) {" in fill, (
+        assert "if (!_bfPins.length) {" in fill, (
             "the last run's positions overwrite the session's list"
         )
 

@@ -3,8 +3,8 @@
  * timeline beneath.
  *
  *     OverviewStage.mount('embryos-overview-stage', {
- *         frames: () => EmbryosManager._dicFrames,     // oldest first
- *         references: () => EmbryosManager.run?.dic?.references,
+ *         frames: () => EmbryosManager._bfFrames,     // oldest first
+ *         references: () => EmbryosManager.run?.bf?.references,
  *     });
  *     OverviewStage.framesChanged();                   // after a frame lands
  *
@@ -171,7 +171,7 @@ const OverviewStage = (() => {
             lastKey = key;
             renderRefs(f, refs);
             if (typeof Reveal !== 'undefined' && $('ov-reveal')) {
-                Reveal.fill($('ov-reveal'), f.stem ? { what: 'dic', stem: f.stem } : null);
+                Reveal.fill($('ov-reveal'), f.stem ? { what: 'bf', stem: f.stem } : null);
             }
         }
         drawBar();

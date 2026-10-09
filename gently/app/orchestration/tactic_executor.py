@@ -169,7 +169,7 @@ def run_facts(orchestrator, reason: str | None = None) -> dict[str, str]:
             how += f" after {span((datetime.now() - started).total_seconds())}"
         facts["ended"] = how
     if getattr(orchestrator, "_volumes", True) is False:
-        frames = getattr(orchestrator, "_dic_frames", None)
+        frames = getattr(orchestrator, "_bf_frames", None)
         if frames is not None:
             facts["acquired"] = f"{int(frames)} brightfield frame{'' if frames == 1 else 's'}"
     else:
@@ -258,9 +258,9 @@ async def execute_tactic(agent, tactic: dict) -> dict:
                 "base_interval_seconds": interval,
                 "condition_value": structure.get("condition_value"),
             }
-            dic = structure.get("dic")
-            if isinstance(dic, dict) and dic.get("enabled"):
-                start_kwargs["dic"] = dic
+            bf = structure.get("bf")
+            if isinstance(bf, dict) and bf.get("enabled"):
+                start_kwargs["bf"] = bf
             overrides = structure.get("stop_conditions")
             if volumes and isinstance(overrides, dict) and overrides:
                 start_kwargs["stop_conditions"] = overrides

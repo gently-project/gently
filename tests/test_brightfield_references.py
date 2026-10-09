@@ -267,8 +267,8 @@ class TestTheRoutes:
 
 class TestTheFramesAndTheExport:
     def test_the_orchestrator_names_the_references_on_every_frame_and_warns_when_none(self):
-        assert '"references": getattr(self, "_dic_references", None),' in ORCH
-        assert "self._dic_references = self._find_brightfield_references()" in ORCH
+        assert '"references": getattr(self, "_bf_references", None),' in ORCH
+        assert "self._bf_references = self._find_brightfield_references()" in ORCH
         assert "No dark/flat references for the overview" in ORCH
         assert "EventType.WARNING_ISSUED" in ORCH
 
@@ -281,21 +281,21 @@ class TestTheFramesAndTheExport:
         refs = bf.for_frame(bf.matching(bf.list_records(store, "s1"), spec))
         store.put_snapshot(
             "s1",
-            "dic",
+            "bf",
             np.zeros((6, 9), dtype=np.uint16),
             metadata={
-                "channel": "dic",
+                "channel": "bf",
                 "frame": 1,
                 "captured_at": "2026-10-06T21:00:00",
                 "references": refs,
             },
         )
         out = export_session(store, "s1")
-        assert (out / "dic" / "references" / folder.name / "brightfield.yaml").is_file()
-        assert (out / "dic" / "references" / folder.name / "dark_20ms.tif").is_file()
+        assert (out / "bf" / "references" / folder.name / "brightfield.yaml").is_file()
+        assert (out / "bf" / "references" / folder.name / "dark_20ms.tif").is_file()
         import csv
 
-        with open(out / "dic" / "dic.csv", newline="", encoding="utf-8") as fh:
+        with open(out / "bf" / "bf.csv", newline="", encoding="utf-8") as fh:
             (row,) = list(csv.DictReader(fh))
         assert row["dark"] == f"references/{folder.name}/dark_20ms.tif"
         assert row["flat"] == f"references/{folder.name}/flat_led-1pct_20ms.tif"
@@ -304,19 +304,19 @@ class TestTheFramesAndTheExport:
 
 
 class TestThePane:
-    def test_the_led_defaults_to_one_percent_and_the_panel_is_under_the_dic_fields(self):
+    def test_the_led_defaults_to_one_percent_and_the_panel_is_under_the_bf_fields(self):
         """Under the plan's light, LED and exposure fields — which live on the
         Bottom cam pane now, beside the live view and the stage pad the flat
         needs (tests/test_overview_fields.py)."""
-        assert 'id="op-plan-dic-led" type="number" min="1" max="100" step="1" value="1"' in INDEX
+        assert 'id="op-plan-bf-led" type="number" min="1" max="100" step="1" value="1"' in INDEX
         assert 'id="op-bfref-host"' in INDEX and "panels/brightfield-refs.js" in INDEX
         bottom = INDEX[INDEX.index('id="op-pane-bottom"') : INDEX.index('id="op-pane-spim"')]
-        assert bottom.index('id="op-plan-dic-light"') < bottom.index('id="op-bfref-host"')
+        assert bottom.index('id="op-plan-bf-light"') < bottom.index('id="op-bfref-host"')
         assert "BrightfieldRefs.mount('op-bfref-host'" in OPERATE
         for needle in (
-            "'op-plan-dic-light'",
-            "'op-plan-dic-led'",
-            "'op-plan-dic-exposure'",
+            "'op-plan-bf-light'",
+            "'op-plan-bf-led'",
+            "'op-plan-bf-exposure'",
             "/api/brightfield/references/",
             "no embryo",
         ):
@@ -328,10 +328,10 @@ class TestReferencesTakenAfterTheRun:
         # The run's frames first, with no references to name …
         store.put_snapshot(
             "s1",
-            "dic",
+            "bf",
             np.zeros((6, 9), dtype=np.uint16),
             metadata={
-                "channel": "dic",
+                "channel": "bf",
                 "frame": 1,
                 "captured_at": "2026-10-06T21:00:00",
                 "light": "led",
@@ -355,7 +355,7 @@ class TestReferencesTakenAfterTheRun:
         out = export_session(store, "s1")
         import csv
 
-        with open(out / "dic" / "dic.csv", newline="", encoding="utf-8") as fh:
+        with open(out / "bf" / "bf.csv", newline="", encoding="utf-8") as fh:
             (row,) = list(csv.DictReader(fh))
         assert row["dark"] == f"references/{folder.name}/dark_20ms.tif"
         assert row["flat"] == f"references/{folder.name}/flat_led-1pct_20ms.tif"
@@ -363,7 +363,7 @@ class TestReferencesTakenAfterTheRun:
 
 class TestTheStatusSaysWhatTheChannelHasDone:
     def test_the_status_carries_frames_due_time_and_references(self):
-        assert "dic=self._dic_status()," in ORCH
-        helper = ORCH[ORCH.index("def _dic_status(self)") :][:1200]
-        for needle in ('"frames": self._dic_frames', '"next_due_at"', '"last_at"', '"references"'):
+        assert "bf=self._bf_status()," in ORCH
+        helper = ORCH[ORCH.index("def _bf_status(self)") :][:1200]
+        for needle in ('"frames": self._bf_frames', '"next_due_at"', '"last_at"', '"references"'):
             assert needle in helper, needle

@@ -313,8 +313,8 @@
 .session-plan-grid dt { color: var(--text-muted); }
 .session-plan-grid dd { margin: 0; }
 
-.session-dic { margin-bottom: 16px; }
-.session-dic-head {
+.session-bf { margin-bottom: 16px; }
+.session-bf-head {
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
@@ -322,10 +322,10 @@
     color: var(--text-muted);
     margin-bottom: 6px;
 }
-.session-dic-count { font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 6px; }
-.session-dic-frames { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
-.session-dic-frame { flex: none; display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: var(--text-muted); }
-.session-dic-frame img {
+.session-bf-count { font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 6px; }
+.session-bf-frames { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.session-bf-frame { flex: none; display: flex; flex-direction: column; gap: 2px; text-decoration: none; color: var(--text-muted); }
+.session-bf-frame img {
     width: 160px;
     height: 108px;
     object-fit: cover;
@@ -334,7 +334,7 @@
     background: var(--img-bg);
     display: block;
 }
-.session-dic-cap { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.session-bf-cap { font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .embryo-thumb {
     position: relative;

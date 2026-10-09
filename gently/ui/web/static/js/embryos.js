@@ -179,9 +179,9 @@ const EmbryosManager = {
         ClientEventBus.on('VERIFICATION_COMPLETED', (data) => this.handleVerificationCompleted(data));
         ClientEventBus.on('TIMELAPSE_STATE', (data) => this.reconcileWithServerState(data));
         // The brightfield overview channel: a frame of the whole field, per round.
-        ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data));
+        ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleBfFrame(data));
         // A run that started before this page did has frames on disk already.
-        ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshDicStrip());
+        ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshBfStrip());
         // A setting changed, here or in Settings: the views are redrawn with
         // it. The rig's defaults arrive a moment after load; if they name a
         // different opening view and nobody has chosen one yet, that is shown.
@@ -197,8 +197,8 @@ const EmbryosManager = {
             this.updateAmbientPulse();
         });
         if (typeof SettingsStore !== 'undefined') SettingsStore.loadRigDefaults();
-        this._wireDicStrip();
-        this.refreshDicStrip();
+        this._wireBfStrip();
+        this.refreshBfStrip();
         this.refreshRun();
         // The run's own account of itself — kind, cadence, next frame — is a
         // poll, not the embryo state: a brightfield run has no embryos to
@@ -221,13 +221,13 @@ const EmbryosManager = {
         const embryos = Object.keys(this.state.embryos).length;
         const live = r && r.status && r.status !== 'idle';
         if (live) {
-            if (r.volumes === false && r.dic && r.dic.enabled) return 'brightfield';
-            if (r.dic && r.dic.enabled) return 'mixed';
+            if (r.volumes === false && r.bf && r.bf.enabled) return 'brightfield';
+            if (r.bf && r.bf.enabled) return 'mixed';
             return 'volumes';
         }
         // At rest, go by what the session holds: frames and no embryos means
         // the frames are the experiment, and they get the stage.
-        if (this._dicFrames.length && !embryos) return 'brightfield';
+        if (this._bfFrames.length && !embryos) return 'brightfield';
         return 'none';
     },
 
@@ -241,9 +241,9 @@ const EmbryosManager = {
             const r = await fetch('/api/devices/timelapse/status');
             if (!r.ok) { if (r.status === 503) this.run = null; return; }
             const d = await r.json();
-            const before = JSON.stringify([this.runKind(), (this.run || {}).status, ((this.run || {}).dic || {}).frames, ((this.run || {}).dic || {}).references]);
+            const before = JSON.stringify([this.runKind(), (this.run || {}).status, ((this.run || {}).bf || {}).frames, ((this.run || {}).bf || {}).references]);
             this.run = d;
-            const after = JSON.stringify([this.runKind(), d.status, (d.dic || {}).frames, (d.dic || {}).references]);
+            const after = JSON.stringify([this.runKind(), d.status, (d.bf || {}).frames, (d.bf || {}).references]);
             if (before !== after) this.render();
         } catch (_) { /* the rig is away; the last answer stands */ }
     },
@@ -253,78 +253,78 @@ const EmbryosManager = {
     // ==========================================
     // The overview channel is the field's, not an embryo's, so its frames
     // have a strip above the cards rather than a card each. Frames arrive
-    // two ways: live, on IMAGE_ACQUIRED{source: dic} with a thumbnail; and
-    // from disk, through /api/dic/frames, for a page that opened after the
+    // two ways: live, on IMAGE_ACQUIRED{source: bf} with a thumbnail; and
+    // from disk, through /api/bf/frames, for a page that opened after the
     // run began. Either way a click opens the full frame, rendered from the
     // TIFF the orchestrator filed — a thumbnail is for noticing, not looking.
-    _dicFrames: [],          // every frame known, oldest first: {stem, frame, url, thumb, when}
+    _bfFrames: [],          // every frame known, oldest first: {stem, frame, url, thumb, when}
     // The overview taken from more than one position is one series per
     // field, and they are looked at one at a time: this is the field on the
     // stage. null until the frames say there are fields.
-    _dicField: null,
+    _bfField: null,
 
     /** The fields the frames come from, when there is more than one. */
-    _dicFields() {
+    _bfFields() {
         const seen = new Set();
-        for (const f of this._dicFrames) if (f.fields > 1 && f.field) seen.add(f.field);
+        for (const f of this._bfFrames) if (f.fields > 1 && f.field) seen.add(f.field);
         return [...seen].sort((a, b) => a - b);
     },
 
     /** The frames of the field on the stage: all of them when there is one field. */
-    _dicFramesShown() {
-        const fields = this._dicFields();
-        if (!fields.length) return this._dicFrames;
-        if (this._dicField == null || !fields.includes(this._dicField)) this._dicField = fields[0];
-        return this._dicFrames.filter(f => f.field === this._dicField);
+    _bfFramesShown() {
+        const fields = this._bfFields();
+        if (!fields.length) return this._bfFrames;
+        if (this._bfField == null || !fields.includes(this._bfField)) this._bfField = fields[0];
+        return this._bfFrames.filter(f => f.field === this._bfField);
     },
 
     /** Look at another field: the strip, the stage and the filmstrip follow. */
-    selectDicField(field) {
-        if (field === this._dicField) return;
-        this._dicField = field;
-        this.renderDicStrip();
+    selectBfField(field) {
+        if (field === this._bfField) return;
+        this._bfField = field;
+        this.renderBfStrip();
         if (this._stageMounted && typeof OverviewStage !== 'undefined') OverviewStage.framesChanged();
     },
-    _dicViewerAt: -1,
+    _bfViewerAt: -1,
 
-    _dicStemOf(path) {
+    _bfStemOf(path) {
         const base = String(path || '').split(/[\\/]/).pop();
         return base.replace(/\.tiff?$/i, '') || null;
     },
 
-    _dicRemember(frame) {
-        const i = frame.stem ? this._dicFrames.findIndex(f => f.stem === frame.stem) : -1;
-        if (i >= 0) this._dicFrames[i] = Object.assign(this._dicFrames[i], frame);
-        else this._dicFrames.push(frame);
-        this._dicFrames.sort((a, b) => ((a.frame || 0) - (b.frame || 0)) || ((a.field || 1) - (b.field || 1)));
+    _bfRemember(frame) {
+        const i = frame.stem ? this._bfFrames.findIndex(f => f.stem === frame.stem) : -1;
+        if (i >= 0) this._bfFrames[i] = Object.assign(this._bfFrames[i], frame);
+        else this._bfFrames.push(frame);
+        this._bfFrames.sort((a, b) => ((a.frame || 0) - (b.frame || 0)) || ((a.field || 1) - (b.field || 1)));
     },
 
-    async refreshDicStrip() {
+    async refreshBfStrip() {
         try {
-            const r = await fetch('/api/dic/frames');
+            const r = await fetch('/api/bf/frames');
             if (!r.ok) return;
             const d = await r.json();
-            (d.frames || []).forEach(f => this._dicRemember({
+            (d.frames || []).forEach(f => this._bfRemember({
                 stem: f.stem, frame: f.frame, field: f.field, fields: f.fields, url: f.url, when: f.captured_at, position: f.position,
                 round: f.round, exposure_ms: f.exposure_ms, light: f.light, led_intensity_pct: f.led_intensity_pct,
                 correctable: !!f.correctable,
                 thumb: `${f.url}?max=256`,
             }));
         } catch (_) { /* no session, or no frames yet */ }
-        this.renderDicStrip();
+        this.renderBfStrip();
         this.renderStatusBadge();
         this.renderSummary();
     },
 
-    handleDicFrame(data) {
-        if (!data || data.source !== 'dic') return;
+    handleBfFrame(data) {
+        if (!data || data.source !== 'bf') return;
         this.refreshRun();
-        const stem = this._dicStemOf(data.image_path);
-        this._dicRemember({
+        const stem = this._bfStemOf(data.image_path);
+        this._bfRemember({
             stem,
-            frame: Number(data.frame) || (this._dicFrames.length + 1),
-            url: stem ? `/api/dic/frames/${stem}.png` : null,
-            thumb: data.image_b64 ? `data:image/png;base64,${data.image_b64}` : (stem ? `/api/dic/frames/${stem}.png?max=256` : null),
+            frame: Number(data.frame) || (this._bfFrames.length + 1),
+            url: stem ? `/api/bf/frames/${stem}.png` : null,
+            thumb: data.image_b64 ? `data:image/png;base64,${data.image_b64}` : (stem ? `/api/bf/frames/${stem}.png?max=256` : null),
             when: data.timestamp,
             field: data.field,
             fields: data.fields,
@@ -334,10 +334,10 @@ const EmbryosManager = {
             light: data.light,
             led_intensity_pct: data.led_intensity_pct,
         });
-        this.renderDicStrip();
+        this.renderBfStrip();
         // The list says whether the new frame can be corrected; ask it shortly.
-        clearTimeout(this._dicListTimer);
-        this._dicListTimer = setTimeout(() => this.refreshDicStrip(), 1500);
+        clearTimeout(this._bfListTimer);
+        this._bfListTimer = setTimeout(() => this.refreshBfStrip(), 1500);
     },
 
     // The overview frames. In a brightfield-only run they are the experiment
@@ -348,13 +348,13 @@ const EmbryosManager = {
     _overviewOpen: false,
     _stageMounted: false,
 
-    renderDicStrip() {
-        const strip = document.getElementById('dic-strip');
-        const frames = document.getElementById('dic-strip-frames');
-        const count = document.getElementById('dic-strip-count');
+    renderBfStrip() {
+        const strip = document.getElementById('bf-strip');
+        const frames = document.getElementById('bf-strip-frames');
+        const count = document.getElementById('bf-strip-count');
         const stage = document.getElementById('embryos-overview');
         if (!strip || !frames) return;
-        const all = this._dicFrames;
+        const all = this._bfFrames;
         const kind = this.runKind();
         const inFilm = this.currentView === 'filmstrip';
         const expanded = all.length > 0 && !inFilm && (kind === 'brightfield' || this._overviewOpen);
@@ -367,7 +367,7 @@ const EmbryosManager = {
         // drawer to show; the stage takes the body.
         const def = document.getElementById('view-default');
         if (def) def.classList.toggle('is-overview-only', kind === 'brightfield' && Object.keys(this.state.embryos).length === 0);
-        const fields = this._dicFields();
+        const fields = this._bfFields();
         if (count) count.textContent = `${all.length} frame${all.length === 1 ? '' : 's'}${fields.length ? ` · ${fields.length} fields` : ''}`;
         if (inFilm) { this.renderFilmstripView(); return; }
         if (strip.hidden) return;
@@ -380,15 +380,15 @@ const EmbryosManager = {
                 const t = f.when ? this.formatTime(f.when) : '';
                 const idx = all.indexOf(f);
                 const fld = n ? ` · field ${n}` : '';
-                return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${fld}${t ? `, ${t}` : ''} — open">` +
-                    (f.thumb ? `<img src="${f.thumb}" alt="brightfield overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
-                    `<span class="dic-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
+                return `<button type="button" class="bf-frame" data-bf-index="${idx}" title="Frame ${f.frame}${fld}${t ? `, ${t}` : ''} — open">` +
+                    (f.thumb ? `<img src="${f.thumb}" alt="brightfield overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="bf-frame-blank"></span>') +
+                    `<span class="bf-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
             }).join('');
             return n
-                ? `<div class="dic-strip-row"><span class="dic-strip-field">field ${n}</span><div class="dic-strip-cells">${cells}</div></div>`
+                ? `<div class="bf-strip-row"><span class="bf-strip-field">field ${n}</span><div class="bf-strip-cells">${cells}</div></div>`
                 : cells;
         }).join('');
-        frames.querySelectorAll('.dic-strip-cells').forEach(el => { el.scrollLeft = el.scrollWidth; });
+        frames.querySelectorAll('.bf-strip-cells').forEach(el => { el.scrollLeft = el.scrollWidth; });
         frames.scrollLeft = frames.scrollWidth;
     },
 
@@ -396,10 +396,10 @@ const EmbryosManager = {
         if (typeof OverviewStage === 'undefined') return;
         if (!this._stageMounted) {
             OverviewStage.mount('embryos-overview', {
-                frames: () => this._dicFramesShown(),
-                fields: () => ({ list: this._dicFields(), current: this._dicField }),
-                onField: n => this.selectDicField(n),
-                references: () => (this.run && this.run.dic && this.run.dic.references) || null,
+                frames: () => this._bfFramesShown(),
+                fields: () => ({ list: this._bfFields(), current: this._bfField }),
+                onField: n => this.selectBfField(n),
+                references: () => (this.run && this.run.bf && this.run.bf.references) || null,
                 onFold: this.runKind() === 'brightfield' ? null : () => this.closeOverview(),
                 onTakeReferences: () => {
                     if (typeof switchTab === 'function') switchTab('devices');
@@ -413,25 +413,25 @@ const EmbryosManager = {
     },
 
     /** A frame on the folded strip was chosen: open the stage on it. */
-    openDicViewer(index) {
+    openBfViewer(index) {
         this._overviewOpen = true;
-        index = this._dicPlaceOnStage(index);
-        this.renderDicStrip();
+        index = this._bfPlaceOnStage(index);
+        this.renderBfStrip();
         if (typeof OverviewStage !== 'undefined') OverviewStage.go(index, true);
     },
 
     /** The stage shows one field at a time: put the frame's field on it,
      *  and say where the frame is within that field. */
-    _dicPlaceOnStage(index) {
-        const f = this._dicFrames[index];
-        if (f && f.fields > 1 && f.field) this._dicField = f.field;
-        const shown = this._dicFramesShown();
+    _bfPlaceOnStage(index) {
+        const f = this._bfFrames[index];
+        if (f && f.fields > 1 && f.field) this._bfField = f.field;
+        const shown = this._bfFramesShown();
         return f ? Math.max(0, shown.indexOf(f)) : shown.length - 1;
     },
 
     closeOverview() {
         this._overviewOpen = false;
-        this.renderDicStrip();
+        this.renderBfStrip();
     },
 
     formatTime(iso) {
@@ -439,16 +439,16 @@ const EmbryosManager = {
         return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
     },
 
-    _wireDicStrip() {
-        const frames = document.getElementById('dic-strip-frames');
+    _wireBfStrip() {
+        const frames = document.getElementById('bf-strip-frames');
         if (frames) {
             frames.addEventListener('click', ev => {
-                const b = ev.target.closest('[data-dic-index]');
-                if (b) this.openDicViewer(Number(b.dataset.dicIndex));
+                const b = ev.target.closest('[data-bf-index]');
+                if (b) this.openBfViewer(Number(b.dataset.bfIndex));
             });
         }
-        const open = document.getElementById('dic-strip-open');
-        if (open) open.addEventListener('click', () => this.openDicViewer(this._dicFrames.length - 1));
+        const open = document.getElementById('bf-strip-open');
+        if (open) open.addEventListener('click', () => this.openBfViewer(this._bfFrames.length - 1));
     },
 
     _setupViewSwitcher() {
@@ -497,7 +497,7 @@ const EmbryosManager = {
         // Update buttons
         this._updateViewButtons();
         // The brightfield strip gives way to the film's own brightfield row, and comes back.
-        this.renderDicStrip();
+        this.renderBfStrip();
         // Render the active view's content
         this._renderActiveView();
     },
@@ -886,20 +886,20 @@ const EmbryosManager = {
      * the film as its own block, at twice the size, showing the last twelve
      * frames over a film that starts at the first.
      */
-    _filmDicRow(thumbSize, config) {
-        const all = this._dicFrames;
+    _filmBfRow(thumbSize, config) {
+        const all = this._bfFrames;
         if (!all.length) return '';
         // Taken from more than one position: a row per field.
-        const fields = this._dicFields();
+        const fields = this._bfFields();
         const groups = fields.length ? fields.map(n => [n, all.filter(f => f.field === n)]) : [[null, all]];
-        return groups.map(([n, list]) => this._filmDicFieldRow(list, n, thumbSize, config)).join('');
+        return groups.map(([n, list]) => this._filmBfFieldRow(list, n, thumbSize, config)).join('');
     },
 
-    _filmDicFieldRow(all, fieldNo, thumbSize, config) {
-        const every = this._dicFrames;
+    _filmBfFieldRow(all, fieldNo, thumbSize, config) {
+        const every = this._bfFrames;
         const skip = (config && config.skipInterval) || 1;
         const shown = skip > 1 ? all.filter((_, i) => i % skip === 0 || i === all.length - 1) : all;
-        let html = '<div class="filmstrip-row filmstrip-dic-row">';
+        let html = '<div class="filmstrip-row filmstrip-bf-row">';
         html += `<div class="filmstrip-label">
                 <span class="filmstrip-name">Brightfield</span>
                 <span class="filmstrip-stage">${fieldNo ? `field ${fieldNo}` : 'overview'}</span>
@@ -910,9 +910,9 @@ const EmbryosManager = {
             const when = f.when ? new Date(f.when) : null;
             const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
             const idx = every.indexOf(f);
-            html += `<div class="filmstrip-cell filmstrip-dic-cell" data-dic-index="${idx}" title="brightfield overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
+            html += `<div class="filmstrip-cell filmstrip-bf-cell" data-bf-index="${idx}" title="brightfield overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
             if (f.thumb) {
-                html += `<img class="filmstrip-thumb filmstrip-dic-thumb" src="${f.thumb}" loading="lazy" width="${thumbSize}" height="${thumbSize}" alt="brightfield overview, frame ${f.frame}"/>`;
+                html += `<img class="filmstrip-thumb filmstrip-bf-thumb" src="${f.thumb}" loading="lazy" width="${thumbSize}" height="${thumbSize}" alt="brightfield overview, frame ${f.frame}"/>`;
             } else {
                 html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px">${f.frame}</div>`;
             }
@@ -955,7 +955,7 @@ const EmbryosManager = {
         const thumbSize = config.thumbnailSize || 56;
 
         let html = '<div class="filmstrip-container">';
-        html += this._filmDicRow(thumbSize, config);
+        html += this._filmBfRow(thumbSize, config);
         for (const embryo of embryos) {
             const reasoning = this.detectionReasoning[embryo.embryoId] || [];
             const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
@@ -1020,10 +1020,10 @@ const EmbryosManager = {
 
         // Click handlers. A brightfield cell opens the overview viewer; it is not
         // an embryo's timepoint and has no detail panel.
-        container.querySelectorAll('.filmstrip-dic-cell').forEach(cell => {
-            cell.addEventListener('click', () => this.openDicViewer(Number(cell.dataset.dicIndex)));
+        container.querySelectorAll('.filmstrip-bf-cell').forEach(cell => {
+            cell.addEventListener('click', () => this.openBfViewer(Number(cell.dataset.bfIndex)));
         });
-        container.querySelectorAll('.filmstrip-cell:not(.filmstrip-dic-cell)').forEach(cell => {
+        container.querySelectorAll('.filmstrip-cell:not(.filmstrip-bf-cell)').forEach(cell => {
             cell.addEventListener('click', () => {
                 const eid = cell.dataset.embryoId;
                 const tp = parseInt(cell.dataset.timepoint);
@@ -1407,8 +1407,8 @@ const EmbryosManager = {
             // The overview strip is the session's too: drop the old session's
             // frames and read the new one's from disk. A restored session has
             // its frames under snapshots/ but fires no ACQUISITION_STARTED.
-            this._dicFrames = [];
-            this.refreshDicStrip();
+            this._bfFrames = [];
+            this.refreshBfStrip();
         } else {
             console.log('Reconciling with server state:', serverState.status, 'session:', serverSessionId);
         }
@@ -1941,7 +1941,7 @@ const EmbryosManager = {
         if (!statsEl) return;
         const kind = this.runKind();
         const r = this.run || {};
-        const dic = r.dic || {};
+        const bf = r.bf || {};
         const embryos = Object.values(this.state.embryos);
         const stat = (value, label, id, cls) => `
             <div class="header-stat${cls ? ` ${cls}` : ''}">
@@ -1950,18 +1950,18 @@ const EmbryosManager = {
             </div>`;
         const startedAt = this.state.startedAt || (r.started_at ? new Date(r.started_at) : null);
         const elapsed = startedAt ? stat(this.formatDuration(Date.now() - startedAt.getTime()), 'elapsed', 'summary-duration') : '';
-        const refs = dic.enabled
-            ? stat(dic.references && dic.references.dark && dic.references.flat ? '✓' : '✕', 'dark/flat', null, dic.references && dic.references.dark ? 'is-ok' : 'is-missing')
+        const refs = bf.enabled
+            ? stat(bf.references && bf.references.dark && bf.references.flat ? '✓' : '✕', 'dark/flat', null, bf.references && bf.references.dark ? 'is-ok' : 'is-missing')
             : '';
         if (kind === 'none') { statsEl.innerHTML = ''; return; }
         if (kind === 'brightfield') {
             const live = this.runIsLive();
             statsEl.innerHTML = [
-                stat(live ? (dic.frames ?? this._dicFrames.length) : this._dicFrames.length, 'frames'),
-                dic.every_seconds ? stat(`every ${this.fmtEvery(dic.every_seconds)}`, 'cadence') : '',
+                stat(live ? (bf.frames ?? this._bfFrames.length) : this._bfFrames.length, 'frames'),
+                bf.every_seconds ? stat(`every ${this.fmtEvery(bf.every_seconds)}`, 'cadence') : '',
                 live ? stat(this.getOverviewCountdown(), 'next frame', 'summary-next-countdown', 'is-live') : '',
                 live ? elapsed : '',
-                this._dicFrames.some(f => f.correctable) || (dic.references && dic.references.dark)
+                this._bfFrames.some(f => f.correctable) || (bf.references && bf.references.dark)
                     ? stat('✓', 'dark/flat', null, 'is-ok')
                     : stat('✕', 'dark/flat', null, 'is-missing'),
             ].join('');
@@ -1975,7 +1975,7 @@ const EmbryosManager = {
             done ? stat(done, 'done') : '',
             r.current_round != null ? stat(r.current_round, 'round') : stat(this.state.totalTimepoints, 'timepoints'),
             going ? stat(this.getNextCountdown(), 'next volume', 'summary-next-countdown', 'is-live') : '',
-            kind === 'mixed' ? stat(dic.frames ?? this._dicFrames.length, 'overview frames') : '',
+            kind === 'mixed' ? stat(bf.frames ?? this._bfFrames.length, 'overview frames') : '',
             kind === 'mixed' ? stat(this.getOverviewCountdown(), 'next frame', 'summary-next-overview') : '',
             elapsed,
             refs,
@@ -1991,9 +1991,9 @@ const EmbryosManager = {
     },
 
     getOverviewCountdown() {
-        const dic = (this.run && this.run.dic) || {};
-        let secs = dic.seconds_until_next;
-        if (dic.next_due_at) secs = Math.max(0, (new Date(dic.next_due_at).getTime() - Date.now()) / 1000);
+        const bf = (this.run && this.run.bf) || {};
+        let secs = bf.seconds_until_next;
+        if (bf.next_due_at) secs = Math.max(0, (new Date(bf.next_due_at).getTime() - Date.now()) / 1000);
         if (!Number.isFinite(Number(secs))) return '—';
         return this.formatCountdown(Math.floor(Number(secs)));
     },
@@ -3068,8 +3068,8 @@ const EmbryosManager = {
      */
     renderSmartEmptyState(type) {
         const kind = this.runKind();
-        const dic = (this.run && this.run.dic) || {};
-        const every = dic.every_seconds ? this.fmtEvery(dic.every_seconds) : null;
+        const bf = (this.run && this.run.bf) || {};
+        const every = bf.every_seconds ? this.fmtEvery(bf.every_seconds) : null;
         const states = {
             'no-embryos': kind === 'brightfield'
                 ? {

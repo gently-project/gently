@@ -101,7 +101,7 @@ const ReviewApp = {
         const parts = [];
         if (s.embryo_count) parts.push(`${s.embryo_count} embryo${s.embryo_count !== 1 ? 's' : ''}`);
         if (s.timepoints) parts.push(`${s.timepoints} timepoint${s.timepoints !== 1 ? 's' : ''}`);
-        if (s.dic_frames) parts.push(`${s.dic_frames} brightfield`);
+        if (s.bf_frames) parts.push(`${s.bf_frames} brightfield`);
         if (s.brightfield_references) parts.push('dark/flat ✓');
         if (s.bytes) parts.push(this.fmtBytes(s.bytes));
         return parts;
@@ -149,8 +149,8 @@ const ReviewApp = {
             label: 'Holds',
             chips: {
                 embryos: { label: 'embryos', test: s => s.embryo_count > 0 },
-                brightfield: { label: 'brightfield', test: s => s.dic_frames > 0 },
-                empty: { label: 'empty', test: s => !(s.embryo_count > 0) && !(s.dic_frames > 0) },
+                brightfield: { label: 'brightfield', test: s => s.bf_frames > 0 },
+                empty: { label: 'empty', test: s => !(s.embryo_count > 0) && !(s.bf_frames > 0) },
             },
             defaults: ['embryos', 'brightfield'],
         },
@@ -400,7 +400,7 @@ const ReviewApp = {
         const content = document.getElementById('session-content');
         const s = this.currentSession;
         const embryos = s.embryos || [];
-        const frames = s.dic_frames || [];
+        const frames = s.bf_frames || [];
         const predictions = embryos.reduce((n, e) => n + ((e.predictions || []).length), 0);
 
         content.innerHTML = `
@@ -591,16 +591,16 @@ const ReviewApp = {
         if (!document.getElementById('session-movie-status')) {
             host.innerHTML = `
                 <div class="session-export-row">
-                    <button class="session-edit-btn" id="session-movie-dic" onclick="ReviewApp.askMovie('dic')" title="A folder of brightfield frames (an export's dic/) as a movie: every frame in time order, and flat-fielded where the dark and flat are beside them">brightfield movie…</button>
+                    <button class="session-edit-btn" id="session-movie-bf" onclick="ReviewApp.askMovie('bf')" title="A folder of brightfield frames (an export's bf/) as a movie: every frame in time order, and flat-fielded where the dark and flat are beside them">brightfield movie…</button>
                     <button class="session-edit-btn" id="session-movie-spim" onclick="ReviewApp.askMovie('spim')" title="A folder of volumes (an export's <embryo>/volumes) as a movie: max projections over time, or every slice stack by stack">SPIM movie…</button>
-                    <button class="session-edit-btn" id="session-movie-crops" onclick="ReviewApp.askMovie('crops')" title="Cut each embryo out of a folder of brightfield frames (an export's dic/) into a Hugging Face folder of its own: raw and corrected crops, the references, one metadata table. Where the embryos are comes from this session's Operate marking">Embryo crops…</button>
+                    <button class="session-edit-btn" id="session-movie-crops" onclick="ReviewApp.askMovie('crops')" title="Cut each embryo out of a folder of brightfield frames (an export's bf/) into a Hugging Face folder of its own: raw and corrected crops, the references, one metadata table. Where the embryos are comes from this session's Operate marking">Embryo crops…</button>
                     <span id="session-movie-status"></span>
                 </div>
                 <div id="session-movie-form"></div>`;
         }
         const status = document.getElementById('session-movie-status');
         const running = job.state === 'running';
-        for (const id of ['session-movie-dic', 'session-movie-spim', 'session-movie-crops']) {
+        for (const id of ['session-movie-bf', 'session-movie-spim', 'session-movie-crops']) {
             const b = document.getElementById(id);
             if (b) b.disabled = running;
         }
@@ -626,25 +626,25 @@ const ReviewApp = {
     askMovie(kind) {
         const host = document.getElementById('session-movie-form');
         if (!host) return;
-        const dic = kind === 'dic';
+        const bf = kind === 'bf';
         const crops = kind === 'crops';
-        const prefill = (dic || crops) && this._exportPath ? `${this._exportPath}\\dic` : '';
-        const choice = dic
-            ? `<label class="session-movie-option"><input type="checkbox" id="session-movie-corrected" checked> Also flat-fielded, with the dark and flat beside the frames (dic_corrected.avi)</label>`
+        const prefill = (bf || crops) && this._exportPath ? `${this._exportPath}\\bf` : '';
+        const choice = bf
+            ? `<label class="session-movie-option"><input type="checkbox" id="session-movie-corrected" checked> Also flat-fielded, with the dark and flat beside the frames (bf_corrected.avi)</label>`
             : crops
                 ? ''
                 : `<label class="session-movie-option"><input type="radio" name="session-movie-view" value="projection" checked> Max projection, one frame per timepoint (spim_projection.avi)</label>
                <label class="session-movie-option"><input type="radio" name="session-movie-view" value="slices"> Every slice, stack by stack (spim_slices.avi)</label>`;
-        const makeLabel = dic ? 'Make brightfield movie' : crops ? 'Cut the embryos out' : 'Make SPIM movie';
-        const hint = dic
+        const makeLabel = bf ? 'Make brightfield movie' : crops ? 'Cut the embryos out' : 'Make SPIM movie';
+        const hint = bf
             ? 'Every frame in time order, one brightness stretch for the run, frame and time in the corner. Written beside the frames; Fiji opens it with File › Import › AVI.'
             : crops
-                ? 'One fixed box per embryo, from this session\'s Operate marking. Writes dic/embryos/<embryo>/ with raw/ and corrected/ crops, the dark and flat cropped the same, metadata.csv, two movies, and a README that says how to load or upload it to Hugging Face.'
+                ? 'One fixed box per embryo, from this session\'s Operate marking. Writes bf/embryos/<embryo>/ with raw/ and corrected/ crops, the dark and flat cropped the same, metadata.csv, two movies, and a README that says how to load or upload it to Hugging Face.'
                 : 'One brightness stretch for the run, timepoint (and slice) in the corner. Written beside the volumes; Fiji opens it with File › Import › AVI.';
         host.innerHTML = `
             <form class="session-name-form" onsubmit="event.preventDefault(); ReviewApp.startMovie('${kind}')">
                 <div class="session-export-dest-row">
-                    <input id="session-movie-folder" value="${this.escapeHtml(prefill)}" placeholder="${dic || crops ? "Folder of brightfield frames: an export's dic/ folder" : "Folder of volumes: an export's <embryo>/volumes folder"}" autocomplete="off">
+                    <input id="session-movie-folder" value="${this.escapeHtml(prefill)}" placeholder="${bf || crops ? "Folder of brightfield frames: an export's bf/ folder" : "Folder of volumes: an export's <embryo>/volumes folder"}" autocomplete="off">
                     <button type="button" class="session-edit-btn reveal-local" id="session-movie-browse" onclick="ReviewApp.browseMovieFolder()" title="Choose the folder in a dialog">Browse…</button>
                 </div>
                 ${choice}
@@ -675,7 +675,7 @@ const ReviewApp = {
         const input = document.getElementById('session-movie-folder');
         const folder = input ? input.value.trim() : '';
         const body = { kind, folder };
-        if (kind === 'dic') {
+        if (kind === 'bf') {
             const c = document.getElementById('session-movie-corrected');
             body.corrected = !c || c.checked;
         } else if (kind === 'crops') {
@@ -888,12 +888,12 @@ const ReviewApp = {
         }
         const stop = this.stopText(plan.stop_condition);
         if (stop) rows.push(['Stop', stop]);
-        const dic = plan.dic;
-        if (dic && dic.enabled) {
+        const bf = plan.bf;
+        if (bf && bf.enabled) {
             const d = [];
-            if (dic.every_seconds) d.push(`every ${this.fmtInterval(dic.every_seconds)}`);
-            if (dic.light) d.push(dic.light === 'led' ? `LED${dic.led_intensity_pct != null ? ` ${dic.led_intensity_pct}%` : ''}` : dic.light === 'room' ? 'room light' : 'light as it is');
-            if (dic.exposure_ms != null) d.push(`${dic.exposure_ms} ms`);
+            if (bf.every_seconds) d.push(`every ${this.fmtInterval(bf.every_seconds)}`);
+            if (bf.light) d.push(bf.light === 'led' ? `LED${bf.led_intensity_pct != null ? ` ${bf.led_intensity_pct}%` : ''}` : bf.light === 'room' ? 'room light' : 'light as it is');
+            if (bf.exposure_ms != null) d.push(`${bf.exposure_ms} ms`);
             rows.push(['Brightfield overview', d.join(' · ')]);
         } else {
             rows.push(['Brightfield overview', 'off']);
@@ -930,17 +930,17 @@ const ReviewApp = {
         }
     },
 
-    renderDicStrip() {
-        const frames = this.currentSession.dic_frames || [];
+    renderBfStrip() {
+        const frames = this.currentSession.bf_frames || [];
         if (!frames.length) return '';
         return `
-            <div class="session-dic">
-                <div class="session-dic-head">Brightfield overview <span class="session-dic-count">${frames.length} frame${frames.length !== 1 ? 's' : ''}</span></div>
-                <div class="session-dic-frames">
+            <div class="session-bf">
+                <div class="session-bf-head">Brightfield overview <span class="session-bf-count">${frames.length} frame${frames.length !== 1 ? 's' : ''}</span></div>
+                <div class="session-bf-frames">
                     ${frames.map(f => `
-                        <a class="session-dic-frame" href="${f.url}" target="_blank" rel="noopener" title="Open frame ${f.frame ?? ''}">
+                        <a class="session-bf-frame" href="${f.url}" target="_blank" rel="noopener" title="Open frame ${f.frame ?? ''}">
                             <img src="${f.url}?max=256" alt="brightfield overview frame ${f.frame ?? ''}" loading="lazy">
-                            <span class="session-dic-cap">${f.frame ?? ''}${f.captured_at ? ` · ${this.formatTime(f.captured_at)}` : ''}</span>
+                            <span class="session-bf-cap">${f.frame ?? ''}${f.captured_at ? ` · ${this.formatTime(f.captured_at)}` : ''}</span>
                         </a>`).join('')}
                 </div>
             </div>`;
@@ -948,7 +948,7 @@ const ReviewApp = {
 
     renderEmbryosTab() {
         const embryos = this.currentSession.embryos || [];
-        const strip = this.renderDicStrip();
+        const strip = this.renderBfStrip();
 
         if (embryos.length === 0) {
             return strip + '<div class="empty-tab">No embryo data recorded</div>';
@@ -1080,7 +1080,7 @@ const ReviewApp = {
         const right = document.getElementById('status-right');
         if (!left) return;
         const total = this.sessions.length;
-        const withContent = this.sessions.filter(s => s.embryo_count > 0 || s.dic_frames > 0).length;
+        const withContent = this.sessions.filter(s => s.embryo_count > 0 || s.bf_frames > 0).length;
         left.textContent = `${total} session${total !== 1 ? 's' : ''} · ${withContent} with content`;
         if (right && this.currentSession) {
             const embryos = (this.currentSession.embryos || []).length;

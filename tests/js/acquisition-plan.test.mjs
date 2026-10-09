@@ -25,7 +25,7 @@ test('an untouched form is still a complete, sayable plan', () => {
     const plan = P.fromForm({});
     assert.equal(plan.intervalSeconds, 120);
     assert.equal(plan.spim.slices, 50);
-    assert.equal(plan.dic.enabled, false);
+    assert.equal(plan.bf.enabled, false);
     assert.equal(plan.stop.kind, 'manual');
     assert.deepEqual(P.validate(plan, IDS), []);
     assert.match(P.describe(plan, SUBJECTS), /^Every 2 min: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · until stopped\.$/);
@@ -41,25 +41,25 @@ test('minutes are the unit the biologist thinks in; seconds are what is sent', (
 });
 
 test('the brightfield channel rides on its own clock, in rounds', () => {
-    const plan = P.fromForm({ interval: 5, intervalUnit: 'min', dic: true, dicEveryRounds: 3, dicExposureMs: 8 });
+    const plan = P.fromForm({ interval: 5, intervalUnit: 'min', bf: true, bfEveryRounds: 3, bfExposureMs: 8 });
     const body = P.toPayload(plan, IDS);
-    assert.deepEqual(body.dic, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8, light: 'room' });
+    assert.deepEqual(body.bf, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8, light: 'room' });
     assert.match(P.describe(plan, SUBJECTS), /\+ one brightfield overview every 3 rounds from the centroid/);
-    assert.match(P.describe(P.fromForm({ dic: true }), SUBJECTS), /one brightfield overview per round from the centroid/);
+    assert.match(P.describe(P.fromForm({ bf: true }), SUBJECTS), /one brightfield overview per round from the centroid/);
 });
 
-test('a plan without the brightfield channel sends no dic at all', () => {
-    // The orchestrator treats an absent dic as off, and the existing exact-kwargs
+test('a plan without the brightfield channel sends no bf at all', () => {
+    // The orchestrator treats an absent bf as off, and the existing exact-kwargs
     // route tests pin that a plain run calls start() exactly as before.
-    assert.equal('dic' in P.toPayload(P.fromForm({}), IDS), false);
+    assert.equal('bf' in P.toPayload(P.fromForm({}), IDS), false);
 });
 
 test('"taken from here" is the position captured when it was chosen', () => {
-    const plan = P.fromForm({ dic: true, dicPosition: 'here', dicPin: { x: -512.4, y: -388.9 } });
-    assert.deepEqual(P.toPayload(plan, IDS).dic.position, { x: -512.4, y: -388.9 });
+    const plan = P.fromForm({ bf: true, bfPosition: 'here', bfPin: { x: -512.4, y: -388.9 } });
+    assert.deepEqual(P.toPayload(plan, IDS).bf.position, { x: -512.4, y: -388.9 });
     assert.match(P.describe(plan, SUBJECTS), /from -512, -389/);
     // and without a captured position it is not a plan yet
-    const none = P.fromForm({ dic: true, dicPosition: 'here', dicPin: null });
+    const none = P.fromForm({ bf: true, bfPosition: 'here', bfPin: null });
     assert.match(P.validate(none, IDS).join(' '), /no field captured/i);
 });
 
@@ -121,7 +121,7 @@ test('one embryo is named, several are counted', () => {
 test('a plan survives being saved and reloaded', () => {
     const plan = P.fromForm({
         interval: 5, intervalUnit: 'min', slices: 80, exposureMs: 12, laserConfig: '488 and 561',
-        dic: true, dicEveryRounds: 2, dicPosition: 'here', dicPin: { x: -500, y: -400 }, dicExposureMs: 8,
+        bf: true, bfEveryRounds: 2, bfPosition: 'here', bfPin: { x: -500, y: -400 }, bfExposureMs: 8,
         stopKind: 'duration', stopValue: 12,
         overrides: [{ embryoId: 'embryo_2', kind: 'hatching' }, { embryoId: 'embryo_3', kind: 'timepoints', value: 3 }],
         monitoringMode: 'expression_monitoring',
@@ -129,7 +129,7 @@ test('a plan survives being saved and reloaded', () => {
     const st = P.toStructure(plan);
     assert.equal(st.cadence_s, 300);
     assert.equal(st.stop_condition, 'duration:12h');
-    assert.deepEqual(st.dic, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8, light: 'room' });
+    assert.deepEqual(st.bf, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8, light: 'room' });
     assert.deepEqual(st.stop_conditions, { embryo_2: 'hatching', embryo_3: 'timepoints:3' });
 
     const back = P.fromStructure(st);
@@ -143,7 +143,7 @@ test('a structure the start route seeded, before any of this, still reads as a p
     const plan = P.fromStructure({ cadence_s: 120, interval: 120, stop_condition: 'manual',
                                    condition_value: null, monitoring_mode: 'idle' });
     assert.equal(plan.intervalSeconds, 120);
-    assert.equal(plan.dic.enabled, false);
+    assert.equal(plan.bf.enabled, false);
     assert.deepEqual(plan.overrides, []);
     assert.match(P.describe(plan, SUBJECTS), /^Every 2 min: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · until stopped\.$/);
 });
@@ -157,8 +157,8 @@ test('the stop spec parses back to what the pane offers', () => {
 });
 
 test('a brightfield interval that is not a whole number of rounds rounds to one', () => {
-    const plan = P.fromStructure({ cadence_s: 300, dic: { enabled: true, every_seconds: 700 } });
-    assert.equal(plan.dic.everyRounds, 2);
+    const plan = P.fromStructure({ cadence_s: 300, bf: { enabled: true, every_seconds: 700 } });
+    assert.equal(plan.bf.everyRounds, 2);
 });
 
 test('the agent’s stage-based ending reads back as the pane’s own', () => {
@@ -173,33 +173,33 @@ test('the agent’s stage-based ending reads back as the pane’s own', () => {
 test('the plan says which light the overview is taken under', () => {
     // The bottom camera drives no light of its own. A night of overview
     // frames came out dark because nothing said which light to use.
-    const room = P.fromForm({ dic: true });
-    assert.equal(room.dic.light, 'room', 'the room light is what this rig usually uses');
+    const room = P.fromForm({ bf: true });
+    assert.equal(room.bf.light, 'room', 'the room light is what this rig usually uses');
     assert.match(P.describe(room, SUBJECTS), /from the centroid, under the room light/);
-    const led = P.fromForm({ dic: true, dicLight: 'led' });
-    assert.equal(P.toPayload(led, IDS).dic.light, 'led');
+    const led = P.fromForm({ bf: true, bfLight: 'led' });
+    assert.equal(P.toPayload(led, IDS).bf.light, 'led');
     assert.match(P.describe(led, SUBJECTS), /under the LED/);
-    const asIs = P.fromForm({ dic: true, dicLight: 'none' });
+    const asIs = P.fromForm({ bf: true, bfLight: 'none' });
     assert.match(P.describe(asIs, SUBJECTS), /in the light as it is/);
-    assert.equal(P.fromForm({ dic: true, dicLight: 'sunlight' }).dic.light, 'room');
+    assert.equal(P.fromForm({ bf: true, bfLight: 'sunlight' }).bf.light, 'room');
     // saved and reloaded, the light comes back
-    assert.equal(P.fromStructure(P.toStructure(led)).dic.light, 'led');
+    assert.equal(P.fromStructure(P.toStructure(led)).bf.light, 'led');
     // a plan saved before the light existed is taken under the room light
-    assert.equal(P.fromStructure({ dic: { enabled: true, use_led: true } }).dic.light, 'room');
-    assert.deepEqual(Object.keys(P.DIC_LIGHTS), ['room', 'led', 'none']);
+    assert.equal(P.fromStructure({ bf: { enabled: true, use_led: true } }).bf.light, 'room');
+    assert.deepEqual(Object.keys(P.BF_LIGHTS), ['room', 'led', 'none']);
 });
 
 test('the embryos do not all fit in one field: a frame from each pinned position', () => {
-    const two = P.fromForm({ dic: true, dicPosition: 'here', dicPins: [{ x: -500, y: -400 }, { x: 900, y: -380 }] });
-    const dic = P.toPayload(two, IDS).dic;
-    assert.deepEqual(dic.position, { x: -500, y: -400 }, 'the first is the position older code reads');
-    assert.deepEqual(dic.positions, [{ x: -500, y: -400 }, { x: 900, y: -380 }]);
+    const two = P.fromForm({ bf: true, bfPosition: 'here', bfPins: [{ x: -500, y: -400 }, { x: 900, y: -380 }] });
+    const bf = P.toPayload(two, IDS).bf;
+    assert.deepEqual(bf.position, { x: -500, y: -400 }, 'the first is the position older code reads');
+    assert.deepEqual(bf.positions, [{ x: -500, y: -400 }, { x: 900, y: -380 }]);
     assert.match(P.describe(two, SUBJECTS), /from 2 positions/);
     // and it survives being saved and reloaded
     const back = P.fromStructure(P.toStructure(two));
-    assert.deepEqual(back.dic.pins, two.dic.pins);
+    assert.deepEqual(back.bf.pins, two.bf.pins);
     // one pin says nothing new, so the payload is the old payload
-    const one = P.fromForm({ dic: true, dicPosition: 'here', dicPins: [{ x: -500, y: -400 }] });
-    assert.equal('positions' in P.toPayload(one, IDS).dic, false);
-    assert.deepEqual(P.toPayload(one, IDS).dic.position, { x: -500, y: -400 });
+    const one = P.fromForm({ bf: true, bfPosition: 'here', bfPins: [{ x: -500, y: -400 }] });
+    assert.equal('positions' in P.toPayload(one, IDS).bf, false);
+    assert.deepEqual(P.toPayload(one, IDS).bf.position, { x: -500, y: -400 });
 });

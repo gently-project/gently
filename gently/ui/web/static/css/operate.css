@@ -153,9 +153,9 @@
    fields, so the inputs are the plan's inputs, narrowed to the rail. */
 .op-block-overview .op-num-in, .op-block-overview .op-sel { width: 96px; }
 .op-block-overview .op-cap { margin: 0; }
-.op-plan-dic-setup .op-btn { margin-left: 2px; }
+.op-plan-bf-setup .op-btn { margin-left: 2px; }
 /* "the 2 fields in the list" has to fit: the plan's other selects are this wide. */
-#op-plan-dic-pos { min-width: 190px; }
+#op-plan-bf-pos { min-width: 190px; }
 
 /* ── pane shell ─────────────────────────────────────────────────────────── */
 .op-pane {
@@ -1718,8 +1718,8 @@
 .op-plan-chan-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--op-2); }
 .op-plan-chan-name { font-size: 0.74rem; font-weight: 600; }
 .op-plan-check { display: inline-flex; align-items: center; gap: var(--op-2); cursor: pointer; }
-.op-plan-dic-body { display: grid; gap: var(--op-1); }
-.op-plan-dic-body[hidden] { display: none; }
+.op-plan-bf-body { display: grid; gap: var(--op-1); }
+.op-plan-bf-body[hidden] { display: none; }
 .op-plan-ovr { display: grid; gap: var(--op-1); margin-top: var(--op-1); }
 .op-plan-ovr-row .op-label { font-family: var(--op-mono); }
 
@@ -1829,4 +1829,4 @@
 
 /* What the plan's "taken from the fields" means, under the select. The
    fields themselves are the list in the left column (panels/fields.js). */
-#op-plan-dic-pin[hidden] { display: none; }
+#op-plan-bf-pin[hidden] { display: none; }

@@ -11489,31 +11489,31 @@ body.modal-open {
 @media (prefers-reduced-motion: reduce) { .region-strip { backdrop-filter: none; } }
 
 /* ── Embryos: the brightfield overview strip ───────────────────────────────────── */
-.dic-strip {
+.bf-strip {
     margin: 6px 0 2px;
     padding: 6px 8px;
     border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
     border-radius: 6px;
 }
-.dic-strip[hidden] { display: none; }
-.dic-strip-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
-.dic-strip-title { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
-.dic-strip-count { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; opacity: 0.75; }
-.dic-strip-open {
+.bf-strip[hidden] { display: none; }
+.bf-strip-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.bf-strip-title { font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+.bf-strip-count { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; opacity: 0.75; }
+.bf-strip-open {
     margin-left: auto; font: inherit; font-size: 0.7rem; padding: 2px 8px; border-radius: 5px;
     border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer;
 }
-.dic-strip-open:hover, .dic-strip-open:focus-visible { border-color: var(--accent); color: var(--text); outline: none; }
-.dic-strip-frames { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.bf-strip-open:hover, .bf-strip-open:focus-visible { border-color: var(--accent); color: var(--text); outline: none; }
+.bf-strip-frames { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
 /* Taken from more than one position: a row per field, labelled. */
-.dic-strip-frames.is-fields { flex-direction: column; overflow-x: visible; }
-.dic-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dic-strip-field { flex: none; width: 46px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
-.dic-strip-cells { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; min-width: 0; flex: 1 1 auto; }
+.bf-strip-frames.is-fields { flex-direction: column; overflow-x: visible; }
+.bf-strip-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bf-strip-field { flex: none; width: 46px; font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
+.bf-strip-cells { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; min-width: 0; flex: 1 1 auto; }
 .ov-fields[hidden] { display: none; }
 /* A frame on the strip is a button to the full frame, and looks like one:
    tall enough to read as a picture, with a hover the eye can find. */
-.dic-frame {
+.bf-frame {
     flex: 0 0 auto;
     display: grid;
     gap: 2px;
@@ -11525,9 +11525,9 @@ body.modal-open {
     cursor: pointer;
     font: inherit;
 }
-.dic-frame:hover, .dic-frame:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
-.dic-frame img, .dic-frame-blank { height: 110px; width: auto; min-width: 110px; display: block; border-radius: 3px; background: #000; }
-.dic-frame-cap { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; opacity: 0.7; text-align: center; }
+.bf-frame:hover, .bf-frame:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
+.bf-frame img, .bf-frame-blank { height: 110px; width: auto; min-width: 110px; display: block; border-radius: 3px; background: #000; }
+.bf-frame-cap { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; opacity: 0.7; text-align: center; }
 
 /* ── Home: the recent-images strip opens ─────────────────────────────────── */
 button.home-image {
@@ -11579,14 +11579,14 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
 .home-image-group-head .reveal-btn { margin-left: auto; align-self: center; }
 
 /* ── Film: the brightfield overview is the first row, on the same timeline ───────── */
-.filmstrip-dic-row { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
-.filmstrip-dic-row .filmstrip-label { background: var(--bg-hover); }
-.filmstrip-dic-thumb {
+.filmstrip-bf-row { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
+.filmstrip-bf-row .filmstrip-label { background: var(--bg-hover); }
+.filmstrip-bf-thumb {
     /* The whole field, not the left of a three-view. */
     object-position: center;
     border-color: var(--border);
 }
-.filmstrip-dic-cell .filmstrip-stage-label { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
+.filmstrip-bf-cell .filmstrip-stage-label { color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }
 
 /* ── Settings, as a tab of the app ───────────────────────────────────────── */
 #settings-content .settings-layout {

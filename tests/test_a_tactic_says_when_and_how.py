@@ -62,7 +62,7 @@ def _orch(**kw):
         "_ended": "stopped",
         "_total_timepoints": 4,
         "_volumes": True,
-        "_dic_frames": 0,
+        "_bf_frames": 0,
         "_error_message": None,
         "_operate_tactic_ids": [],
     }
@@ -94,7 +94,7 @@ class TestTheFacts:
         )
 
     def test_a_brightfield_run_counts_frames(self):
-        orch = _orch(_volumes=False, _dic_frames=12, _ended="completed")
+        orch = _orch(_volumes=False, _bf_frames=12, _ended="completed")
         assert run_facts(orch)["acquired"] == "12 brightfield frames"
 
     def test_a_stop_with_no_reason_is_still_a_stop(self):

@@ -355,6 +355,19 @@ async def main(
     storage_dir = settings.storage.base_path
     storage_dir.mkdir(exist_ok=True)
 
+    # The brightfield overview's old on-disk name, renamed once, at the first
+    # boot after the code rename (gently/core/migrations.py). Here, before
+    # anything opens the store, because a run's checkpoint would write the
+    # old keys straight back. A sentinel keeps later boots from walking it.
+    try:
+        from gently.core.migrations import migrate_dic_to_bf
+
+        done = migrate_dic_to_bf(storage_dir)
+        if done is not None and (done.renamed or done.rewritten):
+            print(f"  {done.summary()}")
+    except Exception:
+        logger.warning("the dic-to-bf migration did not complete", exc_info=True)
+
     # Create unified store (FileStore) early for session queries
     from gently.core.gently_manifest import write_manifest
 

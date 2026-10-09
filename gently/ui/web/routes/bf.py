@@ -1,7 +1,7 @@
 """The brightfield overview frames of the live session, as a list and as PNGs.
 
 The overview channel files one TIFF per round under the session's
-``snapshots/`` (see ``TimelapseOrchestrator._capture_dic_overview``). The
+``snapshots/`` (see ``TimelapseOrchestrator._capture_bf_overview``). The
 event that announces each frame carries a thumbnail, which is enough to show
 it landing; it is not enough to LOOK at it — "it appears more like an icon
 than a clickable image". These two routes are what a click opens: the full
@@ -41,7 +41,7 @@ def create_router(server) -> APIRouter:
         if store is None or not sid:
             return []
         try:
-            return list(store.list_snapshots(sid, "dic"))
+            return list(store.list_snapshots(sid, "bf"))
         except Exception:
             logger.debug("brightfield frame listing failed", exc_info=True)
             return []
@@ -67,7 +67,7 @@ def create_router(server) -> APIRouter:
                 logger.debug("brightfield frame lookup failed", exc_info=True)
                 rec = None
             if isinstance(rec, dict):
-                return rec if rec.get("source") == "dic" else None
+                return rec if rec.get("source") == "bf" else None
             if rec is None:
                 return None
         return next((r for r in _records() if _stem(r) == stem), None)
@@ -120,8 +120,8 @@ def create_router(server) -> APIRouter:
         meta = rec.get("metadata") or {}
         return resolve_reference_paths(sd, references_for_frame(meta, records))
 
-    @router.get("/api/dic/frames")
-    async def list_dic_frames():
+    @router.get("/api/bf/frames")
+    async def list_bf_frames():
         """Every overview frame the live session has filed, oldest first, with
         the light it was taken under and whether a dark and flat exist for it."""
         key = _listing_key()
@@ -157,13 +157,13 @@ def create_router(server) -> APIRouter:
                     "light": meta.get("light"),
                     "led_intensity_pct": meta.get("led_intensity_pct"),
                     "correctable": _correction_for(rec, records) is not None,
-                    "url": f"/api/dic/frames/{stem}.png",
+                    "url": f"/api/bf/frames/{stem}.png",
                 }
             )
         return frames
 
-    @router.get("/api/dic/frames/{stem}.png")
-    async def dic_frame_png(stem: str, max: int | None = None, corrected: bool = False):
+    @router.get("/api/bf/frames/{stem}.png")
+    async def bf_frame_png(stem: str, max: int | None = None, corrected: bool = False):
         """One overview frame as PNG; ``?max=N`` bounds the longer side for a
         thumbnail; ``?corrected=1`` divides the session's dark and flat out
         first (404 if the frame has none)."""

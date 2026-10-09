@@ -20,25 +20,25 @@ pytest.importorskip("PIL")
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from gently.ui.web.routes.dic import create_router  # noqa: E402
+from gently.ui.web.routes.bf import create_router  # noqa: E402
 
 
 def _frame(tmp_path: Path, n: int, shape=(400, 600)) -> dict:
     import tifffile
 
-    p = tmp_path / "snapshots" / f"dic_frame{n}.tif"
+    p = tmp_path / "snapshots" / f"bf_frame{n}.tif"
     p.parent.mkdir(parents=True, exist_ok=True)
     arr = (np.arange(shape[0] * shape[1], dtype=np.uint16) % 4096).reshape(shape)
     tifffile.imwrite(str(p), arr)
     return {
         "session_id": "s1",
-        "source": "dic",
+        "source": "bf",
         "file_path": str(p),
         "captured_at": f"2026-09-26T10:0{n}:00",
         "width": shape[1],
         "height": shape[0],
         "metadata": {
-            "channel": "dic",
+            "channel": "bf",
             "frame": n,
             "round": n * 3,
             "position": {"x": -500.0, "y": -400.0},
@@ -69,20 +69,20 @@ def _app(records, session_id="s1"):
 
 def test_the_sessions_frames_are_listed_oldest_first(tmp_path):
     client, server = _app([_frame(tmp_path, 2), _frame(tmp_path, 1)])
-    r = client.get("/api/dic/frames")
+    r = client.get("/api/bf/frames")
     assert r.status_code == 200
     body = r.json()
     assert body["count"] == 2
     assert [f["frame"] for f in body["frames"]] == [2, 1], "the store's order is kept"
     f = body["frames"][1]
-    assert f["stem"] == "dic_frame1" and f["url"] == "/api/dic/frames/dic_frame1.png"
+    assert f["stem"] == "bf_frame1" and f["url"] == "/api/bf/frames/bf_frame1.png"
     assert f["round"] == 3 and f["position"] == {"x": -500.0, "y": -400.0}
-    server.gently_store.list_snapshots.assert_called_with("s1", "dic")
+    server.gently_store.list_snapshots.assert_called_with("s1", "bf")
 
 
 def test_a_frame_is_rendered_from_the_tiff_as_png(tmp_path):
     client, _ = _app([_frame(tmp_path, 1)])
-    r = client.get("/api/dic/frames/dic_frame1.png")
+    r = client.get("/api/bf/frames/bf_frame1.png")
     assert r.status_code == 200
     assert r.headers["content-type"] == "image/png"
     assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
@@ -95,7 +95,7 @@ def test_a_frame_is_rendered_from_the_tiff_as_png(tmp_path):
 
 def test_max_bounds_the_longer_side_for_a_thumbnail(tmp_path):
     client, _ = _app([_frame(tmp_path, 1)])
-    r = client.get("/api/dic/frames/dic_frame1.png?max=200")
+    r = client.get("/api/bf/frames/bf_frame1.png?max=200")
     assert r.status_code == 200
     from PIL import Image
 
@@ -106,20 +106,20 @@ def test_max_bounds_the_longer_side_for_a_thumbnail(tmp_path):
 def test_only_frames_the_session_filed_can_be_asked_for(tmp_path):
     # The stem is looked up in the store's listing, never joined to a path.
     client, _ = _app([_frame(tmp_path, 1)])
-    assert client.get("/api/dic/frames/dic_frame9.png").status_code == 404
-    assert client.get("/api/dic/frames/..%2F..%2Fsecret.png").status_code == 404
+    assert client.get("/api/bf/frames/bf_frame9.png").status_code == 404
+    assert client.get("/api/bf/frames/..%2F..%2Fsecret.png").status_code == 404
 
 
 def test_a_frame_gone_from_disk_is_404_not_500(tmp_path):
     rec = _frame(tmp_path, 1)
     Path(rec["file_path"]).unlink()
     client, _ = _app([rec])
-    assert client.get("/api/dic/frames/dic_frame1.png").status_code == 404
+    assert client.get("/api/bf/frames/bf_frame1.png").status_code == 404
 
 
 def test_no_session_means_no_frames_not_an_error(tmp_path):
     client, _ = _app([_frame(tmp_path, 1)], session_id=None)
-    r = client.get("/api/dic/frames")
+    r = client.get("/api/bf/frames")
     assert r.status_code == 200 and r.json() == {"frames": [], "count": 0}
 
 
@@ -138,17 +138,17 @@ def test_a_frame_with_a_dark_and_flat_can_be_served_corrected(tmp_path: Path):
     )
     store.put_snapshot(
         "s1",
-        "dic",
+        "bf",
         frame,
         metadata={
-            "channel": "dic",
+            "channel": "bf",
             "frame": 1,
             "light": "led",
             "led_intensity_pct": 1,
             "exposure_ms": 20.0,
         },
     )
-    stem = Path(store.list_snapshots("s1", "dic")[0]["file_path"]).stem
+    stem = Path(store.list_snapshots("s1", "bf")[0]["file_path"]).stem
     server = MagicMock()
     server.agent_bridge.agent.session_id = "s1"
     server.gently_store = store
@@ -156,8 +156,8 @@ def test_a_frame_with_a_dark_and_flat_can_be_served_corrected(tmp_path: Path):
     app.include_router(create_router(server))
     c = TestClient(app)
 
-    assert c.get("/api/dic/frames").json()["frames"][0]["correctable"] is False
-    assert c.get(f"/api/dic/frames/{stem}.png", params={"corrected": 1}).status_code == 404
+    assert c.get("/api/bf/frames").json()["frames"][0]["correctable"] is False
+    assert c.get(f"/api/bf/frames/{stem}.png", params={"corrected": 1}).status_code == 404
 
     from gently.app import brightfield as bf
 
@@ -168,11 +168,11 @@ def test_a_frame_with_a_dark_and_flat_can_be_served_corrected(tmp_path: Path):
     bf.file_image(folder, "dark", dark, spec, {"stats": bf.stats(dark)})
     bf.file_image(folder, "flat", flat, spec, {"stats": bf.stats(flat), "frames": 5})
 
-    listed = c.get("/api/dic/frames").json()["frames"][0]
+    listed = c.get("/api/bf/frames").json()["frames"][0]
     assert (
         listed["correctable"] is True and listed["light"] == "led" and listed["exposure_ms"] == 20.0
     )
-    r = c.get(f"/api/dic/frames/{stem}.png", params={"corrected": 1})
+    r = c.get(f"/api/bf/frames/{stem}.png", params={"corrected": 1})
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
     # The arithmetic itself, on the arrays: a flat field divides out.
     corrected = bf.correct(frame, dark, flat)
@@ -189,9 +189,9 @@ def test_a_frame_with_a_dark_and_flat_can_be_served_corrected(tmp_path: Path):
 def test_a_frame_is_found_by_its_own_sidecar_not_by_listing_them_all(tmp_path):
     client, server = _app([_frame(tmp_path, 1), _frame(tmp_path, 2)])
     server.gently_store.list_snapshots.side_effect = AssertionError("listed every frame")
-    r = client.get("/api/dic/frames/dic_frame2.png")
+    r = client.get("/api/bf/frames/bf_frame2.png")
     assert r.status_code == 200 and r.headers["content-type"] == "image/png"
-    assert client.get("/api/dic/frames/dic_frame9.png").status_code == 404
+    assert client.get("/api/bf/frames/bf_frame9.png").status_code == 404
 
 
 def test_the_store_reads_one_sidecar_and_takes_no_path(tmp_path):
@@ -200,14 +200,14 @@ def test_the_store_reads_one_sidecar_and_takes_no_path(tmp_path):
     store = FileStore(root=tmp_path / "data")
     store.create_session("s1")
     store.put_snapshot(
-        "s1", "dic", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 1}, stem="abc"
+        "s1", "bf", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 1}, stem="abc"
     )
-    rec = store.get_snapshot("s1", "dic_abc")
-    assert rec and rec["source"] == "dic" and rec["metadata"] == {"frame": 1}
-    assert store.get_snapshot("s1", "dic_nope") is None
-    for bad in ("../session.yaml", "dic_abc/..", "..", "", "sub/dic_abc", "sub\dic_abc"):
+    rec = store.get_snapshot("s1", "bf_abc")
+    assert rec and rec["source"] == "bf" and rec["metadata"] == {"frame": 1}
+    assert store.get_snapshot("s1", "bf_nope") is None
+    for bad in ("../session.yaml", "bf_abc/..", "..", "", "sub/bf_abc", "sub\bf_abc"):
         assert store.get_snapshot("s1", bad) is None, bad
-    assert store.get_snapshot("no-such-session", "dic_abc") is None
+    assert store.get_snapshot("no-such-session", "bf_abc") is None
 
 
 def test_the_listing_is_read_once_per_change_of_the_folder(tmp_path):
@@ -215,7 +215,7 @@ def test_the_listing_is_read_once_per_change_of_the_folder(tmp_path):
 
     store = FileStore(root=tmp_path / "data")
     store.create_session("s1")
-    store.put_snapshot("s1", "dic", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 1})
+    store.put_snapshot("s1", "bf", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 1})
     server = MagicMock()
     server.agent_bridge.agent.session_id = "s1"
     server.gently_store = store
@@ -225,12 +225,12 @@ def test_the_listing_is_read_once_per_change_of_the_folder(tmp_path):
     app = FastAPI()
     app.include_router(create_router(server))
     client = TestClient(app)
-    assert client.get("/api/dic/frames").json()["count"] == 1
-    assert client.get("/api/dic/frames").json()["count"] == 1
+    assert client.get("/api/bf/frames").json()["count"] == 1
+    assert client.get("/api/bf/frames").json()["count"] == 1
     assert len(reads) == 1, "the folder had not changed"
     import time
 
     time.sleep(0.05)
-    store.put_snapshot("s1", "dic", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 2})
-    assert client.get("/api/dic/frames").json()["count"] == 2
+    store.put_snapshot("s1", "bf", np.zeros((4, 6), dtype=np.uint16), metadata={"frame": 2})
+    assert client.get("/api/bf/frames").json()["count"] == 2
     assert len(reads) == 2, "a frame landed, so it was listed again"

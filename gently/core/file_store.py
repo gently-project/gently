@@ -1418,7 +1418,7 @@ class FileStore:
         return canonical
 
     def get_snapshot(self, session_id: str, stem: str) -> dict[str, Any] | None:
-        """One snapshot record by the stem of its file (``dic_6d29469c4763``):
+        """One snapshot record by the stem of its file (``bf_6d29469c4763``):
         its own sidecar read, not every record in the session. A page that
         plays a run back asks for frames ten times a second, and listing two
         thousand sidecars for each was what stalled the agent. None when the

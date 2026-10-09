@@ -22,7 +22,7 @@ const SUBJECTS = [{ id: 'embryo_1', label: '1' }, { id: 'embryo_2', label: '2' }
 const IDS = SUBJECTS.map(s => s.id);
 
 const brightfield = extra => P.fromForm({
-    interval: 5, intervalUnit: 'min', volumes: false, dicLight: 'led', ...extra,
+    interval: 5, intervalUnit: 'min', volumes: false, bfLight: 'led', ...extra,
 });
 
 test('a plan takes volumes unless it says it does not', () => {
@@ -33,14 +33,14 @@ test('a plan takes volumes unless it says it does not', () => {
 });
 
 test('with no volumes the overview is the run, and a round is a frame', () => {
-    const plan = P.fromForm({ volumes: false, dic: false, dicEveryRounds: 4 });
-    assert.equal(plan.dic.enabled, true);
-    assert.equal(plan.dic.everyRounds, 1);
-    assert.equal(P.toPayload(brightfield(), IDS).dic.every_seconds, 300);
+    const plan = P.fromForm({ volumes: false, bf: false, bfEveryRounds: 4 });
+    assert.equal(plan.bf.enabled, true);
+    assert.equal(plan.bf.everyRounds, 1);
+    assert.equal(P.toPayload(brightfield(), IDS).bf.every_seconds, 300);
 });
 
 test('it is said as what it is', () => {
-    const plan = brightfield({ dicLedPct: 40, dicExposureMs: 20, stopKind: 'timepoints', stopValue: 12 });
+    const plan = brightfield({ bfLedPct: 40, bfExposureMs: 20, stopKind: 'timepoints', stopValue: 12 });
     assert.equal(P.describe(plan, SUBJECTS),
         'Every 5 min: one brightfield frame of the field on the bottom camera (20 ms), ' +
         'from the centroid, under the LED at 40 % · after 12 frames. No SPIM volumes.');
@@ -49,7 +49,7 @@ test('it is said as what it is', () => {
 test('with no embryo placed there is no centroid to claim', () => {
     assert.match(P.describe(brightfield(), []), /from where the stage is/);
     assert.match(P.describe(brightfield(), SUBJECTS), /from the centroid/);
-    const pinned = brightfield({ dicPosition: 'here', dicPin: { x: -120.4, y: 88 } });
+    const pinned = brightfield({ bfPosition: 'here', bfPin: { x: -120.4, y: 88 } });
     assert.match(P.describe(pinned, []), /from -120, 88/);
 });
 
@@ -111,50 +111,50 @@ test('per-embryo endings are dropped from a plan that images no embryo', () => {
 /* ── the LED's brightness ─────────────────────────────────────────────── */
 
 test('the brightness is sent under the LED, as a whole percent', () => {
-    assert.equal(P.toPayload(brightfield({ dicLedPct: '40' }), IDS).dic.led_intensity_pct, 40);
-    assert.equal(P.toPayload(brightfield({ dicLedPct: 1 }), IDS).dic.led_intensity_pct, 1);
-    assert.equal(P.toPayload(brightfield({ dicLedPct: 100 }), IDS).dic.led_intensity_pct, 100);
+    assert.equal(P.toPayload(brightfield({ bfLedPct: '40' }), IDS).bf.led_intensity_pct, 40);
+    assert.equal(P.toPayload(brightfield({ bfLedPct: 1 }), IDS).bf.led_intensity_pct, 1);
+    assert.equal(P.toPayload(brightfield({ bfLedPct: 100 }), IDS).bf.led_intensity_pct, 100);
 });
 
 test('an empty brightness leaves the LED as it is', () => {
     for (const empty of ['', null, undefined]) {
-        const plan = brightfield({ dicLedPct: empty });
-        assert.equal(plan.dic.ledPct, null);
-        assert.ok(!('led_intensity_pct' in P.toPayload(plan, IDS).dic));
+        const plan = brightfield({ bfLedPct: empty });
+        assert.equal(plan.bf.ledPct, null);
+        assert.ok(!('led_intensity_pct' in P.toPayload(plan, IDS).bf));
         assert.match(P.describe(plan, SUBJECTS), /under the LED ·/);
     }
 });
 
 test('a brightness means nothing under another light, and is not sent', () => {
     for (const light of ['room', 'none']) {
-        const plan = brightfield({ dicLight: light, dicLedPct: 40 });
-        assert.equal(plan.dic.ledPct, null);
-        assert.ok(!('led_intensity_pct' in P.toPayload(plan, IDS).dic));
+        const plan = brightfield({ bfLight: light, bfLedPct: 40 });
+        assert.equal(plan.bf.ledPct, null);
+        assert.ok(!('led_intensity_pct' in P.toPayload(plan, IDS).bf));
         assert.doesNotMatch(P.describe(plan, SUBJECTS), /%/);
     }
 });
 
 test('what is not a brightness is refused, not sent', () => {
     for (const bad of [0, 101, -5, 'bright']) {
-        const problems = P.validate(brightfield({ dicLedPct: bad }), IDS);
+        const problems = P.validate(brightfield({ bfLedPct: bad }), IDS);
         assert.deepEqual(problems, ['LED brightness must be a whole percent from 1 to 100.'], String(bad));
     }
     assert.deepEqual(P.LED_PCT, { min: 1, max: 100 });
 });
 
 test('a volume run can set the overview\'s brightness too', () => {
-    const plan = P.fromForm({ dic: true, dicLight: 'led', dicLedPct: 30 });
-    assert.equal(P.toPayload(plan, IDS).dic.led_intensity_pct, 30);
+    const plan = P.fromForm({ bf: true, bfLight: 'led', bfLedPct: 30 });
+    assert.equal(P.toPayload(plan, IDS).bf.led_intensity_pct, 30);
     assert.match(P.describe(plan, SUBJECTS), /one brightfield overview per round from the centroid, under the LED at 30 %/);
 });
 
 /* ── saved, and read back ─────────────────────────────────────────────── */
 
 test('a brightfield plan survives being saved and read back', () => {
-    const plan = brightfield({ dicLedPct: 40, dicExposureMs: 20, stopKind: 'duration', stopValue: 6 });
+    const plan = brightfield({ bfLedPct: 40, bfExposureMs: 20, stopKind: 'duration', stopValue: 6 });
     const back = P.fromStructure(P.toStructure(plan));
     assert.equal(back.spim.enabled, false);
-    assert.deepEqual(back.dic, plan.dic);
+    assert.deepEqual(back.bf, plan.bf);
     assert.deepEqual(back.stop, plan.stop);
     assert.equal(P.describe(back, SUBJECTS), P.describe(plan, SUBJECTS));
 });
@@ -182,6 +182,6 @@ test('read back, the volume fields hold their defaults and not the floor', () =>
 test('a plan saved before there was a choice is a volume plan', () => {
     const back = P.fromStructure({ cadence_s: 300, num_slices: 40, exposure_ms: 8 });
     assert.equal(back.spim.enabled, true);
-    assert.equal(back.dic.ledPct, null);
+    assert.equal(back.bf.ledPct, null);
     assert.equal(P.toStructure(P.fromForm({})).volumes, true);
 });

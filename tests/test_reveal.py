@@ -134,11 +134,11 @@ class TestWhatIsWhere:
         r = _post(_client(store), what="volume", embryo_id="embryo_2", timepoint=7)
         assert r.status_code == 404 and calls["show"] == []
 
-    def test_a_dic_frame_by_its_stem(self, store, calls):
-        store.put_snapshot("s1", "dic", np.zeros((4, 4), dtype=np.uint16), {"frame": 1})
-        rec = store.list_snapshots("s1", "dic")[0]
+    def test_a_bf_frame_by_its_stem(self, store, calls):
+        store.put_snapshot("s1", "bf", np.zeros((4, 4), dtype=np.uint16), {"frame": 1})
+        rec = store.list_snapshots("s1", "bf")[0]
         stem = Path(rec["file_path"]).stem
-        r = _post(_client(store), what="dic", stem=stem)
+        r = _post(_client(store), what="bf", stem=stem)
         assert r.status_code == 200, r.text
         assert calls["show"] == [Path(rec["file_path"])]
 
@@ -174,7 +174,7 @@ class TestWhatIsNot:
             {"what": "session", "session_id": "nope"},
             {"what": "embryo", "embryo_id": "embryo_9"},
             {"what": "timepoint", "embryo_id": "embryo_1", "timepoint": 99},
-            {"what": "dic", "stem": "nope"},
+            {"what": "bf", "stem": "nope"},
             {"what": "calibration_run", "embryo_id": "embryo_1", "run": "nope"},
             {"what": "removed"},
         ],
@@ -396,7 +396,7 @@ class TestThePage:
                     "n": 10,
                 },
             ),
-            ({"url": "/api/dic/frames/dic_f0007.png"}, {"what": "dic", "stem": "dic_f0007"}),
+            ({"url": "/api/bf/frames/bf_f0007.png"}, {"what": "bf", "stem": "bf_f0007"}),
             (
                 {
                     "url": "/x.jpg",
@@ -440,7 +440,7 @@ class TestWhereTheButtonsAre:
     def test_both_viewers(self):
         assert 'id="lightbox-reveal"' in INDEX
         stage = (WEB / "static" / "js" / "panels" / "overview-stage.js").read_text(encoding="utf-8")
-        assert "what: 'dic', stem: f.stem" in stage  # the stage reveals the frame it shows
+        assert "what: 'bf', stem: f.stem" in stage  # the stage reveals the frame it shows
         lightbox = self._js("lightbox.js")
         assert lightbox.count("this.showReveal(img);") == 2, "one of the two ways of showing forgot"
 

@@ -22,7 +22,7 @@
  *
  * WHAT IT DOES NOT OWN
  *
- * The list. `_dicPins`, the stage position, the plan and the endpoints stay
+ * The list. `_bfPins`, the stage position, the plan and the endpoints stay
  * in operate.js. This renders `SharedState.overviewFields` against
  * `SharedState.stageXY` and calls `OperateManager.fields.*` — the same split
  * as the Roster panel (docs/architecture/PANELS.md).

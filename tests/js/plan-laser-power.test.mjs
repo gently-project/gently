@@ -102,7 +102,7 @@ test('without the limits a power is still a percentage', () => {
 });
 
 test('a brightfield run sets no power, whatever is in the form', () => {
-    const p = plan({ volumes: false, dicLight: 'led', laserConfig: '488 only', laserPowers: { 488: 50 } });
+    const p = plan({ volumes: false, bfLight: 'led', laserConfig: '488 only', laserPowers: { 488: 50 } });
     assert.deepEqual(p.spim.laserPowers, {});
     assert.ok(!('laser_powers' in P.toPayload(p, IDS)));
     // ... and a number left in a hidden field cannot make the plan invalid.

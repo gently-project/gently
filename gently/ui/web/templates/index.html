@@ -277,20 +277,20 @@
                     </div>
                 </div>
                 {# The brightfield overview channel: one frame of the whole field per
-                   round. Frames arrive on IMAGE_ACQUIRED{source: dic} with a
+                   round. Frames arrive on IMAGE_ACQUIRED{source: bf} with a
                    thumbnail; the count comes from the run's status. Hidden
                    until a run has one. #}
                 {# The overview frames. A brightfield-only run gets the stage:
                    the newest frame large with a timeline beneath (panels/
                    overview-stage.js). A mixed run gets the strip — the stage
                    folded to one row — and Open expands it in place. #}
-                <div class="dic-strip" id="dic-strip" hidden>
-                    <div class="dic-strip-head">
-                        <span class="dic-strip-title">Brightfield overview</span>
-                        <span class="dic-strip-count" id="dic-strip-count"></span>
-                        <button type="button" class="dic-strip-open" id="dic-strip-open" title="The newest frame large, with the whole series beneath">Open ⌄</button>
+                <div class="bf-strip" id="bf-strip" hidden>
+                    <div class="bf-strip-head">
+                        <span class="bf-strip-title">Brightfield overview</span>
+                        <span class="bf-strip-count" id="bf-strip-count"></span>
+                        <button type="button" class="bf-strip-open" id="bf-strip-open" title="The newest frame large, with the whole series beneath">Open ⌄</button>
                     </div>
-                    <div class="dic-strip-frames" id="dic-strip-frames"></div>
+                    <div class="bf-strip-frames" id="bf-strip-frames"></div>
                 </div>
             </div>
 
@@ -551,8 +551,8 @@
                          plan says which one the frame is taken under. It is
                          switched on for the frame and off again before the
                          volumes; a light that was already on is left on. #}
-                      <div class="op-field"><label class="op-label" for="op-plan-dic-light">Light</label>
-                        <select class="op-sel" id="op-plan-dic-light">
+                      <div class="op-field"><label class="op-label" for="op-plan-bf-light">Light</label>
+                        <select class="op-sel" id="op-plan-bf-light">
                           <option value="room" selected>room light</option>
                           <option value="led">LED</option>
                           <option value="none">as it is</option>
@@ -560,11 +560,11 @@
                       {# Set before every frame, so the series is lit the
                          same whatever the Light panel was moved to between
                          them. Empty leaves the LED as it is. #}
-                      <div class="op-field" id="op-plan-dic-led-field" hidden>
-                        <label class="op-label" for="op-plan-dic-led">LED brightness (%)</label>
-                        <input class="op-num-in" id="op-plan-dic-led" type="number" min="1" max="100" step="1" value="1" placeholder="as it is"></div>
-                      <div class="op-field"><label class="op-label" for="op-plan-dic-exposure">Exposure (ms)</label>
-                        <input class="op-num-in" id="op-plan-dic-exposure" type="number" min="1" max="2000" placeholder="camera's"></div>
+                      <div class="op-field" id="op-plan-bf-led-field" hidden>
+                        <label class="op-label" for="op-plan-bf-led">LED brightness (%)</label>
+                        <input class="op-num-in" id="op-plan-bf-led" type="number" min="1" max="100" step="1" value="1" placeholder="as it is"></div>
+                      <div class="op-field"><label class="op-label" for="op-plan-bf-exposure">Exposure (ms)</label>
+                        <input class="op-num-in" id="op-plan-bf-exposure" type="number" min="1" max="2000" placeholder="camera's"></div>
                       {# What the picture is showing right now is usually what
                          the operator wants the run to take: one press copies
                          the LED's brightness and the camera's exposure in. #}
@@ -928,29 +928,29 @@
                         <div class="op-plan-chan">
                           <div class="op-plan-chan-head">
                             <label class="op-plan-chan-name op-plan-check">
-                              <input type="checkbox" id="op-plan-dic"> <span id="op-plan-dic-name">Brightfield overview</span></label>
+                              <input type="checkbox" id="op-plan-bf"> <span id="op-plan-bf-name">Brightfield overview</span></label>
                             <span class="op-cap">one bottom-camera frame of the whole field</span></div>
-                          <div class="op-plan-dic-body" id="op-plan-dic-body" hidden>
-                            <div class="op-field" id="op-plan-dic-every-field"><label class="op-label" for="op-plan-dic-every">Every</label>
+                          <div class="op-plan-bf-body" id="op-plan-bf-body" hidden>
+                            <div class="op-field" id="op-plan-bf-every-field"><label class="op-label" for="op-plan-bf-every">Every</label>
                               <span class="op-plan-pair">
-                                <input class="op-num-in" id="op-plan-dic-every" type="number" min="1" value="1">
+                                <input class="op-num-in" id="op-plan-bf-every" type="number" min="1" value="1">
                                 <span class="op-cap">round(s)</span></span></div>
                             {# Where the frame is taken from: the embryos'
                                centroid, or the fields list. The list itself is
                                in the column on the left and on Bottom cam; the
                                "here" option's text carries its size. #}
-                            <div class="op-field"><label class="op-label" for="op-plan-dic-pos">Taken from</label>
-                              <select class="op-sel" id="op-plan-dic-pos">
+                            <div class="op-field"><label class="op-label" for="op-plan-bf-pos">Taken from</label>
+                              <select class="op-sel" id="op-plan-bf-pos">
                                 <option value="centroid" selected>centroid of the embryos</option>
                                 <option value="here">the fields in the list</option>
                               </select></div>
-                            <div class="op-cap" id="op-plan-dic-pin" hidden></div>
+                            <div class="op-cap" id="op-plan-bf-pin" hidden></div>
                             {# How the frame is lit and exposed, and its dark and
                                flat, are set on the Bottom cam pane beside the live
                                view they are judged on (the Overview frames block).
                                Said back here so the plan reads in one place, with
                                the way there. #}
-                            <div class="op-cap op-plan-dic-setup" id="op-plan-dic-setup"></div>
+                            <div class="op-cap op-plan-bf-setup" id="op-plan-bf-setup"></div>
                           </div>
                         </div>
 

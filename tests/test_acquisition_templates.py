@@ -74,7 +74,7 @@ PLAN = {
     "num_slices": 80,
     "exposure_ms": 12,
     "laser_config": "488 and 561",
-    "dic": {"enabled": True, "every_seconds": 600, "position": None, "exposure_ms": 8},
+    "bf": {"enabled": True, "every_seconds": 600, "position": None, "exposure_ms": 8},
     "stop_conditions": {"embryo_2": "hatching"},
 }
 
@@ -98,7 +98,7 @@ def test_a_saved_plan_reaches_the_orchestrator_whole():
     assert kw["embryo_ids"] == ["embryo_1", "embryo_2"]
     assert kw["base_interval_seconds"] == 300
     assert kw["stop_condition"] == "duration:12h"
-    assert kw["dic"] == PLAN["dic"], "the brightfield channel was dropped on the way"
+    assert kw["bf"] == PLAN["bf"], "the brightfield channel was dropped on the way"
     assert kw["stop_conditions"] == {"embryo_2": "hatching"}, "the per-embryo endings were dropped"
 
 
@@ -134,7 +134,7 @@ def test_a_plan_that_predates_channels_runs_exactly_as_before():
         },
     )
     kw = agent.timelapse_orchestrator.start_kwargs
-    assert "dic" not in kw and "stop_conditions" not in kw
+    assert "bf" not in kw and "stop_conditions" not in kw
     agent.client.set_laser_config.assert_not_awaited()
     assert agent.experiment.embryos["embryo_1"].num_slices == 50
 

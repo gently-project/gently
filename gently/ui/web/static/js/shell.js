@@ -70,7 +70,7 @@ const Shell = (() => {
             status,
             volumes: (st && st.total_timepoints) || 0,
             nextIn: st && st.seconds_until_next_round != null ? st.seconds_until_next_round : null,
-            dicFrames: st && st.dic ? (st.dic.frames || 0) : null,
+            bfFrames: st && st.bf ? (st.bf.frames || 0) : null,
         };
         document.body.dataset.run = status;
         renderStrip();
@@ -92,7 +92,7 @@ const Shell = (() => {
             const s = _run.nextIn;
             bits.push(`next ${s < 1 ? 'now' : s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`}`);
         }
-        if (_run.dicFrames) bits.push(`brightfield ${_run.dicFrames}`);
+        if (_run.bfFrames) bits.push(`brightfield ${_run.bfFrames}`);
         return bits.join(' · ') + ' · ';
     }
 

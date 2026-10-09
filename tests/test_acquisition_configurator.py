@@ -31,9 +31,9 @@ def test_the_pane_asks_only_for_what_the_instrument_cannot_answer():
         "op-plan-slices",
         "op-plan-exposure",
         "op-plan-laser",
-        "op-plan-dic",
-        "op-plan-dic-every",
-        "op-plan-dic-pos",
+        "op-plan-bf",
+        "op-plan-bf-every",
+        "op-plan-bf-pos",
         "op-tl-stop",
         "op-tl-condval",
         "op-plan-overrides",
@@ -88,11 +88,11 @@ def test_taken_from_the_fields_captures_the_stage_when_chosen_not_at_start():
     still makes one from where the stage is at that moment — through the
     same door the rail's button uses, so it is kept and published too."""
     wiring = _wire_body()
-    assert "!_dicPins.length && !addFieldHere()" in wiring
+    assert "!_bfPins.length && !addFieldHere()" in wiring
     add = OPERATE[OPERATE.index("function addFieldHere()") :]
     add = add[: add.index("\n    }")]
     assert "No stage position known yet" in add
-    assert "_dicPins.push({ x: _xy.x, y: _xy.y })" in add
+    assert "_bfPins.push({ x: _xy.x, y: _xy.y })" in add
 
 
 def test_the_sentence_sits_beside_start_not_atop_a_scrolling_panel():
@@ -118,7 +118,7 @@ def test_the_plan_is_pure():
 
 def test_hidden_actually_hides_the_plans_panels():
     """`[hidden]` is specificity 0,1,0; a class rule that sets display beats it."""
-    for cls in (".op-plan-say", ".op-plan-dic-body"):
+    for cls in (".op-plan-say", ".op-plan-bf-body"):
         rule = re.search(re.escape(cls) + r"\s*\{[^}]*display:", CSS)
         if rule:
             assert re.search(re.escape(cls) + r"\[hidden\]\s*\{[^}]*display:\s*none", CSS), (

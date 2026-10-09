@@ -38,7 +38,7 @@ WHAT: dict[str, str] = {
     "volume": "file",
     "projection": "file",
     "snapshots": "folder",
-    "dic": "file",
+    "bf": "file",
     "calibration_run": "folder",
     "calibration_image": "file",
     "removed": "folder",
@@ -191,9 +191,9 @@ def create_router(server) -> APIRouter:
                 return Path(projection)
             raise _missing(f"{eid} t{tp} is not on disk in session {sid}")
 
-        if what == "dic":
+        if what == "bf":
             _, sid = _session_dir(store, req)
-            for rec in store.list_snapshots(sid, "dic"):
+            for rec in store.list_snapshots(sid, "bf"):
                 fp = rec.get("file_path")
                 if fp and Path(fp).stem == req.stem:
                     return Path(fp)

@@ -3,7 +3,7 @@
 CI runs no JavaScript and no browser, so what the pane and the tab need in
 order to work is pinned as source. The status route the pane reads is tested
 in tests/test_timelapse_start_route.py; the thumbnail on the event in
-tests/test_dic_overview.py.
+tests/test_bf_overview.py.
 """
 
 from __future__ import annotations
@@ -73,15 +73,15 @@ def test_the_moments_of_a_run_redraw_it():
     assert "scheduleRenderRun()" in wiring
 
 
-def test_the_dic_strip_exists_and_is_fed_by_the_event():
-    assert 'id="dic-strip"' in HTML and 'id="dic-strip-frames"' in HTML
-    assert "ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data))" in EMBRYOS
-    fn = EMBRYOS[EMBRYOS.index("handleDicFrame(data) {") :][:1400]
-    assert "data.source !== 'dic'" in fn, "any IMAGE_ACQUIRED would land on the brightfield strip"
+def test_the_bf_strip_exists_and_is_fed_by_the_event():
+    assert 'id="bf-strip"' in HTML and 'id="bf-strip-frames"' in HTML
+    assert "ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleBfFrame(data))" in EMBRYOS
+    fn = EMBRYOS[EMBRYOS.index("handleBfFrame(data) {") :][:1400]
+    assert "data.source !== 'bf'" in fn, "any IMAGE_ACQUIRED would land on the brightfield strip"
     assert "data:image/png;base64," in fn
-    render = EMBRYOS[EMBRYOS.index("renderDicStrip() {") :][:2400]
+    render = EMBRYOS[EMBRYOS.index("renderBfStrip() {") :][:2400]
     assert "slice(-12)" in render, "the strip keeps every frame in the DOM"
 
 
 def test_hidden_actually_hides_the_strip():
-    assert ".dic-strip[hidden] { display: none; }" in MAIN_CSS
+    assert ".bf-strip[hidden] { display: none; }" in MAIN_CSS

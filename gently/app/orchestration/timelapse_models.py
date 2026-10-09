@@ -342,7 +342,7 @@ class StopCondition:
 
 
 @dataclass
-class DicOverview:
+class BfOverview:
     """One bottom-camera (brightfield) frame of the whole field, per round.
 
     The second channel of a Gently timelapse. Not a per-embryo thing: the
@@ -425,8 +425,8 @@ class DicOverview:
         return int(value)
 
     @classmethod
-    def from_dict(cls, d: Any) -> "DicOverview":
-        if isinstance(d, DicOverview):
+    def from_dict(cls, d: Any) -> "BfOverview":
+        if isinstance(d, BfOverview):
             return d
         if not isinstance(d, dict):
             return cls()
@@ -484,7 +484,7 @@ class TimelapseState:
     seconds_until_next_round: float | None = None
     error_message: str | None = None
     # The brightfield overview channel, when the run has one: frames taken, next due.
-    dic: dict[str, Any] | None = None
+    bf: dict[str, Any] | None = None
     # False for a brightfield-only run: the overview channel is the run, and
     # no embryo is imaged by the SPIM head.
     volumes: bool = True
@@ -516,6 +516,6 @@ class TimelapseState:
                 for eid, e in self.embryos.items()
             },
             "error": self.error_message,
-            "dic": self.dic,
+            "bf": self.bf,
             "volumes": self.volumes,
         }

@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from gently.app.orchestration.timelapse import TimelapseOrchestrator
-from gently.app.orchestration.timelapse_models import DicOverview
+from gently.app.orchestration.timelapse_models import BfOverview
 from gently.harness.state import ExperimentState
 
 
@@ -48,7 +48,7 @@ def _client(tmp_path: Path):
     c.acquire_volume = AsyncMock(return_value={"success": True, "volume": None})
     c.capture_lightsheet_image = AsyncMock(return_value={"success": True, "image": None})
     # The overview's light: already on, so these tests are about the frame and
-    # not about switching (tests/test_dic_light.py is about switching).
+    # not about switching (tests/test_bf_light.py is about switching).
     c.get_room_light_status = AsyncMock(return_value={"success": True, "state": "on"})
     c.set_room_light = AsyncMock(return_value={"success": True})
     c.set_led = AsyncMock(return_value={"success": True})
@@ -59,7 +59,7 @@ def _client(tmp_path: Path):
         import numpy as np
 
         frames["n"] += 1
-        p = tmp_path / "incoming" / f"dic{frames['n']}.tif"
+        p = tmp_path / "incoming" / f"bf{frames['n']}.tif"
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"II*\0")  # enough to exist; nothing reads it
         # A frame the size of the real camera's, so the thumbnail path runs.
@@ -128,12 +128,12 @@ def _calls(orch, name):
 # ---------------------------------------------------------------------------
 
 
-def test_without_a_dic_channel_nothing_touches_the_bottom_camera(tmp_path):
+def test_without_a_bf_channel_nothing_touches_the_bottom_camera(tmp_path):
     orch = _orchestrator(tmp_path)
     asyncio.run(_run(orch, 0.5))
     assert not _calls(orch, "capture_bottom_image")
     assert len(_calls(orch, "acquire_volume")) >= 3, "the volumes still ran"
-    assert orch.get_status().dic is None
+    assert orch.get_status().bf is None
 
 
 def test_the_overview_goes_first_and_is_taken_from_the_centroid(tmp_path):
@@ -141,7 +141,7 @@ def test_the_overview_goes_first_and_is_taken_from_the_centroid(tmp_path):
     # starts where the volumes do; and absent a pinned spot it is taken from
     # the centroid of the subjects — the one place that is the same for all.
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.5, dic=DicOverview(enabled=True, every_seconds=100)))
+    asyncio.run(_run(orch, 0.5, bf=BfOverview(enabled=True, every_seconds=100)))
     names = [c[0] for c in orch.client.method_calls]
     first_capture = names.index("capture_bottom_image")
     first_volume = names.index("acquire_volume")
@@ -156,16 +156,16 @@ def test_one_frame_per_its_own_interval_not_per_embryo(tmp_path):
     # Three embryos at 0.15 s each; the overview every 100 s. Over half a
     # second the embryos are imaged many times and the field exactly once.
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.6, dic={"enabled": True, "every_seconds": 100}))
+    asyncio.run(_run(orch, 0.6, bf={"enabled": True, "every_seconds": 100}))
     assert len(_calls(orch, "capture_bottom_image")) == 1
     assert len(_calls(orch, "acquire_volume")) >= 4
-    assert orch.get_status().dic["frames"] == 1
+    assert orch.get_status().bf["frames"] == 1
 
 
 def test_the_overview_keeps_its_own_clock(tmp_path):
     # Every 0.2 s over ~0.65 s: three or four frames, and never one per volume.
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.65, dic=DicOverview(enabled=True, every_seconds=0.2)))
+    asyncio.run(_run(orch, 0.65, bf=BfOverview(enabled=True, every_seconds=0.2)))
     frames = len(_calls(orch, "capture_bottom_image"))
     volumes = len(_calls(orch, "acquire_volume"))
     assert 2 <= frames <= 5, frames
@@ -187,7 +187,7 @@ def test_a_pinned_position_wins_over_the_centroid(tmp_path):
         _run(
             orch,
             0.3,
-            dic=DicOverview(enabled=True, every_seconds=100, position={"x": 1.0, "y": 2.0}),
+            bf=BfOverview(enabled=True, every_seconds=100, position={"x": 1.0, "y": 2.0}),
         )
     )
     names = [c[0] for c in orch.client.method_calls]
@@ -198,22 +198,22 @@ def test_a_pinned_position_wins_over_the_centroid(tmp_path):
 
 def test_frames_are_filed_beside_the_sessions_snapshots(tmp_path):
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.3, dic=DicOverview(enabled=True, every_seconds=100, exposure_ms=8.0)))
+    asyncio.run(_run(orch, 0.3, bf=BfOverview(enabled=True, every_seconds=100, exposure_ms=8.0)))
     st = orch._store
     assert st.register_snapshot.call_count == 1
     args, kwargs = st.register_snapshot.call_args
-    assert args[0] == "s1" and args[1] == "dic"
+    assert args[0] == "s1" and args[1] == "bf"
     meta = kwargs["metadata"]
-    assert meta["channel"] == "dic" and meta["frame"] == 1 and meta["exposure_ms"] == 8.0
-    assert (tmp_path / "sessions" / "s1" / "snapshots" / "dic_dic1.tif").exists()
+    assert meta["channel"] == "bf" and meta["frame"] == 1 and meta["exposure_ms"] == 8.0
+    assert (tmp_path / "sessions" / "s1" / "snapshots" / "bf_bf1.tif").exists()
 
 
 def test_a_failed_frame_does_not_take_the_volumes_down(tmp_path):
     orch = _orchestrator(tmp_path)
     orch.client.capture_bottom_image = AsyncMock(side_effect=RuntimeError("camera busy"))
-    asyncio.run(_run(orch, 0.5, dic=DicOverview(enabled=True, every_seconds=0.1)))
+    asyncio.run(_run(orch, 0.5, bf=BfOverview(enabled=True, every_seconds=0.1)))
     assert len(_calls(orch, "acquire_volume")) >= 3, "the experiment carried on"
-    assert orch.get_status().dic["frames"] == 0
+    assert orch.get_status().bf["frames"] == 0
     assert orch.get_status().status.value in ("stopped", "completed", "idle")
 
 
@@ -252,18 +252,18 @@ def test_the_overview_survives_a_restart(tmp_path):
         _run(
             orch,
             0.3,
-            dic=DicOverview(enabled=True, every_seconds=100, position={"x": 1.0, "y": 2.0}),
+            bf=BfOverview(enabled=True, every_seconds=100, position={"x": 1.0, "y": 2.0}),
         )
     )
     doc = orch._serialize_runtime_state()
-    assert doc["dic"]["enabled"] is True and doc["dic"]["position"] == {"x": 1.0, "y": 2.0}
-    assert doc["dic_frames"] == 1
+    assert doc["bf"]["enabled"] is True and doc["bf"]["position"] == {"x": 1.0, "y": 2.0}
+    assert doc["bf_frames"] == 1
 
     fresh = _orchestrator(tmp_path)
     fresh._apply_runtime_state(doc)
-    assert fresh._dic is not None and fresh._dic.position == {"x": 1.0, "y": 2.0}
-    assert fresh._dic_frames == 1
-    assert fresh._dic_next_due_at is not None
+    assert fresh._bf is not None and fresh._bf.position == {"x": 1.0, "y": 2.0}
+    assert fresh._bf_frames == 1
+    assert fresh._bf_next_due_at is not None
 
 
 def test_the_trace_dir_follows_the_storage_root_at_call_time(tmp_path, monkeypatch):
@@ -279,19 +279,17 @@ def test_the_trace_dir_follows_the_storage_root_at_call_time(tmp_path, monkeypat
     assert "Gently3" not in str(orch._trace_dir)
 
 
-def test_dic_overview_round_trips_through_a_dict():
-    d = DicOverview(enabled=True, every_seconds=300.0, position={"x": 1, "y": 2}, exposure_ms=5.0)
-    assert DicOverview.from_dict(d.to_dict()) == d
-    assert DicOverview.from_dict(None).enabled is False
-    assert (
-        DicOverview.from_dict({"enabled": True, "position": {"x": None, "y": 3}}).position is None
-    )
+def test_bf_overview_round_trips_through_a_dict():
+    d = BfOverview(enabled=True, every_seconds=300.0, position={"x": 1, "y": 2}, exposure_ms=5.0)
+    assert BfOverview.from_dict(d.to_dict()) == d
+    assert BfOverview.from_dict(None).enabled is False
+    assert BfOverview.from_dict({"enabled": True, "position": {"x": None, "y": 3}}).position is None
 
 
 @pytest.mark.parametrize("bad", [{"enabled": True, "every_seconds": "soon"}])
-def test_dic_overview_rejects_a_non_number_interval(bad):
+def test_bf_overview_rejects_a_non_number_interval(bad):
     with pytest.raises((TypeError, ValueError)):
-        DicOverview.from_dict(bad)
+        BfOverview.from_dict(bad)
 
 
 def test_the_frame_event_carries_a_thumbnail_the_tab_can_show(tmp_path):
@@ -303,10 +301,10 @@ def test_the_frame_event_carries_a_thumbnail_the_tab_can_show(tmp_path):
     bus = get_event_bus()
     bus.subscribe(EventType.IMAGE_ACQUIRED, lambda ev: seen.append(ev))
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.3, dic=DicOverview(enabled=True, every_seconds=100)))
-    dic = [e for e in seen if (getattr(e, "data", None) or {}).get("source") == "dic"]
-    assert dic, "no IMAGE_ACQUIRED for the overview"
-    data = dic[0].data
+    asyncio.run(_run(orch, 0.3, bf=BfOverview(enabled=True, every_seconds=100)))
+    bf = [e for e in seen if (getattr(e, "data", None) or {}).get("source") == "bf"]
+    assert bf, "no IMAGE_ACQUIRED for the overview"
+    data = bf[0].data
     assert data["frame"] == 1 and data["embryo_id"] is None
     assert isinstance(data["image_b64"], str) and len(data["image_b64"]) > 100
     assert len(data["image_b64"]) < 400_000, "that is not a thumbnail"
@@ -322,7 +320,7 @@ def test_two_pinned_positions_are_visited_in_turn_each_frame_filed_with_its_fiel
         _run(
             orch,
             0.3,
-            dic=DicOverview(
+            bf=BfOverview(
                 enabled=True,
                 every_seconds=100,
                 positions=[{"x": 1.0, "y": 2.0}, {"x": 900.0, "y": 2.0}],
@@ -343,36 +341,36 @@ def test_two_pinned_positions_are_visited_in_turn_each_frame_filed_with_its_fiel
     assert [(m["frame"], m["field"], m["fields"]) for m in metas] == [(1, 1, 2), (1, 2, 2)]
     assert [m["position"] for m in metas] == [{"x": 1.0, "y": 2.0}, {"x": 900.0, "y": 2.0}]
     # and it is one frame of the overview, not two
-    assert orch.get_status().dic["frames"] == 1
+    assert orch.get_status().bf["frames"] == 1
 
 
 def test_positions_round_trip_and_the_first_is_the_position():
-    dic = DicOverview.from_dict(
+    bf = BfOverview.from_dict(
         {"enabled": True, "positions": [{"x": 1, "y": 2}, {"x": "3", "y": 4.5}, {"x": None}]}
     )
-    assert dic.positions == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.5}]
-    assert dic.position == {"x": 1.0, "y": 2.0}
-    assert dic.fields() == dic.positions
-    back = DicOverview.from_dict(dic.to_dict())
-    assert back.positions == dic.positions and back.position == dic.position
+    assert bf.positions == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.5}]
+    assert bf.position == {"x": 1.0, "y": 2.0}
+    assert bf.fields() == bf.positions
+    back = BfOverview.from_dict(bf.to_dict())
+    assert back.positions == bf.positions and back.position == bf.position
     # One position is one field, as it always was; none is "wherever the stage is".
-    one = DicOverview(enabled=True, position={"x": 5.0, "y": 6.0})
+    one = BfOverview(enabled=True, position={"x": 5.0, "y": 6.0})
     assert one.fields() == [{"x": 5.0, "y": 6.0}] and one.positions == [{"x": 5.0, "y": 6.0}]
-    assert DicOverview(enabled=True).fields() == [None]
+    assert BfOverview(enabled=True).fields() == [None]
 
 
 def test_the_plan_route_takes_a_list_of_positions():
     from fastapi import HTTPException
 
-    from gently.ui.web.routes.data import _parse_dic_config
+    from gently.ui.web.routes.data import _parse_bf_config
 
-    out = _parse_dic_config({"enabled": True, "positions": [{"x": 1, "y": 2}, {"x": 3, "y": 4}]})
+    out = _parse_bf_config({"enabled": True, "positions": [{"x": 1, "y": 2}, {"x": 3, "y": 4}]})
     assert out["positions"] == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]
     assert out["position"] == {"x": 1.0, "y": 2.0}
     with pytest.raises(HTTPException):
-        _parse_dic_config({"enabled": True, "positions": [{"x": 1}]})
+        _parse_bf_config({"enabled": True, "positions": [{"x": 1}]})
     with pytest.raises(HTTPException):
-        _parse_dic_config({"enabled": True, "positions": {"x": 1, "y": 2}})
+        _parse_bf_config({"enabled": True, "positions": {"x": 1, "y": 2}})
 
 
 # "how reliable is the thing like next frame indicator? why it does not seem
@@ -384,7 +382,7 @@ def test_the_next_frame_is_due_one_interval_after_the_last_was_due_not_done(tmp_
     from datetime import datetime, timedelta
 
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.2, dic=DicOverview(enabled=True, every_seconds=100)))
+    asyncio.run(_run(orch, 0.2, bf=BfOverview(enabled=True, every_seconds=100)))
     taking = orch.client.capture_bottom_image
 
     async def slow(*a, **k):
@@ -393,22 +391,22 @@ def test_the_next_frame_is_due_one_interval_after_the_last_was_due_not_done(tmp_
 
     orch.client.capture_bottom_image = AsyncMock(side_effect=slow)
     due = datetime.now() - timedelta(seconds=1)
-    orch._dic_next_due_at = due
-    asyncio.run(orch._capture_dic_overview())
-    assert orch._dic_next_due_at == due + timedelta(seconds=100), "from when it was due"
+    orch._bf_next_due_at = due
+    asyncio.run(orch._capture_bf_overview())
+    assert orch._bf_next_due_at == due + timedelta(seconds=100), "from when it was due"
     # A capture that overran its interval is followed at once, never scheduled in the past.
-    orch._dic.every_seconds = 0.01
+    orch._bf.every_seconds = 0.01
     before = datetime.now()
-    orch._dic_next_due_at = before - timedelta(seconds=1)
-    asyncio.run(orch._capture_dic_overview())
-    assert before <= orch._dic_next_due_at <= datetime.now()
+    orch._bf_next_due_at = before - timedelta(seconds=1)
+    asyncio.run(orch._capture_bf_overview())
+    assert before <= orch._bf_next_due_at <= datetime.now()
 
 
 def test_in_a_brightfield_run_the_frame_is_the_round(tmp_path):
     # "why it shows round 146, but shows 148 frames?" — the loop's counter
     # starts at -1 and steps after the capture, so it ran two behind.
     orch = _orchestrator(tmp_path)
-    asyncio.run(_run(orch, 0.45, volumes=False, dic=DicOverview(enabled=True, every_seconds=0.1)))
+    asyncio.run(_run(orch, 0.45, volumes=False, bf=BfOverview(enabled=True, every_seconds=0.1)))
     metas = [kw["metadata"] for _, kw in orch._store.register_snapshot.call_args_list]
     assert len(metas) >= 2
     assert all(m["round"] == m["frame"] for m in metas), [(m["frame"], m["round"]) for m in metas]

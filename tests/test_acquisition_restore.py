@@ -40,7 +40,7 @@ PLAN = {
     "num_slices": 40,
     "exposure_ms": 12.0,
     "laser_config": "488 only",
-    "dic": {"enabled": True, "every_seconds": None, "position": None, "exposure_ms": None},
+    "bf": {"enabled": True, "every_seconds": None, "position": None, "exposure_ms": None},
     "stop_conditions": {"embryo_2": "timepoints:12"},
     "embryo_ids": ["embryo_1", "embryo_2"],
 }
@@ -81,7 +81,7 @@ def test_a_session_that_predates_the_plan_file_reads_its_checkpoint(store):
         "status": "running",
         "base_interval_seconds": 300.0,
         "active_monitoring_modes": [],
-        "dic": {"enabled": True, "every_seconds": 600.0, "position": None, "exposure_ms": 20.0},
+        "bf": {"enabled": True, "every_seconds": 600.0, "position": None, "exposure_ms": 20.0},
         "embryos": {
             "embryo_1": {"stop_condition": {"spec": "stages(hatched,hatching)"}},
             "embryo_2": {"stop_condition": {"spec": "timepoints:12"}},
@@ -96,7 +96,7 @@ def test_a_session_that_predates_the_plan_file_reads_its_checkpoint(store):
     assert plan["cadence_s"] == 300.0
     assert plan["stop_condition"] == "stages(hatched,hatching)", "the ending most share"
     assert plan["stop_conditions"] == {"embryo_2": "timepoints:12"}, "the one that differs"
-    assert plan["dic"]["every_seconds"] == 600.0
+    assert plan["bf"]["every_seconds"] == 600.0
     assert plan["num_slices"] == 50 and plan["exposure_ms"] == 10.0
     assert plan["embryo_ids"] == ["embryo_1", "embryo_2", "embryo_3"]
 
@@ -187,7 +187,7 @@ def test_starting_a_run_keeps_its_plan(store):
         "num_slices": 40,
         "exposure_ms": 12,
         "laser_config": "488 only",
-        "dic": {"enabled": True},
+        "bf": {"enabled": True},
         "stop_conditions": {"embryo_2": "timepoints:12"},
         "monitoring_mode": "expression_monitoring",
     }
@@ -198,7 +198,7 @@ def test_starting_a_run_keeps_its_plan(store):
     assert kept["cadence_s"] == 300.0
     assert kept["num_slices"] == 40 and kept["exposure_ms"] == 12.0
     assert kept["laser_config"] == "488 only"
-    assert kept["dic"]["enabled"] is True
+    assert kept["bf"]["enabled"] is True
     assert kept["stop_conditions"] == {"embryo_2": "timepoints:12"}
     assert kept["monitoring_mode"] == "expression_monitoring"
 
@@ -245,17 +245,17 @@ def test_fill_is_the_inverse_of_read():
         "op-plan-slices",
         "op-plan-exposure",
         "op-plan-laser",
-        "op-plan-dic",
-        "op-plan-dic-every",
-        "op-plan-dic-pos",
-        "op-plan-dic-exposure",
+        "op-plan-bf",
+        "op-plan-bf-every",
+        "op-plan-bf-pos",
+        "op-plan-bf-exposure",
         "op-tl-stop",
         "op-tl-condval",
         "op-tl-monitor",
     ):
         assert f"'{field}'" in fn, f"fillPlan never sets {field}"
     assert "renderOverrideRows();" in fn and "plan.overrides.forEach" in fn
-    assert "_dicPins = plan.dic.position === 'here'" in fn
+    assert "_bfPins = plan.bf.position === 'here'" in fn
 
 
 def test_the_pane_says_where_the_plan_came_from():

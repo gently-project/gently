@@ -290,22 +290,22 @@ def test_timelapse_start_requires_control():
 # ---------------------------------------------------------------------------
 
 
-def test_a_plan_without_dic_calls_start_exactly_as_before():
-    """A run with no brightfield channel must not grow a `dic=` kwarg — the old
+def test_a_plan_without_bf_calls_start_exactly_as_before():
+    """A run with no brightfield channel must not grow a `bf=` kwarg — the old
     assertions above are the contract, and this keeps them honest."""
     orch = _make_orchestrator()
     _app(orch).post("/api/devices/timelapse/start", json={"interval_seconds": 60})
     kwargs = orch.start.await_args.kwargs
-    assert "dic" not in kwargs and "stop_conditions" not in kwargs
+    assert "bf" not in kwargs and "stop_conditions" not in kwargs
 
 
-def test_dic_channel_is_forwarded_validated():
+def test_bf_channel_is_forwarded_validated():
     orch = _make_orchestrator()
     r = _app(orch).post(
         "/api/devices/timelapse/start",
         json={
             "interval_seconds": 300,
-            "dic": {
+            "bf": {
                 "enabled": True,
                 "every_seconds": 600,
                 "position": {"x": -500, "y": -400},
@@ -314,39 +314,39 @@ def test_dic_channel_is_forwarded_validated():
         },
     )
     assert r.status_code == 200, r.text
-    dic = orch.start.await_args.kwargs["dic"]
-    assert dic == {
+    bf = orch.start.await_args.kwargs["bf"]
+    assert bf == {
         "enabled": True,
         "every_seconds": 600.0,
         "position": {"x": -500.0, "y": -400.0},
         "exposure_ms": 8.0,
         "light": "room",
     }
-    assert r.json()["dic"] == dic
+    assert r.json()["bf"] == bf
 
 
-def test_dic_disabled_is_the_same_as_absent():
+def test_bf_disabled_is_the_same_as_absent():
     orch = _make_orchestrator()
     _app(orch).post(
-        "/api/devices/timelapse/start", json={"dic": {"enabled": False, "every_seconds": 5}}
+        "/api/devices/timelapse/start", json={"bf": {"enabled": False, "every_seconds": 5}}
     )
-    assert "dic" not in orch.start.await_args.kwargs
+    assert "bf" not in orch.start.await_args.kwargs
 
 
-def test_dic_interval_must_be_positive():
+def test_bf_interval_must_be_positive():
     orch = _make_orchestrator()
     r = _app(orch).post(
-        "/api/devices/timelapse/start", json={"dic": {"enabled": True, "every_seconds": 0}}
+        "/api/devices/timelapse/start", json={"bf": {"enabled": True, "every_seconds": 0}}
     )
     assert r.status_code == 400
     assert "every_seconds" in r.json()["detail"]
     orch.start.assert_not_awaited()
 
 
-def test_dic_position_must_be_xy():
+def test_bf_position_must_be_xy():
     orch = _make_orchestrator()
     r = _app(orch).post(
-        "/api/devices/timelapse/start", json={"dic": {"enabled": True, "position": {"x": 1}}}
+        "/api/devices/timelapse/start", json={"bf": {"enabled": True, "position": {"x": 1}}}
     )
     assert r.status_code == 400
     orch.start.assert_not_awaited()
@@ -401,7 +401,7 @@ def _running(orch):
         last_error=None,
     )
     state = SimpleNamespace(
-        embryos={"embryo_1": e1}, to_dict=lambda: {"status": "running", "dic": {"frames": 2}}
+        embryos={"embryo_1": e1}, to_dict=lambda: {"status": "running", "bf": {"frames": 2}}
     )
     orch.get_status = MagicMock(return_value=state)
     orch.stop_embryo = AsyncMock(return_value="Stopped imaging embryo_1 (reason: user_request)")
@@ -414,7 +414,7 @@ def test_status_gives_the_pane_its_embryo_rows():
     r = _app(orch).get("/api/devices/timelapse/status")
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["status"] == "running" and body["dic"] == {"frames": 2}
+    assert body["status"] == "running" and body["bf"] == {"frames": 2}
     row = body["embryos"]["embryo_1"]
     assert row["timepoints"] == 4
     assert row["stop_condition"] == "timepoints:12"

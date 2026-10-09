@@ -166,8 +166,8 @@ const Reveal = (() => {
                 n: Number(m[3]),
             };
         }
-        m = url.match(/\/api\/dic\/frames\/([^/?]+)\.png/);
-        if (m) return { what: 'dic', stem: decodeURIComponent(m[1]) };
+        m = url.match(/\/api\/bf\/frames\/([^/?]+)\.png/);
+        if (m) return { what: 'bf', stem: decodeURIComponent(m[1]) };
         const md = img.metadata || {};
         const tp = md.timepoint;
         if (md.embryo_id && tp !== undefined && tp !== null && Number.isFinite(Number(tp))) {
