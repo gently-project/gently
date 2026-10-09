@@ -27,7 +27,12 @@ from gently.core.hub_dataset import (  # noqa: E402
 
 
 def _export(
-    tmp_path, folder="20261007_1833_two_b1ffda4e", fields=(1, 2), frames=3, embryos=("embryo_1",)
+    tmp_path,
+    folder="20261007_1833_two_b1ffda4e",
+    fields=(1, 2),
+    frames=3,
+    embryos=("embryo_1",),
+    channel="bf",
 ):
     """An export folder as gently.core.export lays it out, small."""
     import tifffile
@@ -49,17 +54,17 @@ def _export(
         (root / name).write_text(name, encoding="utf-8")
     (root / "embryo_1" / "volumes").mkdir(parents=True)
     (root / "embryo_1" / "volumes" / "embryo_1_t0001.tif").write_bytes(b"not for the hub")
-    dic = root / "dic"
+    chan = root / channel
     for n in fields:
-        fd = dic / f"field_{n}" if len(fields) > 1 else dic
+        fd = chan / f"field_{n}" if len(fields) > 1 else chan
         fd.mkdir(parents=True, exist_ok=True)
         rows = []
         for i in range(1, frames + 1):
-            name = f"dic_f{i:04d}_20261007-18{i:02d}00.tif"
+            name = f"{channel}_f{i:04d}_20261007-18{i:02d}00.tif"
             tifffile.imwrite(fd / name, np.zeros((4, 6), dtype=np.uint16))
             rows.append(
                 {
-                    "file": f"dic/{f'field_{n}/' if len(fields) > 1 else ''}{name}",
+                    "file": f"{channel}/{f'field_{n}/' if len(fields) > 1 else ''}{name}",
                     "frame": i,
                     "field": n,
                     "captured_at": f"2026-10-07T18:{i:02d}:00",
@@ -67,7 +72,7 @@ def _export(
                     "dark": "../references/r/dark.tif",
                 }
             )
-        with open(fd / "dic.csv", "w", newline="", encoding="utf-8") as f:
+        with open(fd / f"{channel}.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(rows[0]))
             w.writeheader()
             w.writerows(rows)
@@ -92,7 +97,7 @@ class TestWhatIsThere:
 
     def test_a_single_field_export_has_one_field_at_dic_itself(self, tmp_path):
         s = discover(_export(tmp_path, folder="20261006_1001_one_d4f9ebe1", fields=(1,)))
-        assert len(s.fields) == 1 and s.fields[0].rel == "" and s.fields[0].folder.name == "dic"
+        assert len(s.fields) == 1 and s.fields[0].rel == "" and s.fields[0].folder.name == "bf"
 
     def test_not_an_export(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -104,13 +109,13 @@ class TestWhatGoesWhere:
         s = discover(_export(tmp_path))
         where = plan([s])
         in_repo = [r for _, r in where]
-        assert "sessions/20261007_1833_two_b1ffda4e/dic" in in_repo
+        assert "sessions/20261007_1833_two_b1ffda4e/bf" in in_repo
         assert "sessions/20261007_1833_two_b1ffda4e/metadata" in in_repo
         assert "sessions/20261007_1833_two_b1ffda4e/README.txt" in in_repo
         assert "sessions/20261007_1833_two_b1ffda4e/embryos.csv" in in_repo
         assert not any("volumes" in r or "embryo_1/" in r for r in in_repo)
         local = {r: p for p, r in where}
-        assert local["sessions/20261007_1833_two_b1ffda4e/dic"] == s.root / "dic"
+        assert local["sessions/20261007_1833_two_b1ffda4e/bf"] == s.root / "bf"
 
     def test_the_fields_frame_table_in_the_hubs_shape(self, tmp_path):
         s = discover(_export(tmp_path))
@@ -118,7 +123,7 @@ class TestWhatGoesWhere:
         assert out == s.fields[0].folder / "metadata.csv"
         rows = list(csv.DictReader(open(out, encoding="utf-8")))
         assert [r["file_name"] for r in rows] == [
-            f"dic_f000{i}_20261007-180{i}00.tif" for i in (1, 2, 3)
+            f"bf_f000{i}_20261007-180{i}00.tif" for i in (1, 2, 3)
         ]
         assert (
             "file" not in rows[0]
@@ -168,10 +173,10 @@ class TestTheCard:
         assert "| `20261007_1833_two_b1ffda4e` | two fields |" in body
         assert "(raw - dark) / (flat - dark)" in body
         assert (
-            'load_dataset("imagefolder", data_dir="sessions/20261007_1833_two_b1ffda4e/dic/'
+            'load_dataset("imagefolder", data_dir="sessions/20261007_1833_two_b1ffda4e/bf/'
             'field_1/embryos/embryo_1")' in body
         )
-        assert 'data_dir="sessions/20261007_1833_two_b1ffda4e/dic/field_1")' in body
+        assert 'data_dir="sessions/20261007_1833_two_b1ffda4e/bf/field_1")' in body
         assert "gently-project/celegans-brightfield" in body
 
     def test_the_tool_plans_without_the_hub(self, tmp_path, capsys):
@@ -186,5 +191,28 @@ class TestTheCard:
         root = _export(tmp_path)
         assert mod.main(["plan", str(root), "--repo", "org/name"]) == 0
         out = capsys.readouterr().out
-        assert "sessions/20261007_1833_two_b1ffda4e/dic" in out and "<- written at upload" in out
-        assert not (root / "dic" / "field_1" / "metadata.csv").exists(), "plan writes nothing"
+        assert "sessions/20261007_1833_two_b1ffda4e/bf" in out and "<- written at upload" in out
+        assert not (root / "bf" / "field_1" / "metadata.csv").exists(), "plan writes nothing"
+
+
+class TestTheOlderNameAndTheRandomOne:
+    def test_an_export_from_before_the_rename_reads_the_same_and_lands_as_bf(self, tmp_path):
+        """The two exports already on the share were made when the channel was
+        called dic. They are read as they are and go to the repo as bf/."""
+        root = _export(tmp_path, folder="20261006_1001_one_d4f9ebe1", fields=(1,), channel="dic")
+        s = discover(root)
+        assert s.channel == "dic" and s.fields[0].folder == root / "dic" and s.frames == 3
+        assert [r for _, r in plan([s])][-1] == "sessions/20261006_1001_one_d4f9ebe1/bf"
+        out = field_metadata_csv(s.fields[0].folder)
+        rows = list(csv.DictReader(open(out, encoding="utf-8")))
+        assert rows[0]["file_name"] == "dic_f0001_20261007-180100.tif"
+
+    def test_frames_with_random_names_are_refused(self, tmp_path):
+        """ "file names that were like random characters … we would rather
+        have something that is sortable easily as per the timepoints"."""
+        import tifffile
+
+        root = _export(tmp_path, folder="20261002_1329_first_73a58424", fields=(1,))
+        tifffile.imwrite(root / "bf" / "bf_05b7f925dae8.tif", np.zeros((4, 6), dtype=np.uint16))
+        with pytest.raises(ValueError, match="not named by frame number and time"):
+            discover(root)

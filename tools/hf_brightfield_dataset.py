@@ -7,7 +7,7 @@
 
 ``plan`` says what would go where and writes nothing to the Hub. ``upload``
 creates the repository if it is not there, writes ``metadata.csv`` beside
-each field's ``dic.csv`` (so the full frames load as an image folder), the
+each field's ``bf.csv`` (so the full frames load as an image folder), the
 ``sessions.csv`` and the card, and uploads straight from the export folders.
 A second ``upload`` of the same exports adds and replaces, never removes.
 
@@ -50,7 +50,7 @@ def cmd_plan(args) -> int:
     print("  sessions.csv, README.md             <- written at upload")
     for s in exports:
         for f in s.fields:
-            print(f"  {f.folder / 'metadata.csv'}  <- written beside dic.csv at upload")
+            print(f"  {f.folder / 'metadata.csv'}  <- written beside {f.table.name} at upload")
     return 0
 
 
