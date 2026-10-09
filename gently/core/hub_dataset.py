@@ -11,14 +11,22 @@ table of what is there, and a card at the top.
     sessions/<session>/
         README.txt  embryos.csv  stage_calls.csv  events.csv  temperature.csv
         metadata/               the session's own files, as kept
-        dic/                    the export's dic/ folder, as it is:
+        bf/                     the export's brightfield folder, as it is:
             [field_1/ field_2/ …]   one series per field when there are several
-                dic_f0001_….tif …   the full frames, 16-bit
-                dic.csv  metadata.csv   the table; metadata.csv is the Hub's name
+                bf_f0001_….tif …    the full frames, 16-bit, named by frame
+                                    number and time so a sort is time order
+                bf.csv  metadata.csv    the table; metadata.csv is the Hub's name
                                         for it (file_name = the frame)
-                dic.avi  dic_corrected.avi
+                bf.avi  bf_corrected.avi
                 embryos/<embryo>/raw/ corrected/ metadata.csv …
             references/<record>/dark.tif flat.tif
+
+The channel was called ``dic`` before it was called ``bf``; an export made
+then has a ``dic/`` folder, ``dic.csv`` and ``dic_f0001_…`` frames. It is
+read the same and lands in the repo as ``bf/``, frame names as they are:
+the scheme is the one scheme, only the prefix differs. A frame named any
+other way (the session's own random names, say) is refused, since the
+point of the names is that a sort is time order.
 
 Nothing is copied to make this: an upload goes straight from the export
 folders, each to its place in the repo. The SPIM volumes are not part of
@@ -28,11 +36,16 @@ it; this is the brightfield data.
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+# The channel's folder and prefix, newest first; an export has one of them.
+CHANNELS = ("bf", "dic")
+FRAME_NAME = re.compile(r"^(bf|dic)_f\d{4}(_\d{8}-\d{6})?\.tif$")
 
 SESSION_FILES = (
     "README.txt",
@@ -45,17 +58,23 @@ SESSION_FILES = (
 
 @dataclass
 class FieldExport:
-    """One series of full frames: an export's ``dic/`` or ``dic/field_n/``."""
+    """One series of full frames: an export's ``bf/`` or ``bf/field_n/``
+    (``dic/`` in an export from before the rename)."""
 
     folder: Path
     number: int
     frames: int
     embryos: list[str] = field(default_factory=list)
+    channel: str = "bf"
 
     @property
     def rel(self) -> str:
-        """Where it sits under the session's ``dic/`` in the repo."""
+        """Where it sits under the session's ``bf/`` in the repo."""
         return f"field_{self.number}" if self.folder.name.startswith("field_") else ""
+
+    @property
+    def table(self) -> Path:
+        return self.folder / f"{self.channel}.csv"
 
 
 @dataclass
@@ -68,10 +87,15 @@ class SessionExport:
     created: str
     session_id: str
     description: str
+    channel: str = "bf"
 
     @property
     def folder(self) -> str:
         return self.root.name
+
+    @property
+    def channel_dir(self) -> Path:
+        return self.root / self.channel
 
     @property
     def frames(self) -> int:
@@ -89,24 +113,32 @@ def discover(export_root: Path) -> SessionExport:
     """What an export folder holds, read from its files. Raises when it is
     not an export with DIC frames."""
     root = Path(export_root)
-    dic = root / "dic"
-    if not dic.is_dir():
-        raise FileNotFoundError(f"{root} has no dic/ folder: not a brightfield export")
-    field_dirs = sorted(dic.glob("field_*"), key=lambda p: int(p.name.split("_")[-1])) or [dic]
+    channel = next((c for c in CHANNELS if (root / c).is_dir()), None)
+    if channel is None:
+        raise FileNotFoundError(f"{root} has no bf/ (or dic/) folder: not a brightfield export")
+    chan = root / channel
+    field_dirs = sorted(chan.glob("field_*"), key=lambda p: int(p.name.split("_")[-1])) or [chan]
     fields = []
     for fd in field_dirs:
         n = int(fd.name.split("_")[-1]) if fd.name.startswith("field_") else 1
-        frames = len(list(fd.glob("dic_f*.tif")))
-        if not frames:
+        tifs = [p.name for p in fd.glob("*.tif")]
+        if not tifs:
             continue
+        odd = sorted(t for t in tifs if not FRAME_NAME.match(t))
+        if odd:
+            raise ValueError(
+                f"{fd} has {len(odd)} frame(s) not named by frame number and time "
+                f"(first: {odd[0]}); export the session with gently.core.export so a sort "
+                "is time order"
+            )
         embryos = (
             sorted(p.name for p in (fd / "embryos").iterdir() if p.is_dir())
             if (fd / "embryos").is_dir()
             else []
         )
-        fields.append(FieldExport(fd, n, frames, embryos))
+        fields.append(FieldExport(fd, n, len(tifs), embryos, channel))
     if not fields:
-        raise FileNotFoundError(f"{root} has no DIC frames")
+        raise FileNotFoundError(f"{root} has no brightfield frames")
     info: dict[str, Any] = {}
     try:
         doc = yaml.safe_load((root / "metadata" / "session.yaml").read_text(encoding="utf-8"))
@@ -121,16 +153,25 @@ def discover(export_root: Path) -> SessionExport:
         created=str(info.get("created_at") or ""),
         session_id=sid,
         description=str(info.get("description") or ""),
+        channel=channel,
     )
 
 
 def field_metadata_csv(field_dir: Path) -> Path | None:
-    """``metadata.csv`` beside a field's ``dic.csv``: the same rows with the
-    frame as ``file_name`` relative to the folder, which is how the Hub's
-    image-folder loader reads a folder of images. Returns the path, or None
-    when there is no table to make it from."""
-    src = Path(field_dir) / "dic.csv"
-    if not src.is_file():
+    """``metadata.csv`` beside a field's ``bf.csv`` (``dic.csv`` in an older
+    export): the same rows with the frame as ``file_name`` relative to the
+    folder, which is how the Hub's image-folder loader reads a folder of
+    images. Returns the path, or None when there is no table to make it
+    from."""
+    src = next(
+        (
+            Path(field_dir) / f"{c}.csv"
+            for c in CHANNELS
+            if (Path(field_dir) / f"{c}.csv").is_file()
+        ),
+        None,
+    )
+    if src is None:
         return None
     with open(src, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -196,7 +237,8 @@ def plan(exports: list[SessionExport]) -> list[tuple[Path, str]]:
                 out.append((s.root / name, f"{base}/{name}"))
         if (s.root / "metadata").is_dir():
             out.append((s.root / "metadata", f"{base}/metadata"))
-        out.append((s.root / "dic", f"{base}/dic"))
+        # The channel folder lands as bf/ whatever it was called when exported.
+        out.append((s.channel_dir, f"{base}/bf"))
     return out
 
 
@@ -219,7 +261,7 @@ def dataset_card(exports: list[SessionExport], repo_id: str, license_id: str) ->
     first = exports[0] if exports else None
     fld = first.fields[0] if first else None
     session_dir = f"sessions/{first.folder}" if first else "sessions/<session>"
-    frames_dir = f"{session_dir}/dic" + (f"/{fld.rel}" if fld and fld.rel else "")
+    frames_dir = f"{session_dir}/bf" + (f"/{fld.rel}" if fld and fld.rel else "")
     embryo = first.embryos[0] if first and first.embryos else "<embryo>"
     crops_dir = f"{frames_dir}/embryos/{embryo}"
     lines = [
@@ -265,18 +307,23 @@ def dataset_card(exports: list[SessionExport], repo_id: str, license_id: str) ->
         "sessions/<session>/",
         "  README.txt  embryos.csv  stage_calls.csv  events.csv  temperature.csv",
         "  metadata/                  the session's own files, as kept (YAML, JSONL)",
-        "  dic/[field_n/]             one series per field the overview was taken from",
-        "    dic_f0001_<stamp>.tif …  the full frames, 16-bit, named so a sort is time order",
+        "  bf/[field_n/]              one series per field the overview was taken from",
+        "    bf_f0001_<stamp>.tif …   the full frames, 16-bit; the name is the frame",
+        "                             number and the capture time, so a sort is time order",
         "    metadata.csv             one row per frame: file_name, frame, captured_at,",
         "                             stage position, light, exposure, the dark and flat",
-        "    dic.avi  dic_corrected.avi   the series as a movie, as taken and corrected",
+        "    bf.avi  bf_corrected.avi     the series as a movie, as taken and corrected",
         "    embryos/<embryo>/        the embryo cut out of every frame:",
-        "      raw/  corrected/       the crops, 16-bit",
+        "      raw/  corrected/       the crops, 16-bit, named <embryo>_f0001_<stamp>.tif",
         "      dark.tif  flat.tif     the references, cropped the same",
         "      metadata.csv           file_name (raw), corrected_file, frame, time, box …",
         "      README.md              that folder's own card",
-        "  dic/references/<record>/   the dark and flat frames the correction uses",
+        "  bf/references/<record>/    the dark and flat frames the correction uses",
         "```",
+        "",
+        "Sessions exported before the channel was renamed from `dic` to `bf` keep",
+        "`dic_f0001_<stamp>.tif`, `dic.csv` and `dic.avi` inside `bf/`: the same",
+        "scheme, an older prefix.",
         "",
         "## Shading correction",
         "",

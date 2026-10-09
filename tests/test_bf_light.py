@@ -108,21 +108,22 @@ def _round(client, store, **bf):
     return [e for e in client.log if e != "move"]
 
 
-def test_the_room_light_is_the_default():
-    assert BfOverview().light == "room"
-    assert BfOverview.from_dict({"enabled": True}).light == "room"
+def test_the_led_is_the_default():
+    """Ryan, 2026-10-09: "light should be default to LED for BF imaging. at 1 percent." """
+    assert BfOverview().light == "led"
+    assert BfOverview.from_dict({"enabled": True}).light == "led"
 
 
-def test_a_plan_from_before_the_light_existed_does_not_choose_the_led():
-    """`use_led: true` was in every plan and did nothing. It must not start
-    flashing the LED at a sample now."""
+def test_a_plan_from_before_the_light_existed_takes_the_default_and_drops_use_led():
+    """`use_led: true` was in every plan and did nothing; it chooses nothing
+    now either — the plan takes the default light like any other."""
     old = BfOverview.from_dict({"enabled": True, "use_led": True})
-    assert old.light == "room"
+    assert old.light == "led"
     assert "use_led" not in old.to_dict()
 
 
-def test_an_unknown_light_is_the_room_light():
-    assert BfOverview.from_dict({"enabled": True, "light": "sunlight"}).light == "room"
+def test_an_unknown_light_is_the_default():
+    assert BfOverview.from_dict({"enabled": True, "light": "sunlight"}).light == "led"
 
 
 def test_the_light_survives_the_checkpoint():
@@ -131,13 +132,13 @@ def test_the_light_survives_the_checkpoint():
 
 
 def test_the_room_light_goes_on_for_the_frame_and_off_before_the_volume(store):
-    log = _round(_rig(room="off"), store)
+    log = _round(_rig(room="off"), store, light="room")
     assert log[:3] == ["room on", "capture(use_led=False, room=on)", "room off"], log
     assert log.index("room off") < log.index("volume"), "the volume was imaged with the light on"
 
 
 def test_a_room_light_that_was_already_on_is_left_on(store):
-    log = _round(_rig(room="on"), store)
+    log = _round(_rig(room="on"), store, light="room")
     assert "room on" not in log and "room off" not in log, log
     assert log[0] == "capture(use_led=False, room=on)"
 
@@ -162,14 +163,14 @@ def test_the_light_goes_off_even_when_the_capture_fails(store):
         raise RuntimeError("camera busy")
 
     client.capture_bottom_image = AsyncMock(side_effect=boom)
-    log = _round(client, store)
+    log = _round(client, store, light="room")
     assert log[:3] == ["room on", "capture failed", "room off"], log
     assert "volume" in log, "a failed overview took the volumes down"
 
 
 def test_no_room_light_on_this_rig_takes_the_frame_as_it_is(store, caplog):
     with caplog.at_level(logging.WARNING):
-        log = _round(_rig(room_works=False), store)
+        log = _round(_rig(room_works=False), store, light="room")
     assert log[0] == "room on" and log[1].startswith("capture"), log
     assert "room off" not in log, "it switched off a light it never switched on"
     assert any("did not come on" in r.message for r in caplog.records)
@@ -178,7 +179,7 @@ def test_no_room_light_on_this_rig_takes_the_frame_as_it_is(store, caplog):
 
 def test_a_light_that_will_not_go_off_is_an_error_not_a_whisper(store, caplog):
     with caplog.at_level(logging.WARNING):
-        log = _round(_rig(off_works=False), store)
+        log = _round(_rig(off_works=False), store, light="room")
     assert log.count("room off") == 2, "tried once and gave up"
     assert any("STILL ON" in r.message and r.levelno >= logging.ERROR for r in caplog.records)
     assert "volume" in log, "the run carries on; the volumes are the experiment"
@@ -222,9 +223,11 @@ def test_the_route_refuses_a_light_it_does_not_know():
     assert r.status_code == 400 and "bf.light" in r.json()["detail"]
 
 
-def test_the_pane_offers_the_three_lights_with_room_first():
+def test_the_pane_offers_the_three_lights_with_the_led_first_and_chosen():
+    """Ryan, 2026-10-09: "light should be default to LED for BF imaging. at 1 percent." """
     block = HTML[HTML.index('id="op-plan-bf-light"') :][:400]
-    assert block.index('value="room" selected') < block.index('value="led"')
+    assert block.index('value="led" selected') < block.index('value="room"')
+    assert 'id="op-plan-bf-led" type="number" min="1" max="100" step="1" value="1"' in HTML
     assert 'value="none"' in block
 
 

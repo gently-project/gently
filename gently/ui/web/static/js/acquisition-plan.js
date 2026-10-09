@@ -72,8 +72,8 @@ const AcquisitionPlan = (() => {
     // The light the brightfield overview is taken under. The bottom camera drives
     // none of its own, so the plan has to say.
     const BF_LIGHTS = {
-        room: { label: 'room light', says: 'under the room light' },
         led: { label: 'LED', says: 'under the LED' },
+        room: { label: 'room light', says: 'under the room light' },
         none: { label: 'as it is', says: 'in the light as it is' },
     };
 
@@ -142,7 +142,7 @@ const AcquisitionPlan = (() => {
             .map(p => ({ x: p.x, y: p.y }));
         f = f || {};
         const unit = f.intervalUnit === 'min' ? 60 : 1;
-        const intervalSeconds = Math.max(1, num(f.interval, 120) * unit);
+        const intervalSeconds = Math.max(1, num(f.interval, 30) * unit);
         const overrides = (f.overrides || [])
             .filter(o => o && o.embryoId && o.kind && o.kind !== 'default')
             .map(o => ({ embryoId: String(o.embryoId), kind: o.kind, value: o.value == null ? null : o.value }));
@@ -155,7 +155,7 @@ const AcquisitionPlan = (() => {
             if (raw == null || raw === '') return;
             laserPowers[wl] = num(raw, NaN);
         });
-        const light = BF_LIGHTS[f.bfLight] ? f.bfLight : 'room';
+        const light = BF_LIGHTS[f.bfLight] ? f.bfLight : 'led';
         const pct = f.bfLedPct != null && f.bfLedPct !== '' ? Math.round(num(f.bfLedPct, NaN)) : null;
         return {
             intervalSeconds,
@@ -408,7 +408,7 @@ const AcquisitionPlan = (() => {
     /** A plan from a saved tactic's `structure`. Anything missing takes the default. */
     function fromStructure(st) {
         st = st || {};
-        const interval = Math.max(1, num(st.cadence_s, num(st.interval, 120)));
+        const interval = Math.max(1, num(st.cadence_s, num(st.interval, 30)));
         const bf = st.bf && typeof st.bf === 'object' ? st.bf : null;
         const stop = parseStopSpec(st.stop_condition);
         const overrides = Object.entries(st.stop_conditions || {}).map(([embryoId, spec]) => {
@@ -430,7 +430,7 @@ const AcquisitionPlan = (() => {
             bfPins: bf && bf.positions && bf.positions.length ? bf.positions : (bf && bf.position ? [bf.position] : []),
             bfPin: bf && bf.position ? bf.position : null,
             bfExposureMs: bf ? bf.exposure_ms : null,
-            bfLight: bf ? bf.light : 'room',
+            bfLight: bf ? bf.light : 'led',
             stopKind: stop.kind, stopValue: stop.value,
             overrides,
             monitoringMode: st.monitoring_mode,

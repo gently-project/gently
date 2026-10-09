@@ -23,12 +23,12 @@ const IDS = SUBJECTS.map(s => s.id);
 
 test('an untouched form is still a complete, sayable plan', () => {
     const plan = P.fromForm({});
-    assert.equal(plan.intervalSeconds, 120);
+    assert.equal(plan.intervalSeconds, 30);
     assert.equal(plan.spim.slices, 50);
     assert.equal(plan.bf.enabled, false);
     assert.equal(plan.stop.kind, 'manual');
     assert.deepEqual(P.validate(plan, IDS), []);
-    assert.match(P.describe(plan, SUBJECTS), /^Every 2 min: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · until stopped\.$/);
+    assert.match(P.describe(plan, SUBJECTS), /^Every 30 s: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · until stopped\.$/);
 });
 
 test('minutes are the unit the biologist thinks in; seconds are what is sent', () => {
@@ -43,7 +43,7 @@ test('minutes are the unit the biologist thinks in; seconds are what is sent', (
 test('the brightfield channel rides on its own clock, in rounds', () => {
     const plan = P.fromForm({ interval: 5, intervalUnit: 'min', bf: true, bfEveryRounds: 3, bfExposureMs: 8 });
     const body = P.toPayload(plan, IDS);
-    assert.deepEqual(body.bf, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8, light: 'room' });
+    assert.deepEqual(body.bf, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8, light: 'led' });
     assert.match(P.describe(plan, SUBJECTS), /\+ one brightfield overview every 3 rounds from the centroid/);
     assert.match(P.describe(P.fromForm({ bf: true }), SUBJECTS), /one brightfield overview per round from the centroid/);
 });
@@ -129,7 +129,7 @@ test('a plan survives being saved and reloaded', () => {
     const st = P.toStructure(plan);
     assert.equal(st.cadence_s, 300);
     assert.equal(st.stop_condition, 'duration:12h');
-    assert.deepEqual(st.bf, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8, light: 'room' });
+    assert.deepEqual(st.bf, { enabled: true, every_seconds: 600, position: { x: -500, y: -400 }, exposure_ms: 8, light: 'led' });
     assert.deepEqual(st.stop_conditions, { embryo_2: 'hatching', embryo_3: 'timepoints:3' });
 
     const back = P.fromStructure(st);
@@ -172,21 +172,23 @@ test('the agent’s stage-based ending reads back as the pane’s own', () => {
 
 test('the plan says which light the overview is taken under', () => {
     // The bottom camera drives no light of its own. A night of overview
-    // frames came out dark because nothing said which light to use.
-    const room = P.fromForm({ bf: true });
-    assert.equal(room.bf.light, 'room', 'the room light is what this rig usually uses');
-    assert.match(P.describe(room, SUBJECTS), /from the centroid, under the room light/);
-    const led = P.fromForm({ bf: true, bfLight: 'led' });
-    assert.equal(P.toPayload(led, IDS).bf.light, 'led');
-    assert.match(P.describe(led, SUBJECTS), /under the LED/);
+    // frames came out dark because nothing said which light to use. The
+    // default is the LED (Ryan, 2026-10-09: "light should be default to LED
+    // for BF imaging. at 1 percent").
+    const dflt = P.fromForm({ bf: true });
+    assert.equal(dflt.bf.light, 'led', 'the LED is what this rig uses for brightfield');
+    assert.match(P.describe(dflt, SUBJECTS), /from the centroid, under the LED/);
+    const room = P.fromForm({ bf: true, bfLight: 'room' });
+    assert.equal(P.toPayload(room, IDS).bf.light, 'room');
+    assert.match(P.describe(room, SUBJECTS), /under the room light/);
     const asIs = P.fromForm({ bf: true, bfLight: 'none' });
     assert.match(P.describe(asIs, SUBJECTS), /in the light as it is/);
-    assert.equal(P.fromForm({ bf: true, bfLight: 'sunlight' }).bf.light, 'room');
+    assert.equal(P.fromForm({ bf: true, bfLight: 'sunlight' }).bf.light, 'led');
     // saved and reloaded, the light comes back
-    assert.equal(P.fromStructure(P.toStructure(led)).bf.light, 'led');
-    // a plan saved before the light existed is taken under the room light
-    assert.equal(P.fromStructure({ bf: { enabled: true, use_led: true } }).bf.light, 'room');
-    assert.deepEqual(Object.keys(P.BF_LIGHTS), ['room', 'led', 'none']);
+    assert.equal(P.fromStructure(P.toStructure(room)).bf.light, 'room');
+    // a plan saved before the light existed takes the default
+    assert.equal(P.fromStructure({ bf: { enabled: true, use_led: true } }).bf.light, 'led');
+    assert.deepEqual(Object.keys(P.BF_LIGHTS), ['led', 'room', 'none']);
 });
 
 test('the embryos do not all fit in one field: a frame from each pinned position', () => {

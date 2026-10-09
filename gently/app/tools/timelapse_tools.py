@@ -61,7 +61,7 @@ async def generate_bluesky_plan(
 async def start_adaptive_timelapse(
     embryo_ids: list[str] | None = None,
     stop_condition: str = "manual",
-    interval_seconds: float = 120.0,
+    interval_seconds: float = 30.0,
     condition_value: int | None = None,
     monitoring_mode: str | None = None,
     tactic_id: str | None = None,
@@ -170,7 +170,7 @@ start_adaptive_timelapse.""",
     ],
 )
 async def start_brightfield_timelapse(
-    interval_seconds: float = 300.0,
+    interval_seconds: float = 30.0,
     stop_condition: str = "manual",
     condition_value: float | None = None,
     light: str = "led",

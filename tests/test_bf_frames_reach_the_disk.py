@@ -57,8 +57,11 @@ def _rig(capture):
 
 
 async def _one_round(orch):
+    # "none": the light as it is. These tests are about the frame reaching the
+    # disk, not about switching (that is tests/test_bf_light.py); the default
+    # LED would be opened and given a moment to settle first.
     msg = await orch.start(
-        base_interval_seconds=100, bf=BfOverview(enabled=True, every_seconds=100)
+        base_interval_seconds=100, bf=BfOverview(enabled=True, every_seconds=100, light="none")
     )
     assert msg.startswith("Started"), msg
     await asyncio.sleep(0.4)
