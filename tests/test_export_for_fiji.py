@@ -394,6 +394,62 @@ class TestDicMovie:
         assert any(w.startswith("dic.avi") for _, _, w in seen)
 
 
+class TestMovieFitsAPlainAvi:
+    """ "frames that are in the raw data are missing in the video": past 1 GB
+    an AVI continues in OpenDML chunks that many players do not read, and a
+    1.5 GB movie showed 922 of its 1336 frames in them. A movie is now made
+    to fit in one chunk, at a smaller size when it must."""
+
+    def test_the_scale_fits_the_frames_in_the_limit(self):
+        from gently.core.export import _fit_scale
+
+        rng = np.random.default_rng(1)
+        frame = rng.integers(0, 255, (512, 512), dtype=np.uint8)  # noisy: a big JPEG
+        import cv2
+
+        _, jpg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+        per = int(jpg.size)
+        assert _fit_scale(frame, 3, limit=per * 10) == 1.0, "three fit in ten"
+        s = _fit_scale(frame, 40, limit=per * 10)
+        assert 0.1 <= s < 1.0
+        # Shrunk by s on each side, 40 of them fit (JPEG size goes with area).
+        assert (s * s) * per * 40 * 1.1 <= per * 10 * 1.05
+        assert _fit_scale(frame, 10**9, limit=1) == 0.1, "never below a tenth"
+
+    def test_a_long_run_is_written_smaller_not_cut(self, tmp_path, monkeypatch):
+        import cv2
+        import tifffile
+
+        from gently.core import export as export_mod
+        from gently.core.export import dic_movie
+
+        d = tmp_path / "dic"
+        d.mkdir()
+        rng = np.random.default_rng(0)
+        for i in range(1, 7):
+            tifffile.imwrite(
+                d / f"dic_f{i:04d}_20261006-10{i:02d}00.tif",
+                rng.integers(60, 1000, (200, 240), dtype=np.uint16),
+            )
+        # A limit so small that six frames must shrink to fit it.
+        monkeypatch.setattr(export_mod, "AVI_CLASSIC_BYTES", 40_000)
+        out = dic_movie(d, label=False)
+        cap = cv2.VideoCapture(str(out))
+        n, w, h = 0, int(cap.get(3)), int(cap.get(4))
+        while cap.read()[0]:
+            n += 1
+        cap.release()
+        assert n == 6, "every frame is there"
+        assert w < 240 and h < 200, "at a smaller size"
+        assert (d / "dic.avi").stat().st_size < 60_000
+        # With room to spare, full size as before.
+        monkeypatch.setattr(export_mod, "AVI_CLASSIC_BYTES", 1_000_000_000)
+        out = dic_movie(d, label=False)
+        cap = cv2.VideoCapture(str(out))
+        assert (int(cap.get(3)), int(cap.get(4))) == (240, 200)
+        cap.release()
+
+
 class TestCorrectedDicMovie:
     """ "can you also output the flat fielded movie? using the flat field
     image?" — dic_corrected.avi: each frame with the dark and flat dic.csv

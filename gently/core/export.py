@@ -190,6 +190,31 @@ def _elapsed(start: str | None, now: str | None) -> str:
     return f"+{h:02d}:{m:02d}:{sec:02d}"
 
 
+# A plain AVI holds one RIFF chunk of at most this much; OpenCV writes the
+# rest as OpenDML "AVIX" chunks, which Fiji and VLC read and which many
+# players do not: a 1.5 GB movie showed 922 of its 1336 frames in them,
+# and the coworkers who saw that reported frames missing from the video.
+# So a movie is made to fit in one chunk, at a smaller size when it must.
+AVI_CLASSIC_BYTES = 1_000_000_000
+
+
+def _fit_scale(first_frame: Any, n_frames: int, limit: int | None = None) -> float:
+    """The factor to shrink every frame by so ``n_frames`` of them, as
+    Motion JPEG, fit in one classic AVI chunk: 1.0 when they already do.
+    Estimated from the first frame's JPEG size, with a tenth to spare."""
+    import cv2
+
+    if limit is None:
+        limit = AVI_CLASSIC_BYTES
+    ok, jpg = cv2.imencode(".jpg", first_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    if not ok or n_frames <= 0:
+        return 1.0
+    estimate = int(jpg.size) * n_frames * 1.1
+    if estimate <= limit:
+        return 1.0
+    return max(0.1, (limit / estimate) ** 0.5)
+
+
 def dic_movie(
     dic_dir: Path,
     fps: int = 10,
@@ -269,6 +294,7 @@ def dic_movie(
     size: tuple[int, int] | None = None
     start = frames[0]["captured_at"]
     written = 0
+    shrink = 1.0
     try:
         for i, frame_rec in enumerate(frames, start=1):
             path, when = frame_rec["path"], frame_rec["captured_at"]
@@ -282,6 +308,21 @@ def dic_movie(
             frame = np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(
                 np.uint8
             )
+            if size is None:
+                shrink = _fit_scale(frame, len(frames))
+                if shrink < 1.0:
+                    logger.info(
+                        "%s: %d frames would overflow a plain AVI; written at %.0f%% size",
+                        out.name,
+                        len(frames),
+                        shrink * 100,
+                    )
+            if shrink < 1.0:
+                frame = cv2.resize(
+                    frame,
+                    (max(16, int(frame.shape[1] * shrink)), max(16, int(frame.shape[0] * shrink))),
+                    interpolation=cv2.INTER_AREA,
+                )
             if size is None:
                 size = (int(frame.shape[1]), int(frame.shape[0]))
                 writer = cv2.VideoWriter(
@@ -1052,10 +1093,32 @@ def spim_movie(
     writer = None
     size: tuple[int, int] | None = None
     written = 0
+    shrink = 1.0
+    # How many frames the movie will have, for the size to fit a plain AVI.
+    n_total = (
+        len(files)
+        if view == "projection"
+        else sum(int(load(p).shape[0]) for p in sample) * max(1, len(files) // max(1, len(sample)))
+    )
 
     def put(img, text: str) -> bool:
-        nonlocal writer, size, written
+        nonlocal writer, size, written, shrink
         frame = np.clip((img.astype(np.float32) - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+        if size is None:
+            shrink = _fit_scale(frame, n_total)
+            if shrink < 1.0:
+                logger.info(
+                    "%s: %d frames would overflow a plain AVI; written at %.0f%% size",
+                    out.name,
+                    n_total,
+                    shrink * 100,
+                )
+        if shrink < 1.0:
+            frame = cv2.resize(
+                frame,
+                (max(16, int(frame.shape[1] * shrink)), max(16, int(frame.shape[0] * shrink))),
+                interpolation=cv2.INTER_AREA,
+            )
         if size is None:
             size = (int(frame.shape[1]), int(frame.shape[0]))
             writer = cv2.VideoWriter(
@@ -1618,7 +1681,8 @@ def export_session(
         " Image Sequence on the dic/ folder for the raw frames.",
         "  dic.avi is Motion JPEG: every frame in time order, one brightness stretch for"
         " the run, frame number and time since the first in the corner. For viewing;"
-        " the .tif frames are the data.",
+        " the .tif frames are the data. A movie is kept under 1 GB so every player"
+        " shows every frame, at a reduced size when a long run needs it.",
         "  dic_corrected.avi is the same with each frame's dark and flat divided out"
         " (the correction above), where the session had them.",
         *(
