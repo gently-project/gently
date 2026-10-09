@@ -3134,7 +3134,8 @@ const OperateManager = (function () {
         // The bottom camera's LED card. Here rather than in mountLightPanel:
         // that one waits for the SPIM pane, and this is the pane we start on.
         if (typeof LightPanel !== 'undefined' && $('op-led-host')) {
-            LightPanel.mount('op-led-host', { only: 'led' });
+            // Untitled: the folding card above it draws the "LED" heading.
+            LightPanel.mount('op-led-host', { only: 'led', titled: false });
         }
         if (typeof CameraPanel !== 'undefined') {
             if ($('op-cam-panel-bottom')) {
@@ -3144,6 +3145,53 @@ const OperateManager = (function () {
                 CameraPanel.mount('op-cam-panel-spim', { camera: 'spim', titled: false });
             }
         }
+    }
+
+    // ══ THE RAIL'S FOLDING CARDS ═══════════════════════════════════════════
+    // Every card on the Bottom cam rail folds to its head row (Ryan: "show
+    // button also needed on bottom focus, led, stage etc"). One rule for all
+    // of them: `data-disclose` names the card, the head row and anything
+    // marked `.op-disc-keep` stay, the other direct children fold. The
+    // choice is remembered per card across reloads. What is used every
+    // minute opens by default; what is set once a night starts closed.
+    const DISCLOSE_KEY = 'gently.operate.rail.';
+    const DISCLOSE_DEFAULT = { camera: true, stage: true, led: true, focus: true, overview: false, advanced: false };
+
+    function discloseState(key) {
+        try {
+            const v = localStorage.getItem(DISCLOSE_KEY + key);
+            if (v === '1') return true;
+            if (v === '0') return false;
+        } catch (_) { /* no storage: the default */ }
+        return DISCLOSE_DEFAULT[key] !== false;
+    }
+
+    function applyDisclosure(block, open) {
+        const head = block.querySelector(':scope > .op-disc-head, :scope > .op-gauge-head');
+        [...block.children].forEach(ch => {
+            if (ch === head || ch.classList.contains('op-disc-keep')) return;
+            ch.hidden = !open;
+        });
+        const btn = head && head.querySelector('[data-disclose-toggle]');
+        if (btn) {
+            btn.textContent = open ? 'Hide' : 'Show';
+            btn.setAttribute('aria-expanded', String(open));
+        }
+        block.dataset.open = open ? '1' : '0';
+    }
+
+    function wireDisclosures() {
+        document.querySelectorAll('#op-pane-bottom [data-disclose]').forEach(block => {
+            const key = block.dataset.disclose;
+            applyDisclosure(block, discloseState(key));
+            const btn = block.querySelector('[data-disclose-toggle]');
+            if (!btn) return;
+            btn.addEventListener('click', () => {
+                const open = block.dataset.open !== '1';
+                applyDisclosure(block, open);
+                try { localStorage.setItem(DISCLOSE_KEY + key, open ? '1' : '0'); } catch (_) { /* not remembered */ }
+            });
+        });
     }
 
     function showPane(name) {
@@ -3390,18 +3438,7 @@ const OperateManager = (function () {
         if (all) all.addEventListener('click', calibrateAll);
         const clear = $('op-cal-clear');
         if (clear) clear.addEventListener('click', clearFit);
-        // Two disclosures on the Bottom cam rail, one rule: the SPIM centre,
-        // and the overview frames' settings. Both closed until asked.
-        [['op-adv-more', 'op-adv'], ['op-ov-more', 'op-ov-body']].forEach(([btnId, bodyId]) => {
-            const more = $(btnId), body = $(bodyId);
-            if (!more || !body) return;
-            more.addEventListener('click', () => {
-                const open = body.hidden;
-                body.hidden = !open;
-                more.setAttribute('aria-expanded', String(open));
-                more.textContent = open ? 'Hide' : 'Show';
-            });
-        });
+        wireDisclosures();
         const alignSet = $('op-align-set');
         if (alignSet) alignSet.addEventListener('click', setSpimCentre);
         const alignHist = $('op-align-history');
@@ -3451,7 +3488,9 @@ const OperateManager = (function () {
         // every input, including the per-embryo rows that come and go with
         // the roster; the run's own stop select is populated here, once.
         const stopSel = $('op-tl-stop');
-        if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('manual', false);
+        // A run ends after 16 hours unless told otherwise (Ryan, 2026-10-09):
+        // the night, with the morning to look at it.
+        if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('duration', false);
         const planPanel = $('op-panel-adaptive');
         if (planPanel) {
             planPanel.addEventListener('input', () => { _planDirty = true; renderPlan(); });

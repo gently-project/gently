@@ -282,7 +282,7 @@ const LightPanel = (() => {
         hosts.forEach((opts, host) => {
             const el = document.getElementById(host);
             if (!el) return;
-            el.innerHTML = opts.only === 'led' ? ledCard(s) : markup(s, em);
+            el.innerHTML = opts.only === 'led' ? ledCard(s, opts.titled) : markup(s, em);
             wire(el, opts.only === 'led' ? 'led' : undefined);
         });
     }
@@ -347,15 +347,17 @@ const LightPanel = (() => {
      * No mode selector: this card cannot see the laser, so it must not offer
      * to choose between the two. It reports the LED and sets its brightness.
      */
-    function ledCard(s) {
+    function ledCard(s, titled) {
         // The switch says what pressing it does, and what it does follows
         // from the read-back state: an unread LED is offered "Open", since
         // the one thing the operator cannot do with it is see.
         const open = s.led === 'Open';
+        // Untitled when the card it sits in already says "LED" (the Bottom
+        // cam rail's folding card); the age stays, it is the read-back's.
         return `
           <div class="lp">
             <div class="lp-head">
-              <span class="lp-title">LED</span>
+              ${titled === false ? '<span></span>' : '<span class="lp-title">LED</span>'}
               <span class="lp-age" title="Values are read from the hardware, not remembered">read ${ageOf(s.ledReadAt)}</span>
             </div>
             <div class="lp-row">
@@ -583,7 +585,7 @@ const LightPanel = (() => {
 
     async function mount(hostId, opts) {
         const only = opts && opts.only === 'led' ? 'led' : null;
-        hosts.set(hostId, { only });
+        hosts.set(hostId, { only, titled: !(opts && opts.titled === false) });
         if (hosts.size === 1) {
             SharedState.on('light', render);
             timer = setInterval(() => {

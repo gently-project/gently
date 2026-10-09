@@ -26,9 +26,9 @@ test('an untouched form is still a complete, sayable plan', () => {
     assert.equal(plan.intervalSeconds, 30);
     assert.equal(plan.spim.slices, 50);
     assert.equal(plan.bf.enabled, false);
-    assert.equal(plan.stop.kind, 'manual');
     assert.deepEqual(P.validate(plan, IDS), []);
-    assert.match(P.describe(plan, SUBJECTS), /^Every 30 s: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · until stopped\.$/);
+    assert.deepEqual(plan.stop, { kind: 'duration', value: 16 });
+    assert.match(P.describe(plan, SUBJECTS), /^Every 30 s: SPIM volumes \(50 slices · 10 ms\) of 4 embryos · after 16 h\.$/);
 });
 
 test('minutes are the unit the biologist thinks in; seconds are what is sent', () => {

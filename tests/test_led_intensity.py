@@ -363,7 +363,7 @@ class TestTheBottomCameraCard:
         assert INDEX.count('id="op-led-host"') == 1
 
     def test_operate_mounts_the_shared_panel_into_it(self):
-        assert "LightPanel.mount('op-led-host', { only: 'led' })" in OPERATE_JS
+        assert "LightPanel.mount('op-led-host', { only: 'led', titled: false })" in OPERATE_JS
 
     def test_it_is_mounted_with_the_pane_it_starts_on(self):
         """`mountLightPanel` waits for the SPIM pane; the bottom pane is first."""
