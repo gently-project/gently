@@ -89,38 +89,36 @@ const BrightfieldRefs = (() => {
         if (!host) return;
         const s = spec();
         const m = state.match_record;
-        const have = m ? `<span class="bf-ok">✓ references taken ${esc((m.flat && m.flat.taken_at) || (m.dark && m.dark.taken_at) || '')}</span>`
-            : `<span class="bf-missing">✕ none yet for ${esc(specText(s))}</span>`;
+        const when = m ? String((m.flat && m.flat.taken_at) || (m.dark && m.dark.taken_at) || '') : '';
+        const have = m ? `<span class="bf-ok" title="Taken ${esc(when)} for ${esc(specText(s))}">✓ taken ${esc(when.slice(11, 16) || when)}</span>`
+            : `<span class="bf-missing" title="None yet for these frames: ${esc(specText(s))}">✕ none for ${esc(specText(s))}</span>`;
         const checks = m && m.checks ? m.checks : (last.flat && last.flat.checks) || (last.dark && last.dark.checks) || {};
         const warn = [];
         if (checks.dark_is_dark === false) warn.push('The dark is not dark: it is more than half as bright as the flat. The room light did not go off — cycle it again, or check the room.');
         if (checks.flat_unsaturated === false) warn.push('The flat is saturated in places. Lower the LED or the exposure and retake.');
-        const img = (k) => last[k] && last[k].thumbnail ? `<img class="bf-thumb" src="data:image/png;base64,${last[k].thumbnail}" alt="${k} reference">` : '';
+        // One line of status, two buttons, the two pictures. What each step
+        // does, and the order, lives on the buttons' hover text and in the
+        // flat's confirm — not in paragraphs the operator reads once and then
+        // scrolls past every night.
+        const thumb = (k, caption) => last[k] && last[k].thumbnail
+            ? `<figure class="bf-fig" title="${esc(fmtStats(last[k].stats).replace(/<[^>]+>/g, ''))}">
+                 <img class="bf-thumb" src="data:image/png;base64,${last[k].thumbnail}" alt="${k} reference">
+                 <figcaption class="bf-cap">${caption}</figcaption></figure>`
+            : '';
+        const needDark = !last.dark && !record;
+        const darkTitle = 'One frame with nothing lit: the room light is cycled so its state is known, the LED closed. About 5 s.';
+        const flatTitle = needDark ? 'Take the dark first'
+            : 'Drive the stage (the pad above) so no embryo is in view, then five frames are averaged under the light set above.';
         host.innerHTML = `
             <div class="bf-refs">
-                <div class="bf-head"><span class="bf-title">Dark and flat references</span> ${have}</div>
-                <div class="bf-cap">Taken once per session for these frames (${esc(specText(s))}). Every overview frame then names them, so the analysis downstream can correct: (frame − dark) / (flat − dark).</div>
+                <div class="bf-head"><span class="bf-title">Dark and flat</span> ${have}</div>
                 ${state.error ? `<div class="bf-warn">${esc(state.error)}</div>` : ''}
-                <div class="bf-steps">
-                    <div class="bf-step">
-                        <div class="bf-step-head"><b>1. Dark</b> <span class="bf-cap">the room light is switched on, then off, so its state is known; the LED is closed; one frame.</span></div>
-                        <div class="bf-row">
-                            <button class="op-btn" type="button" data-bf="dark" ${working ? 'disabled' : ''}>${working === 'dark' ? 'Taking the dark… (about 5 s)' : last.dark ? 'Retake dark' : 'Take dark'}</button>
-                            ${last.dark ? `<span class="bf-cap">${fmtStats(last.dark.stats)}</span>` : ''}
-                        </div>
-                        ${img('dark')}
-                    </div>
-                    <div class="bf-step">
-                        <div class="bf-step-head"><b>2. Flat</b> <span class="bf-cap">first drive the stage (the pad above) so <u>no embryo</u> is in the bottom camera's view; then five frames are averaged under the light set above.</span></div>
-                        <div class="bf-row">
-                            <button class="op-btn" type="button" data-bf="flat" ${working || !last.dark && !record ? 'disabled' : ''} title="${!last.dark && !record ? 'Take the dark first' : ''}">${working === 'flat' ? 'Taking the flat…' : last.flat ? 'Retake flat' : 'Take flat'}</button>
-                            ${last.flat ? `<span class="bf-cap">${fmtStats(last.flat.stats)} · ${last.flat.frames} frames</span>` : ''}
-                        </div>
-                        ${img('flat')}
-                    </div>
+                <div class="bf-row">
+                    <button class="op-btn" type="button" data-bf="dark" ${working ? 'disabled' : ''} title="${darkTitle}">${working === 'dark' ? 'Taking dark…' : last.dark ? 'Retake dark' : 'Take dark'}</button>
+                    <button class="op-btn" type="button" data-bf="flat" ${working || needDark ? 'disabled' : ''} title="${flatTitle}">${working === 'flat' ? 'Taking flat…' : last.flat ? 'Retake flat' : 'Take flat'}</button>
                 </div>
+                ${last.dark || last.flat ? `<div class="bf-figs">${thumb('dark', 'dark')}${thumb('flat', `flat · ${last.flat ? last.flat.frames : ''} frames`)}</div>` : ''}
                 ${warn.map(w => `<div class="bf-warn">! ${esc(w)}</div>`).join('')}
-                ${state.records && state.records.length ? `<div class="bf-cap">${state.records.length} record${state.records.length !== 1 ? 's' : ''} in this session · calibration/brightfield/</div>` : ''}
             </div>`;
         host.querySelectorAll('[data-bf]').forEach(b => b.addEventListener('click', () => take(b.dataset.bf)));
     }

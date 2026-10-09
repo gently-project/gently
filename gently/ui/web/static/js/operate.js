@@ -2639,16 +2639,23 @@ const OperateManager = (function () {
         // How the frame is lit and exposed, and whether its dark and flat
         // exist, are set on Bottom cam; said back here with the way there.
         const setup = $('op-plan-bf-setup');
-        if (setup) {
+        const ovSummary = $('op-ov-summary');
+        if (setup || ovSummary) {
             const lit = plan.bf.light === 'led' ? `LED${plan.bf.ledPct != null ? ` ${plan.bf.ledPct} %` : ''}`
                 : plan.bf.light === 'room' ? 'room light' : 'light as it is';
             const exp = plan.bf.exposureMs != null ? `${plan.bf.exposureMs} ms` : "the camera's exposure";
             const refs = typeof BrightfieldRefs !== 'undefined' && BrightfieldRefs.status ? BrightfieldRefs.status() : null;
             const refTxt = !refs ? '' : refs.have ? ' · dark and flat taken'
                 : ' · <span class="op-cap-warn">no dark and flat yet</span>';
-            setup.innerHTML = `${escapeHtml(lit)} · ${escapeHtml(exp)}${refTxt} — `
-                + '<button type="button" class="op-btn op-btn-quiet" data-goto-pane="bottom" '
-                + 'title="The light, exposure, dark and flat are set beside the live view">Change on Bottom cam →</button>';
+            const said = `${escapeHtml(lit)} · ${escapeHtml(exp)}${refTxt}`;
+            // The same fact in both places: the Bottom cam block's closed
+            // state, and the Acquisition pane's line with the way there.
+            if (ovSummary) ovSummary.innerHTML = said;
+            if (setup) {
+                setup.innerHTML = `${said} — `
+                    + '<button type="button" class="op-btn op-btn-quiet" data-goto-pane="bottom" '
+                    + 'title="The light, exposure, dark and flat are set beside the live view">Change on Bottom cam →</button>';
+            }
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
         const problems = AcquisitionPlan.validate(plan, subjectIds(), _laserLimits);
@@ -3383,15 +3390,18 @@ const OperateManager = (function () {
         if (all) all.addEventListener('click', calibrateAll);
         const clear = $('op-cal-clear');
         if (clear) clear.addEventListener('click', clearFit);
-        const advMore = $('op-adv-more'), adv = $('op-adv');
-        if (advMore && adv) {
-            advMore.addEventListener('click', () => {
-                const open = adv.hidden;
-                adv.hidden = !open;
-                advMore.setAttribute('aria-expanded', String(open));
-                advMore.textContent = open ? 'Hide' : 'Show';
+        // Two disclosures on the Bottom cam rail, one rule: the SPIM centre,
+        // and the overview frames' settings. Both closed until asked.
+        [['op-adv-more', 'op-adv'], ['op-ov-more', 'op-ov-body']].forEach(([btnId, bodyId]) => {
+            const more = $(btnId), body = $(bodyId);
+            if (!more || !body) return;
+            more.addEventListener('click', () => {
+                const open = body.hidden;
+                body.hidden = !open;
+                more.setAttribute('aria-expanded', String(open));
+                more.textContent = open ? 'Hide' : 'Show';
             });
-        }
+        });
         const alignSet = $('op-align-set');
         if (alignSet) alignSet.addEventListener('click', setSpimCentre);
         const alignHist = $('op-align-history');
