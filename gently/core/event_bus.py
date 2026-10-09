@@ -123,6 +123,9 @@ class EventType(Enum):
     ERROR_OCCURRED = auto()
     WARNING_ISSUED = auto()
     STATUS_CHANGED = auto()
+    # A choice about the surface that belongs to the rig: which cards on the
+    # Bottom cam rail are open. Every browser follows (routes/ui_prefs.py).
+    UI_RAIL_CARDS = auto()
 
     # Async timelapse — per-embryo cadence transitions (Phase 4)
     EMBRYO_CADENCE_CHANGED = (

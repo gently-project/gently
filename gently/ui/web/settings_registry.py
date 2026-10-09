@@ -272,6 +272,19 @@ SETTINGS: list[Setting] = [
     ),
     # ── Experiment ───────────────────────────────────────────────────────
     Setting(
+        key="views.railCards",
+        label="Bottom cam rail cards",
+        help="Which cards on the Bottom cam rail are open — Camera, Stage, LED, Bottom "
+        "focus, Overview frames, Advanced. Each card's Show/Hide is the control; the "
+        "choice is the rig's, kept as it is pressed, and every browser follows.",
+        category="views",
+        group="Devices",
+        type="link",
+        reach=RIG,
+        where="Devices › Operate › Bottom cam — each card's Show/Hide",
+        href="devices",
+    ),
+    Setting(
         key="experiment.plan",
         label="Acquisition plan",
         help="Cadence, channels, the brightfield light and how a run ends. Kept with each "

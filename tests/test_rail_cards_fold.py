@@ -37,14 +37,15 @@ def test_the_verb_this_pane_cannot_do_without_stays_out_when_folded():
     assert 'class="op-cap op-disc-keep" id="op-ov-summary"' in RAIL
 
 
-def test_one_rule_wired_once_and_remembered():
+def test_one_rule_wired_once_and_kept_by_the_rig():
     wire = OPERATE[OPERATE.index("if (_wired) return;") :]
     wire = wire[: wire.index("\n    async function ")]
     assert "wireDisclosures();" in wire
     fn = OPERATE[OPERATE.index("function wireDisclosures()") :]
     fn = fn[: fn.index("\n    }")]
     assert "'#op-pane-bottom [data-disclose]'" in fn
-    assert "localStorage.setItem(DISCLOSE_KEY + key" in fn
+    # The choice is the rig's (tests/test_rail_cards_rig_wide.py), not this browser's.
+    assert "saveRailCard(key, open)" in fn and "localStorage" not in fn
     assert (
         "const DISCLOSE_DEFAULT = { camera: true, stage: true, led: true, focus: true, "
         "overview: false, advanced: false };"
