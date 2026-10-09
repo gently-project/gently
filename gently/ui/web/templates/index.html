@@ -539,14 +539,17 @@
                        on the Acquisition pane, two panes from the picture.
                        The ids are the plan's: the Acquisition pane reads these
                        fields and says them back; it holds no copy of its own. #}
+                    {# Behind a disclosure like the SPIM centre below it: set
+                       once a night, then read. The line under the heading
+                       says what is set, so the block is a fact when closed. #}
                     <div class="op-block op-block-overview" id="op-overview-host">
-                      <div class="op-block-head">Overview frames</div>
-                      <p class="op-cap">
-                        The brightfield frame a timelapse takes of each field on
-                        its cadence, lit and exposed as set here. Taken from the
-                        fields in the list on the left, or from the embryos'
-                        centroid while the list is empty.
-                      </p>
+                      <div class="op-row op-row-wrap">
+                        <span class="op-block-head" title="The brightfield frame a timelapse takes of each field on its cadence. Taken from the fields in the list on the left, or from the embryos' centroid while the list is empty.">Overview frames</span>
+                        <button class="op-btn op-btn-quiet" id="op-ov-more" type="button"
+                                aria-expanded="false" aria-controls="op-ov-body">Show</button>
+                      </div>
+                      <div class="op-cap" id="op-ov-summary"></div>
+                      <div class="op-adv" id="op-ov-body" hidden>
                       {# The bottom camera drives no light of its own, so the
                          plan says which one the frame is taken under. It is
                          switched on for the frame and off again before the
@@ -576,6 +579,7 @@
                          once per session at this light and exposure.
                          panels/brightfield-refs.js owns the markup. #}
                       <div id="op-bfref-host"></div>
+                      </div>
                     </div>
 
                     {# The SPIM centre governs what "centre on this embryo"

@@ -1808,10 +1808,13 @@
 .bf-ok { color: var(--op-live); font-size: 12px; }
 .bf-missing { color: var(--op-warn); font-size: 12px; }
 .bf-cap { color: var(--op-ink-dim); font-size: 12px; }
-.bf-steps { display: grid; gap: var(--op-2); }
-.bf-step { display: grid; gap: var(--op-1); }
 .bf-row { display: flex; align-items: center; gap: var(--op-2); flex-wrap: wrap; }
-.bf-thumb { width: 160px; max-width: 100%; border: 1px solid var(--op-rule); border-radius: 4px; background: #000; display: block; }
+.bf-row .op-btn { flex: 1 1 auto; }
+/* The two pictures side by side, small: they are there to be glanced at
+   (is the dark dark, is the flat even), not studied. */
+.bf-figs { display: flex; gap: var(--op-2); }
+.bf-fig { margin: 0; flex: 1 1 0; min-width: 0; display: grid; gap: 2px; }
+.bf-thumb { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid var(--op-rule); border-radius: 4px; background: #000; display: block; }
 .bf-warn { color: var(--op-warn); font-size: 12px; }
 
 /* ── XY stage pad (panels/stage-pad.js) ───────────────────────────────── */
