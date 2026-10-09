@@ -773,7 +773,7 @@ def create_router(server) -> APIRouter:
 
     def _what_to_look_at(store, sid: str) -> tuple[list[dict], list[dict]]:
         """Per embryo: its latest projection and last predicted stage. Per
-        DIC frame: where to fetch it. Paths never leave the server; the
+        brightfield frame: where to fetch it. Paths never leave the server; the
         client gets URLs the routes below resolve through the store."""
         embryos: list[dict] = []
         states = ((store.load_session_snapshot(sid) or {}).get("experiment_data", {}) or {}).get(
@@ -988,7 +988,7 @@ def create_router(server) -> APIRouter:
         """Begin exporting the session: one folder per embryo, files named so
         a sort is time order, the record beside them (see gently.core.export).
         ``{"dest": "<folder>"}`` puts it somewhere other than <root>/exports;
-        ``{"crops": false}`` skips cutting each embryo out of the DIC frames."""
+        ``{"crops": false}`` skips cutting each embryo out of the brightfield frames."""
         import threading
 
         from gently.core.export import export_session
@@ -1047,7 +1047,7 @@ def create_router(server) -> APIRouter:
         return dict(job, default_dest=default)
 
     # ---- movies, from any folder ------------------------------------------
-    # Two kinds with two behaviours. A DIC movie is a folder of frames over
+    # Two kinds with two behaviours. A brightfield movie is a folder of frames over
     # time, with the flat divided out where the references are beside them.
     # A SPIM movie is a folder of volumes: max projections over time, or
     # every slice stack by stack. The folder is the operator's own (an export
@@ -1058,7 +1058,7 @@ def create_router(server) -> APIRouter:
         """``{"kind": "dic", "folder": ..., "corrected": true}``,
         ``{"kind": "spim", "folder": ..., "view": "projection"|"slices"}``, or
         ``{"kind": "crops", "folder": ..., "session_id": ...}``: each embryo
-        cut out of a folder of DIC frames, where the session's Operate
+        cut out of a folder of brightfield frames, where the session's Operate
         marking says the embryos are."""
         import threading
 
@@ -1094,7 +1094,8 @@ def create_router(server) -> APIRouter:
                 path = path / "dic"
             if not _dic_frames(path):
                 raise HTTPException(
-                    status_code=400, detail="No DIC frames (dic_f*.tif or dic.csv) in that folder"
+                    status_code=400,
+                    detail="No brightfield frames (dic_f*.tif or dic.csv) in that folder",
                 )
             sid = str((body or {}).get("session_id") or "")
             store = _file_store()
@@ -1113,7 +1114,8 @@ def create_router(server) -> APIRouter:
                 path = path / "dic"
             if not _dic_frames(path):
                 raise HTTPException(
-                    status_code=400, detail="No DIC frames (dic_f*.tif or dic.csv) in that folder"
+                    status_code=400,
+                    detail="No brightfield frames (dic_f*.tif or dic.csv) in that folder",
                 )
             steps.append({"corrected": False})
             if bool((body or {}).get("corrected", True)):
@@ -1189,7 +1191,7 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/sessions/{session_id}/snapshot/{stem}.png")
     async def session_snapshot_png(session_id: str, stem: str, max: int | None = None):
-        """One of the session's filed snapshots (DIC overview) as a PNG,
+        """One of the session's filed snapshots (brightfield overview) as a PNG,
         ``?max=N`` for a thumbnail. Found through the store's own listing,
         never from a path in the request."""
         from gently.ui.web.routes.dic import tiff_png_response

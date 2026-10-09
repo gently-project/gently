@@ -276,7 +276,7 @@
                         <!-- Stats rendered dynamically -->
                     </div>
                 </div>
-                {# The DIC overview channel: one frame of the whole field per
+                {# The brightfield overview channel: one frame of the whole field per
                    round. Frames arrive on IMAGE_ACQUIRED{source: dic} with a
                    thumbnail; the count comes from the run's status. Hidden
                    until a run has one. #}
@@ -286,7 +286,7 @@
                    folded to one row — and Open expands it in place. #}
                 <div class="dic-strip" id="dic-strip" hidden>
                     <div class="dic-strip-head">
-                        <span class="dic-strip-title">DIC overview</span>
+                        <span class="dic-strip-title">Brightfield overview</span>
                         <span class="dic-strip-count" id="dic-strip-count"></span>
                         <button type="button" class="dic-strip-open" id="dic-strip-open" title="The newest frame large, with the whole series beneath">Open ⌄</button>
                     </div>
@@ -928,7 +928,7 @@
                         <div class="op-plan-chan">
                           <div class="op-plan-chan-head">
                             <label class="op-plan-chan-name op-plan-check">
-                              <input type="checkbox" id="op-plan-dic"> <span id="op-plan-dic-name">DIC overview</span></label>
+                              <input type="checkbox" id="op-plan-dic"> <span id="op-plan-dic-name">Brightfield overview</span></label>
                             <span class="op-cap">one bottom-camera frame of the whole field</span></div>
                           <div class="op-plan-dic-body" id="op-plan-dic-body" hidden>
                             <div class="op-field" id="op-plan-dic-every-field"><label class="op-label" for="op-plan-dic-every">Every</label>

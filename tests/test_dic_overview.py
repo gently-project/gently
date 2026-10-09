@@ -1,4 +1,4 @@
-"""The DIC overview: one frame of the whole field per round, on its own clock.
+"""The brightfield overview: one frame of the whole field per round, on its own clock.
 
 The second channel of a Gently timelapse. The bottom camera's field covers
 every embryo, so one frame a round records all of them; and because embryo

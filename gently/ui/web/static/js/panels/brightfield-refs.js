@@ -1,5 +1,5 @@
 /**
- * Dark and flat-field references for the brightfield (DIC overview) frames.
+ * Dark and flat-field references for the brightfield (brightfield overview) frames.
  *
  *     BrightfieldRefs.mount('op-bfref-host');
  *

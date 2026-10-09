@@ -1,4 +1,4 @@
-"""The DIC overview says which light it is taken under.
+"""The brightfield overview says which light it is taken under.
 
 "on dic light source, perhaps that can be configured when setting up the dic
 - where appropriate. usually we use the room light."

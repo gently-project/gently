@@ -1,7 +1,7 @@
-"""In the film, the DIC overview is a row of the film; and a thumbnail is an
+"""In the film, the brightfield overview is a row of the film; and a thumbnail is an
 average, not a sample.
 
-"take a look at the embryo tab - say in the film view. the DIC thumbnails or
+"take a look at the embryo tab - say in the film view. the brightfield thumbnails or
 aesthetics look a bit off"
 
 Two causes. The thumbnails were made by keeping one pixel in eight, which

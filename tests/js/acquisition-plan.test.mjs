@@ -40,15 +40,15 @@ test('minutes are the unit the biologist thinks in; seconds are what is sent', (
     assert.match(P.describe(P.fromForm({ interval: 2, intervalUnit: 'min' }), SUBJECTS), /^Every 2 min/);
 });
 
-test('the DIC channel rides on its own clock, in rounds', () => {
+test('the brightfield channel rides on its own clock, in rounds', () => {
     const plan = P.fromForm({ interval: 5, intervalUnit: 'min', dic: true, dicEveryRounds: 3, dicExposureMs: 8 });
     const body = P.toPayload(plan, IDS);
     assert.deepEqual(body.dic, { enabled: true, every_seconds: 900, position: null, exposure_ms: 8, light: 'room' });
-    assert.match(P.describe(plan, SUBJECTS), /\+ one DIC overview every 3 rounds from the centroid/);
-    assert.match(P.describe(P.fromForm({ dic: true }), SUBJECTS), /one DIC overview per round from the centroid/);
+    assert.match(P.describe(plan, SUBJECTS), /\+ one brightfield overview every 3 rounds from the centroid/);
+    assert.match(P.describe(P.fromForm({ dic: true }), SUBJECTS), /one brightfield overview per round from the centroid/);
 });
 
-test('a plan without DIC sends no dic at all', () => {
+test('a plan without the brightfield channel sends no dic at all', () => {
     // The orchestrator treats an absent dic as off, and the existing exact-kwargs
     // route tests pin that a plain run calls start() exactly as before.
     assert.equal('dic' in P.toPayload(P.fromForm({}), IDS), false);
@@ -60,7 +60,7 @@ test('"taken from here" is the position captured when it was chosen', () => {
     assert.match(P.describe(plan, SUBJECTS), /from -512, -389/);
     // and without a captured position it is not a plan yet
     const none = P.fromForm({ dic: true, dicPosition: 'here', dicPin: null });
-    assert.match(P.validate(none, IDS).join(' '), /no stage position/i);
+    assert.match(P.validate(none, IDS).join(' '), /no field captured/i);
 });
 
 test('how it ends, for the run and for one embryo', () => {
@@ -156,7 +156,7 @@ test('the stop spec parses back to what the pane offers', () => {
     assert.deepEqual(P.parseStopSpec(undefined), { kind: 'manual', value: null });
 });
 
-test('a DIC interval that is not a whole number of rounds rounds to one', () => {
+test('a brightfield interval that is not a whole number of rounds rounds to one', () => {
     const plan = P.fromStructure({ cadence_s: 300, dic: { enabled: true, every_seconds: 700 } });
     assert.equal(plan.dic.everyRounds, 2);
 });

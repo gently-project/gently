@@ -66,7 +66,7 @@ def _session(store, sid="s1"):
             store.store_prediction(
                 1, sid, eid, tp, ["bean", "comma", "1_5_fold"][tp - 1], confidence=0.8
             )
-    # DIC frames filed by uuid, out of frame order on disk
+    # brightfield frames filed by uuid, out of frame order on disk
     for frame, when in ((2, "2026-10-04T22:00:00"), (1, "2026-10-04T21:30:00")):
         store.put_snapshot(
             sid,
@@ -218,7 +218,7 @@ class TestTheRecord:
         assert text.startswith("N2 overnight\n")
         assert f"Originals: {store._session_dir(sid)}" in text
         assert "three embryos until hatching" in text
-        assert "Interval: every 600 s" in text and "DIC overview: every 1800 s, led" in text
+        assert "Interval: every 600 s" in text and "Brightfield overview: every 1800 s, led" in text
         assert "A_embryo_1/   role test, 3 timepoints, last stage 1_5_fold, complete" in text
         assert "Import > Image Sequence" in text
         assert "copies, not links" in text
@@ -255,7 +255,7 @@ class TestTheRecord:
         export_session(store, sid, progress=lambda d, t, w: seen.append((d, t)))
         done, total = seen[-1]
         assert done == total and total == 5 + 2 + 2 + 5 + 6
-        # 5 volumes, 2 DIC frames copied and 2 into the movie, 5 projections
+        # 5 volumes, 2 brightfield frames copied and 2 into the movie, 5 projections
         # (filed with the volumes), six records
 
 
@@ -685,7 +685,7 @@ class TestMovieButton:
     def test_a_folder_without_the_right_files(self, store, tmp_path):
         c = _client(store)
         r = c.post("/api/movies", json={"kind": "dic", "folder": str(tmp_path)})
-        assert r.status_code == 400 and "DIC frames" in r.json()["detail"]
+        assert r.status_code == 400 and "brightfield frames" in r.json()["detail"]
         r = c.post("/api/movies", json={"kind": "spim", "folder": str(tmp_path)})
         assert r.status_code == 400 and "volumes" in r.json()["detail"]
 
@@ -940,7 +940,7 @@ class TestCropsInTheExport:
     @staticmethod
     def _mark(store, sid):
         """The Operate tab's marking: a 1/3-scale preview of the field with
-        each embryo's pixel position and stage position. The fixture's DIC
+        each embryo's pixel position and stage position. The fixture's brightfield
         frames are 6 x 9; the preview is 2 x 3."""
         from gently.core.export import marking_seeds
 
@@ -964,7 +964,7 @@ class TestCropsInTheExport:
         sid = _session(store)
         marking_seeds = self._mark(store, sid)
         seeds = marking_seeds(store, sid, store.list_embryos(sid))
-        # Scaled by the DIC frame's width over the preview's: 9 / 3.
+        # Scaled by the brightfield frame's width over the preview's: 9 / 3.
         assert seeds == {"A_embryo_1": (3.0, 1.5), "ref-2_embryo_2": (7.5, 4.5)}
         # The mark near no embryo is nobody's; a session without a marking has none.
         assert marking_seeds(store, "s9", []) == {} if store.get_session("s9") is None else True

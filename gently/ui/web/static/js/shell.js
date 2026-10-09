@@ -92,7 +92,7 @@ const Shell = (() => {
             const s = _run.nextIn;
             bits.push(`next ${s < 1 ? 'now' : s < 90 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`}`);
         }
-        if (_run.dicFrames) bits.push(`DIC ${_run.dicFrames}`);
+        if (_run.dicFrames) bits.push(`brightfield ${_run.dicFrames}`);
         return bits.join(' · ') + ' · ';
     }
 

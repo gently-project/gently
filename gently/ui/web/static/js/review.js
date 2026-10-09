@@ -1,9 +1,9 @@
 /**
  * Sessions — what a saved session holds, before it is restored.
  *
- * The list says how much each session has (embryos, timepoints, DIC frames,
+ * The list says how much each session has (embryos, timepoints, brightfield frames,
  * whether its run was cut short). Selecting one shows the plan it ran with,
- * the latest picture of every embryo, the DIC overview frames, the stage
+ * the latest picture of every embryo, the brightfield overview frames, the stage
  * calls, and the conversation — all read from the session's folder, nothing
  * restored. Resuming is the one button that changes the live agent.
  */
@@ -101,7 +101,7 @@ const ReviewApp = {
         const parts = [];
         if (s.embryo_count) parts.push(`${s.embryo_count} embryo${s.embryo_count !== 1 ? 's' : ''}`);
         if (s.timepoints) parts.push(`${s.timepoints} timepoint${s.timepoints !== 1 ? 's' : ''}`);
-        if (s.dic_frames) parts.push(`${s.dic_frames} DIC`);
+        if (s.dic_frames) parts.push(`${s.dic_frames} brightfield`);
         if (s.brightfield_references) parts.push('dark/flat ✓');
         if (s.bytes) parts.push(this.fmtBytes(s.bytes));
         return parts;
@@ -518,11 +518,11 @@ const ReviewApp = {
                     <input id="session-export-dest" placeholder="Destination folder (leave empty for ${this.escapeHtml(this._exportDefault || 'the data folder\'s exports/')})" autocomplete="off">
                     <button type="button" class="session-edit-btn reveal-local" id="session-export-browse" onclick="ReviewApp.browseExportDest()" title="Choose the folder in a dialog">Browse…</button>
                 </div>
-                <label class="session-movie-option"><input type="checkbox" id="session-export-crops" checked> Also cut each embryo out of the DIC frames into a Hugging Face folder of its own (needs the Operate tab's embryo marking)</label>
+                <label class="session-movie-option"><input type="checkbox" id="session-export-crops" checked> Also cut each embryo out of the brightfield frames into a Hugging Face folder of its own (needs the Operate tab's embryo marking)</label>
                 <div class="session-name-form-row">
                     <button type="submit" class="session-resume-btn">Export</button>
                     <button type="button" class="session-edit-btn" onclick="document.getElementById('session-export-form').innerHTML = ''">Cancel</button>
-                    <span class="hint">Copies, not links. A folder per embryo, named by nickname; volumes and DIC frames named so a sort is time order; plan, stage calls, events and temperature as CSV; a README pointing back at the originals.</span>
+                    <span class="hint">Copies, not links. A folder per embryo, named by nickname; volumes and brightfield frames named so a sort is time order; plan, stage calls, events and temperature as CSV; a README pointing back at the originals.</span>
                 </div>
             </form>`;
         const input = document.getElementById('session-export-dest');
@@ -565,8 +565,8 @@ const ReviewApp = {
         }
     },
 
-    // ---- movies, from any folder: DIC frames, or SPIM volumes ---------------
-    // Two buttons with two behaviours. A DIC movie is frames over time, with
+    // ---- movies, from any folder: brightfield frames, or SPIM volumes ---------------
+    // Two buttons with two behaviours. A brightfield movie is frames over time, with
     // the flat divided out where the dark and flat sit beside them. A SPIM
     // movie is volumes: max projections over time, or every slice, stack by
     // stack. Any folder: an export on a share, a session's own volumes.
@@ -591,9 +591,9 @@ const ReviewApp = {
         if (!document.getElementById('session-movie-status')) {
             host.innerHTML = `
                 <div class="session-export-row">
-                    <button class="session-edit-btn" id="session-movie-dic" onclick="ReviewApp.askMovie('dic')" title="A folder of DIC frames (an export's dic/) as a movie: every frame in time order, and flat-fielded where the dark and flat are beside them">DIC movie…</button>
+                    <button class="session-edit-btn" id="session-movie-dic" onclick="ReviewApp.askMovie('dic')" title="A folder of brightfield frames (an export's dic/) as a movie: every frame in time order, and flat-fielded where the dark and flat are beside them">brightfield movie…</button>
                     <button class="session-edit-btn" id="session-movie-spim" onclick="ReviewApp.askMovie('spim')" title="A folder of volumes (an export's <embryo>/volumes) as a movie: max projections over time, or every slice stack by stack">SPIM movie…</button>
-                    <button class="session-edit-btn" id="session-movie-crops" onclick="ReviewApp.askMovie('crops')" title="Cut each embryo out of a folder of DIC frames (an export's dic/) into a Hugging Face folder of its own: raw and corrected crops, the references, one metadata table. Where the embryos are comes from this session's Operate marking">Embryo crops…</button>
+                    <button class="session-edit-btn" id="session-movie-crops" onclick="ReviewApp.askMovie('crops')" title="Cut each embryo out of a folder of brightfield frames (an export's dic/) into a Hugging Face folder of its own: raw and corrected crops, the references, one metadata table. Where the embryos are comes from this session's Operate marking">Embryo crops…</button>
                     <span id="session-movie-status"></span>
                 </div>
                 <div id="session-movie-form"></div>`;
@@ -635,7 +635,7 @@ const ReviewApp = {
                 ? ''
                 : `<label class="session-movie-option"><input type="radio" name="session-movie-view" value="projection" checked> Max projection, one frame per timepoint (spim_projection.avi)</label>
                <label class="session-movie-option"><input type="radio" name="session-movie-view" value="slices"> Every slice, stack by stack (spim_slices.avi)</label>`;
-        const makeLabel = dic ? 'Make DIC movie' : crops ? 'Cut the embryos out' : 'Make SPIM movie';
+        const makeLabel = dic ? 'Make brightfield movie' : crops ? 'Cut the embryos out' : 'Make SPIM movie';
         const hint = dic
             ? 'Every frame in time order, one brightness stretch for the run, frame and time in the corner. Written beside the frames; Fiji opens it with File › Import › AVI.'
             : crops
@@ -644,7 +644,7 @@ const ReviewApp = {
         host.innerHTML = `
             <form class="session-name-form" onsubmit="event.preventDefault(); ReviewApp.startMovie('${kind}')">
                 <div class="session-export-dest-row">
-                    <input id="session-movie-folder" value="${this.escapeHtml(prefill)}" placeholder="${dic || crops ? "Folder of DIC frames: an export's dic/ folder" : "Folder of volumes: an export's <embryo>/volumes folder"}" autocomplete="off">
+                    <input id="session-movie-folder" value="${this.escapeHtml(prefill)}" placeholder="${dic || crops ? "Folder of brightfield frames: an export's dic/ folder" : "Folder of volumes: an export's <embryo>/volumes folder"}" autocomplete="off">
                     <button type="button" class="session-edit-btn reveal-local" id="session-movie-browse" onclick="ReviewApp.browseMovieFolder()" title="Choose the folder in a dialog">Browse…</button>
                 </div>
                 ${choice}
@@ -894,9 +894,9 @@ const ReviewApp = {
             if (dic.every_seconds) d.push(`every ${this.fmtInterval(dic.every_seconds)}`);
             if (dic.light) d.push(dic.light === 'led' ? `LED${dic.led_intensity_pct != null ? ` ${dic.led_intensity_pct}%` : ''}` : dic.light === 'room' ? 'room light' : 'light as it is');
             if (dic.exposure_ms != null) d.push(`${dic.exposure_ms} ms`);
-            rows.push(['DIC overview', d.join(' · ')]);
+            rows.push(['Brightfield overview', d.join(' · ')]);
         } else {
-            rows.push(['DIC overview', 'off']);
+            rows.push(['Brightfield overview', 'off']);
         }
         if (Array.isArray(plan.embryo_ids) && plan.embryo_ids.length) rows.push(['Embryos', plan.embryo_ids.join(', ')]);
         return `
@@ -935,11 +935,11 @@ const ReviewApp = {
         if (!frames.length) return '';
         return `
             <div class="session-dic">
-                <div class="session-dic-head">DIC overview <span class="session-dic-count">${frames.length} frame${frames.length !== 1 ? 's' : ''}</span></div>
+                <div class="session-dic-head">Brightfield overview <span class="session-dic-count">${frames.length} frame${frames.length !== 1 ? 's' : ''}</span></div>
                 <div class="session-dic-frames">
                     ${frames.map(f => `
                         <a class="session-dic-frame" href="${f.url}" target="_blank" rel="noopener" title="Open frame ${f.frame ?? ''}">
-                            <img src="${f.url}?max=256" alt="DIC overview frame ${f.frame ?? ''}" loading="lazy">
+                            <img src="${f.url}?max=256" alt="brightfield overview frame ${f.frame ?? ''}" loading="lazy">
                             <span class="session-dic-cap">${f.frame ?? ''}${f.captured_at ? ` · ${this.formatTime(f.captured_at)}` : ''}</span>
                         </a>`).join('')}
                 </div>

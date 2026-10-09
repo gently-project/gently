@@ -85,7 +85,7 @@ async def _run_cancellable_calibration(agent, coro, what: str):
 
 
 def _parse_dic_config(raw) -> dict | None:
-    """The DIC overview block of a plan, validated. None when absent or off."""
+    """The brightfield overview block of a plan, validated. None when absent or off."""
     if raw is None:
         return None
     if not isinstance(raw, dict):
@@ -2922,7 +2922,7 @@ def create_router(server) -> APIRouter:
                              "561": 10}; each within the device layer's hard
                              limit for its line, or the start is refused. A
                              line left out keeps the power it has
-          dic              (dict | null) — the DIC overview channel:
+          dic              (dict | null) — the brightfield overview channel:
                              {enabled: bool, every_seconds: float|null,
                               position: {x, y}|null, exposure_ms: float|null,
                               light: room|led|none,
@@ -3093,7 +3093,7 @@ def create_router(server) -> APIRouter:
         # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
         #       this is intentional — the agent path wires the plan, this route does not.
         # Only what the plan actually says goes to the orchestrator: a run
-        # without a DIC channel calls start() exactly as it always has.
+        # without a brightfield channel calls start() exactly as it always has.
         start_kwargs: dict = {
             "embryo_ids": embryo_ids,
             "stop_condition": stop_condition,
@@ -3386,7 +3386,7 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/devices/timelapse/status")
     async def timelapse_status():
-        """The run as it stands: status, cadence, every embryo, the DIC channel.
+        """The run as it stands: status, cadence, every embryo, the brightfield channel.
 
         What the Acquisition pane draws its embryo-wise rows from. Read-only,
         so no require_control — it is the same TimelapseState the agent's

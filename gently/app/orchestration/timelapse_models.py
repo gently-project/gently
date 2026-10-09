@@ -343,7 +343,7 @@ class StopCondition:
 
 @dataclass
 class DicOverview:
-    """One bottom-camera (DIC) frame of the whole field, per round.
+    """One bottom-camera (brightfield) frame of the whole field, per round.
 
     The second channel of a Gently timelapse. Not a per-embryo thing: the
     bottom camera's field covers every embryo on the coverslip, so one frame
@@ -483,7 +483,7 @@ class TimelapseState:
     next_round_time: datetime | None = None
     seconds_until_next_round: float | None = None
     error_message: str | None = None
-    # The DIC overview channel, when the run has one: frames taken, next due.
+    # The brightfield overview channel, when the run has one: frames taken, next due.
     dic: dict[str, Any] | None = None
     # False for a brightfield-only run: the overview channel is the run, and
     # no embryo is imaged by the SPIM head.

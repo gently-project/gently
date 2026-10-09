@@ -14,7 +14,7 @@ reaches, when a change takes effect, where it is kept, and who reads it.
 it, so a dead setting cannot come back.
 
 Some settings are best edited where they are used — the XY region on the Map,
-the SPIM centre on Bottom cam, the DIC light in the plan. Those stay there.
+the SPIM centre on Bottom cam, the brightfield light in the plan. Those stay there.
 They are declared here as links, so Settings says where everything is without
 holding a second copy of anything.
 """
@@ -200,7 +200,7 @@ SETTINGS: list[Setting] = [
     Setting(
         key="views.film.showStageLabels",
         label="Label each frame",
-        help="The stage under an embryo's frame, the time under a DIC frame.",
+        help="The stage under an embryo's frame, the time under a brightfield frame.",
         category="views",
         group="Film",
         type="bool",
@@ -274,7 +274,7 @@ SETTINGS: list[Setting] = [
     Setting(
         key="experiment.plan",
         label="Acquisition plan",
-        help="Cadence, channels, the DIC light and how a run ends. Kept with each "
+        help="Cadence, channels, the brightfield light and how a run ends. Kept with each "
         "session; a plan can be saved under a name and run again.",
         category="experiment",
         type="link",

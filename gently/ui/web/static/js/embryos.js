@@ -178,7 +178,7 @@ const EmbryosManager = {
         ClientEventBus.on('VERIFICATION_PROGRESS', (data) => this.handleVerificationProgress(data));
         ClientEventBus.on('VERIFICATION_COMPLETED', (data) => this.handleVerificationCompleted(data));
         ClientEventBus.on('TIMELAPSE_STATE', (data) => this.reconcileWithServerState(data));
-        // The DIC overview channel: a frame of the whole field, per round.
+        // The brightfield overview channel: a frame of the whole field, per round.
         ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data));
         // A run that started before this page did has frames on disk already.
         ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshDicStrip());
@@ -209,7 +209,7 @@ const EmbryosManager = {
     // ==========================================
     // What kind of run this is
     // ==========================================
-    // volumes:false with the DIC channel on is a brightfield run: the frames
+    // volumes:false with the brightfield channel on is a brightfield run: the frames
     // are the experiment and there are no embryo volumes. volumes:true with
     // the channel on is a mixed run. The status route says which, with how
     // many frames have landed, when the next is due, and whether they have a
@@ -249,7 +249,7 @@ const EmbryosManager = {
     },
 
     // ==========================================
-    // The DIC overview strip
+    // The brightfield overview strip
     // ==========================================
     // The overview channel is the field's, not an embryo's, so its frames
     // have a strip above the cards rather than a card each. Frames arrive
@@ -381,7 +381,7 @@ const EmbryosManager = {
                 const idx = all.indexOf(f);
                 const fld = n ? ` · field ${n}` : '';
                 return `<button type="button" class="dic-frame" data-dic-index="${idx}" title="Frame ${f.frame}${fld}${t ? `, ${t}` : ''} — open">` +
-                    (f.thumb ? `<img src="${f.thumb}" alt="DIC overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
+                    (f.thumb ? `<img src="${f.thumb}" alt="brightfield overview, frame ${f.frame}${fld}" loading="lazy">` : '<span class="dic-frame-blank"></span>') +
                     `<span class="dic-frame-cap">${f.frame}${t ? ` · ${t}` : ''}</span></button>`;
             }).join('');
             return n
@@ -496,7 +496,7 @@ const EmbryosManager = {
         }
         // Update buttons
         this._updateViewButtons();
-        // The DIC strip gives way to the film's own DIC row, and comes back.
+        // The brightfield strip gives way to the film's own brightfield row, and comes back.
         this.renderDicStrip();
         // Render the active view's content
         this._renderActiveView();
@@ -881,7 +881,7 @@ const EmbryosManager = {
     // ==========================================
 
     /**
-     * The DIC overview as the film's first row: the same cell as an embryo's
+     * The brightfield overview as the film's first row: the same cell as an embryo's
      * timepoint, on the same scroll, one frame per round. It used to sit above
      * the film as its own block, at twice the size, showing the last twelve
      * frames over a film that starts at the first.
@@ -901,7 +901,7 @@ const EmbryosManager = {
         const shown = skip > 1 ? all.filter((_, i) => i % skip === 0 || i === all.length - 1) : all;
         let html = '<div class="filmstrip-row filmstrip-dic-row">';
         html += `<div class="filmstrip-label">
-                <span class="filmstrip-name">DIC</span>
+                <span class="filmstrip-name">Brightfield</span>
                 <span class="filmstrip-stage">${fieldNo ? `field ${fieldNo}` : 'overview'}</span>
                 <span class="filmstrip-count">${all.length} frame${all.length === 1 ? '' : 's'}</span>
             </div>`;
@@ -910,9 +910,9 @@ const EmbryosManager = {
             const when = f.when ? new Date(f.when) : null;
             const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
             const idx = every.indexOf(f);
-            html += `<div class="filmstrip-cell filmstrip-dic-cell" data-dic-index="${idx}" title="DIC overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
+            html += `<div class="filmstrip-cell filmstrip-dic-cell" data-dic-index="${idx}" title="brightfield overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
             if (f.thumb) {
-                html += `<img class="filmstrip-thumb filmstrip-dic-thumb" src="${f.thumb}" loading="lazy" width="${thumbSize}" height="${thumbSize}" alt="DIC overview, frame ${f.frame}"/>`;
+                html += `<img class="filmstrip-thumb filmstrip-dic-thumb" src="${f.thumb}" loading="lazy" width="${thumbSize}" height="${thumbSize}" alt="brightfield overview, frame ${f.frame}"/>`;
             } else {
                 html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px">${f.frame}</div>`;
             }
@@ -1018,7 +1018,7 @@ const EmbryosManager = {
         html += '<div class="filmstrip-detail" id="filmstrip-detail"></div>';
         container.innerHTML = html;
 
-        // Click handlers. A DIC cell opens the overview viewer; it is not
+        // Click handlers. A brightfield cell opens the overview viewer; it is not
         // an embryo's timepoint and has no detail panel.
         container.querySelectorAll('.filmstrip-dic-cell').forEach(cell => {
             cell.addEventListener('click', () => this.openDicViewer(Number(cell.dataset.dicIndex)));

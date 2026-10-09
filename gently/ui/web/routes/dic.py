@@ -1,4 +1,4 @@
-"""The DIC overview frames of the live session, as a list and as PNGs.
+"""The brightfield overview frames of the live session, as a list and as PNGs.
 
 The overview channel files one TIFF per round under the session's
 ``snapshots/`` (see ``TimelapseOrchestrator._capture_dic_overview``). The
@@ -43,7 +43,7 @@ def create_router(server) -> APIRouter:
         try:
             return list(store.list_snapshots(sid, "dic"))
         except Exception:
-            logger.debug("DIC frame listing failed", exc_info=True)
+            logger.debug("brightfield frame listing failed", exc_info=True)
             return []
 
     def _stem(rec: dict) -> str | None:
@@ -51,7 +51,7 @@ def create_router(server) -> APIRouter:
         return Path(fp).stem if fp else None
 
     def _record(stem: str) -> dict | None:
-        """The one DIC frame with this stem: its own sidecar, read once.
+        """The one brightfield frame with this stem: its own sidecar, read once.
         Listing every frame to find one was what stalled the agent while a
         run was played back (two thousand sidecars per image, ten images a
         second, all on the loop the orchestrator runs on)."""
@@ -64,7 +64,7 @@ def create_router(server) -> APIRouter:
             try:
                 rec = one(sid, stem)
             except Exception:
-                logger.debug("DIC frame lookup failed", exc_info=True)
+                logger.debug("brightfield frame lookup failed", exc_info=True)
                 rec = None
             if isinstance(rec, dict):
                 return rec if rec.get("source") == "dic" else None
@@ -169,7 +169,9 @@ def create_router(server) -> APIRouter:
         first (404 if the frame has none)."""
         rec = await asyncio.to_thread(_record, stem)
         if rec is None:
-            raise HTTPException(status_code=404, detail=f"no DIC frame {stem!r} in this session")
+            raise HTTPException(
+                status_code=404, detail=f"no brightfield frame {stem!r} in this session"
+            )
         refs = None
         if corrected:
             refs = await asyncio.to_thread(lambda: _correction_for(rec, _reference_records()))
@@ -192,7 +194,7 @@ def tiff_png_response(
 ) -> Response:
     """A filed TIFF as a PNG response; ``max`` bounds the longer side for a
     thumbnail; ``correction`` is the (dark, flat) pair to divide out first.
-    Shared by the live-session DIC routes and the Sessions tab's per-session
+    Shared by the live-session brightfield routes and the Sessions tab's per-session
     snapshot route."""
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"frame {stem!r} is no longer on disk")

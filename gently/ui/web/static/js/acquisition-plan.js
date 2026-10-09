@@ -10,7 +10,7 @@
  * before pressing Start:
  *
  *   Every 5 min: SPIM volumes (50 slices · 10 ms · 488 and 561) of 4 embryos
- *   + one DIC overview per round from the centroid · until stopped; embryo 2
+ *   + one brightfield overview per round from the centroid · until stopped; embryo 2
  *   at hatching.
  *
  * The SPIM volume is a channel like the other, and can be switched off. What
@@ -69,7 +69,7 @@ const AcquisitionPlan = (() => {
     // not a brightness, it is the LED closed.
     const LED_PCT = { min: 1, max: 100 };
 
-    // The light the DIC overview is taken under. The bottom camera drives
+    // The light the brightfield overview is taken under. The bottom camera drives
     // none of its own, so the plan has to say.
     const DIC_LIGHTS = {
         room: { label: 'room light', says: 'under the room light' },
@@ -220,7 +220,7 @@ const AcquisitionPlan = (() => {
             problems.push(`LED brightness must be a whole percent from ${LED_PCT.min} to ${LED_PCT.max}.`);
         }
         if (plan.dic.enabled && plan.dic.position === 'here' && !plan.dic.pin) {
-            problems.push('DIC overview: no stage position captured for "here" yet.');
+            problems.push('Brightfield overview: no field captured for "the fields" yet.');
         }
         if (plan.stop.kind === 'timepoints' && !(num(plan.stop.value, 0) >= 1)) {
             problems.push(volumes ? 'Stop after how many timepoints?' : 'Stop after how many frames?');
@@ -339,7 +339,7 @@ const AcquisitionPlan = (() => {
                 : plan.dic.position === 'here' && plan.dic.pin
                     ? `from ${plan.dic.pin.x.toFixed(0)}, ${plan.dic.pin.y.toFixed(0)}`
                     : 'from the centroid';
-            s += ` + ${many ? 'a' : 'one'} DIC overview ${every} ${from}, ${lit()}`;
+            s += ` + ${many ? 'a' : 'one'} brightfield overview ${every} ${from}, ${lit()}`;
         }
         s += ` · ${stopWords(plan.stop.kind, plan.stop.value)}`;
         if (plan.overrides.length) {

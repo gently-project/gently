@@ -149,7 +149,7 @@ def _references_for(meta: dict, records: list[dict]) -> dict | None:
 
 
 def _dic_frames(dic_dir: Path) -> list[dict[str, Any]]:
-    """The DIC frames of an export's dic/ folder in time order: each with
+    """The brightfield frames of an export's dic/ folder in time order: each with
     its path, when it was captured, and the dark and flat dic.csv names for
     it (relative to dic/). From dic.csv when it is there, else the names."""
     rows: list[dict[str, Any]] = []
@@ -259,7 +259,7 @@ def dic_movie(
     label: bool = True,
     corrected: bool = False,
 ) -> Path | None:
-    """Write ``dic.avi`` beside an export's DIC frames: every frame in time
+    """Write ``dic.avi`` beside an export's brightfield frames: every frame in time
     order, one brightness stretch for the whole run (so the movie does not
     flicker with the field), the frame number and the time since the first
     in the corner. Motion JPEG, which Fiji's AVI reader opens.
@@ -419,7 +419,7 @@ def _sample_frames(dic_dir: Path, sample: int) -> list[tuple[Any, Any, Any]]:
     dic_dir = Path(dic_dir)
     frames = _dic_frames(dic_dir)
     if not frames:
-        raise FileNotFoundError(f"No DIC frames in {dic_dir}")
+        raise FileNotFoundError(f"No brightfield frames in {dic_dir}")
     picks = frames[:: max(1, (len(frames) - 1) // max(1, sample - 1))][:sample]
     refs: dict[tuple[str, str], tuple] = {}
     out = []
@@ -508,7 +508,7 @@ def find_embryo_boxes(
     sample: int = 3,
     method: str = "auto",
 ) -> dict[str, Box]:
-    """Where each embryo is in the DIC field, as one box that holds it in
+    """Where each embryo is in the brightfield field, as one box that holds it in
     every frame. ``seeds`` is each embryo's approximate centre in full-frame
     pixels (the Operate tab's marking gives these). An embryo is the box
     nearest its seed, measured in ``sample`` frames spread through the run
@@ -586,7 +586,7 @@ def dic_crops(
     label: bool = True,
     notes: dict[str, str] | None = None,
 ) -> Path:
-    """Cut each embryo out of every DIC frame into a folder of its own:
+    """Cut each embryo out of every brightfield frame into a folder of its own:
 
         <dic_dir>/embryos/
             README.md                     a dataset card: what this is, how to load it
@@ -615,7 +615,7 @@ def dic_crops(
     dic_dir = Path(dic_dir)
     frames = _dic_frames(dic_dir)
     if not frames:
-        raise FileNotFoundError(f"No DIC frames in {dic_dir}")
+        raise FileNotFoundError(f"No brightfield frames in {dic_dir}")
     root = dic_dir / "embryos"
     root.mkdir(parents=True, exist_ok=True)
     notes = notes or {}
@@ -858,7 +858,7 @@ def _crops_card(
     first = names[0] if names else "<embryo>"
     lines = [
         "---",
-        f"pretty_name: DIC time-lapse of C. elegans embryos, {session}",
+        f"pretty_name: Brightfield time-lapse of C. elegans embryos, {session}",
         "tags:",
         "- microscopy",
         "- brightfield",
@@ -871,7 +871,7 @@ def _crops_card(
         "",
         f"# {session}: one folder per embryo",
         "",
-        f"Gently session `{session}`. Each embryo was cut out of every DIC overview frame",
+        f"Gently session `{session}`. Each embryo was cut out of every brightfield overview frame",
         "with one fixed box, so a folder plays as a fixed camera on one embryo.",
         f"{len(names)} embryo(s), {n_frames} frames each"
         + (f", from {start}" if start else "")
@@ -944,7 +944,7 @@ def marking_seeds(
     embryos: list[dict],
     position: dict | None = None,
 ) -> dict[str, tuple[float, float]]:
-    """Where each embryo is in the full DIC frame, keyed by its export label.
+    """Where each embryo is in the full brightfield frame, keyed by its export label.
 
     From the Operate tab's marking (the newest): the preview's pixel
     positions scaled to the frame, each mark given to the embryo whose
@@ -1079,7 +1079,7 @@ def spim_movie(
     label: bool = True,
 ) -> Path | None:
     """Write a movie of a folder of volumes (an export's ``<embryo>/volumes``,
-    or a session's). Not the DIC movie: a volume is a stack, and there are
+    or a session's). Not the brightfield movie: a volume is a stack, and there are
     two ways to watch one.
 
     ``view="projection"`` writes ``spim_projection.avi``: the max projection
@@ -1276,9 +1276,9 @@ def plan_lines(plan: dict | None) -> list[str]:
             )
         if dic.get("exposure_ms") is not None:
             bits.append(f"{dic['exposure_ms']} ms")
-        out.append("DIC overview: " + ", ".join(bits))
+        out.append("Brightfield overview: " + ", ".join(bits))
     else:
-        out.append("DIC overview: off")
+        out.append("Brightfield overview: off")
     return out
 
 
@@ -1292,7 +1292,7 @@ def export_session(
     """Write the export of ``session_id`` under ``dest`` (default
     ``<root>/exports``) and return its folder. Re-exporting overwrites the
     same folder. ``progress(done, total, what)`` is called per file.
-    ``crops`` also cuts each embryo out of the DIC frames into a Hugging
+    ``crops`` also cuts each embryo out of the brightfield frames into a Hugging
     Face folder of its own (see ``dic_crops``), where the session has an
     Operate marking to say where the embryos are."""
     sd = store._session_dir(session_id)
@@ -1527,7 +1527,7 @@ def export_session(
                     doc["record"] = doc.get("record") or entry.name
                     ref_records.append(doc)
 
-    # --- the DIC overview, by frame then time, not by uuid ------------------
+    # --- the brightfield overview, by frame then time, not by uuid ------------------
     # Taken from more than one position, the overview is one series per
     # field, each in a folder of its own with its own table and movies.
     n_fields = max(
@@ -1605,7 +1605,7 @@ def export_session(
         )
     step("dic.csv")
 
-    # --- the DIC frames as a movie, to watch the night go by: as taken, and
+    # --- the brightfield frames as a movie, to watch the night go by: as taken, and
     # with the dark and flat divided out where there are any ----------------
     movies = [False, True] if (dic_rows and ref_records) else [False] if dic_rows else []
     for corrected in movies:
@@ -1622,11 +1622,11 @@ def export_session(
             try:
                 dic_movie(dic_dir_of(field_no), progress=movie_progress, corrected=corrected)
             except Exception:
-                logger.exception("the DIC movie failed; the frames are exported without it")
+                logger.exception("the brightfield movie failed; the frames are exported without it")
             base = at + len(rows_f)
         done = base
 
-    # --- each embryo cut out of the DIC frames, a dataset folder each --------
+    # --- each embryo cut out of the brightfield frames, a dataset folder each --------
     # With more than one field, each field has its own marking (the operator
     # marked the embryos at each position) and its own embryos/ folder.
     crops_root: Path | None = None
@@ -1700,7 +1700,7 @@ def export_session(
         "  <embryo>/volumes.csv                      when each was taken and with what settings",
         "  <embryo>/projections/                     the per-timepoint JPEG projections",
         "  <embryo>/calibration/                     the calibration runs (frames, plots, fit)",
-        "  dic/dic_f0001_<date-time>.tif ...         the DIC overview frames, in order;"
+        "  dic/dic_f0001_<date-time>.tif ...         the brightfield overview frames, in order;"
         " dic/dic.csv says when and where",
         "  dic/references/<record>/                  dark and flat-field references;"
         " brightfield.yaml says light, exposure, frames averaged, checks",
@@ -1728,7 +1728,7 @@ def export_session(
             if multi
             else []
         ),
-        "  The DIC overview as a movie: open dic/dic.avi (File > Import > AVI...), or"
+        "  The brightfield overview as a movie: open dic/dic.avi (File > Import > AVI...), or"
         " Image Sequence on the dic/ folder for the raw frames.",
         "  dic.avi is Motion JPEG: every frame in time order, one brightness stretch for"
         " the run, frame number and time since the first in the corner. For viewing;"
@@ -1738,9 +1738,9 @@ def export_session(
         " (the correction above), where the session had them.",
         *(
             [
-                "  dic/embryos/<embryo>/ is each embryo cut out of every DIC frame with one fixed"
-                " box: raw/ and corrected/ crops, the dark and flat cropped the same, and a"
-                " metadata.csv tying them together. A Hugging Face image folder each; its"
+                "  dic/embryos/<embryo>/ is each embryo cut out of every brightfield frame with"
+                " one fixed box: raw/ and corrected/ crops, the dark and flat cropped the same,"
+                " and a metadata.csv tying them together. A Hugging Face image folder each; its"
                 " README.md says how to load and upload it.",
             ]
             if crops_root is not None

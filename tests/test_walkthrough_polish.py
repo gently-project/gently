@@ -1,6 +1,6 @@
 """Three things from the first walkthrough of the acquisition surface.
 
-* "the DIC overview image is not viewable … more like an icon, than a
+* "the brightfield overview image is not viewable … more like an icon, than a
   clickable image" — the strip's frames open a viewer with the full frame.
 * "the embryos left layout has more space than needed, and the center and
   right one feels a bit crowded" — the columns are sized to what they hold.
@@ -63,7 +63,7 @@ def test_the_strip_hydrates_from_disk_for_a_page_that_opened_late():
     assert "/api/dic/frames" in EMBRYOS
     assert "this.refreshDicStrip();" in EMBRYOS
     assert "ClientEventBus.on('ACQUISITION_STARTED', () => this.refreshDicStrip())" in EMBRYOS
-    assert "create_dic_router" in ROUTES_INIT, "the DIC routes are not registered"
+    assert "create_dic_router" in ROUTES_INIT, "the brightfield routes are not registered"
 
 
 def test_a_restored_session_brings_its_own_frames_to_the_strip():
@@ -134,7 +134,7 @@ def test_idle_is_the_absence_of_a_rule():
 
 
 def test_every_method_the_embryos_init_calls_exists():
-    """A patch that replaced the DIC handler sliced from its comment to the next
+    """A patch that replaced the brightfield handler sliced from its comment to the next
     landmark — a thousand lines later — and took loadDashboardConfig() and
     everything else in between with it. init() then threw on its first line,
     on every page load, and the Embryos tab never subscribed to anything.

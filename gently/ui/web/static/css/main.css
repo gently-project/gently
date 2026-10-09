@@ -11488,7 +11488,7 @@ body.modal-open {
 .region-corner:hover .region-corner-dot { fill: var(--accent, #3b82f6); }
 @media (prefers-reduced-motion: reduce) { .region-strip { backdrop-filter: none; } }
 
-/* ── Embryos: the DIC overview strip ───────────────────────────────────── */
+/* ── Embryos: the brightfield overview strip ───────────────────────────────────── */
 .dic-strip {
     margin: 6px 0 2px;
     padding: 6px 8px;
@@ -11578,7 +11578,7 @@ button.home-image:hover, button.home-image:focus-visible { border-color: var(--a
 }
 .home-image-group-head .reveal-btn { margin-left: auto; align-self: center; }
 
-/* ── Film: the DIC overview is the first row, on the same timeline ───────── */
+/* ── Film: the brightfield overview is the first row, on the same timeline ───────── */
 .filmstrip-dic-row { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
 .filmstrip-dic-row .filmstrip-label { background: var(--bg-hover); }
 .filmstrip-dic-thumb {

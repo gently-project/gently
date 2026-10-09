@@ -1,4 +1,4 @@
-"""The run, embryo by embryo, on the Acquisition pane; the DIC strip on Embryos.
+"""The run, embryo by embryo, on the Acquisition pane; the brightfield strip on Embryos.
 
 CI runs no JavaScript and no browser, so what the pane and the tab need in
 order to work is pinned as source. The status route the pane reads is tested
@@ -77,7 +77,7 @@ def test_the_dic_strip_exists_and_is_fed_by_the_event():
     assert 'id="dic-strip"' in HTML and 'id="dic-strip-frames"' in HTML
     assert "ClientEventBus.on('IMAGE_ACQUIRED', (data) => this.handleDicFrame(data))" in EMBRYOS
     fn = EMBRYOS[EMBRYOS.index("handleDicFrame(data) {") :][:1400]
-    assert "data.source !== 'dic'" in fn, "any IMAGE_ACQUIRED would land on the DIC strip"
+    assert "data.source !== 'dic'" in fn, "any IMAGE_ACQUIRED would land on the brightfield strip"
     assert "data:image/png;base64," in fn
     render = EMBRYOS[EMBRYOS.index("renderDicStrip() {") :][:2400]
     assert "slice(-12)" in render, "the strip keeps every frame in the DOM"

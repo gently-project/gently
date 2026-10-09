@@ -1,6 +1,6 @@
-"""The DIC overview frames of the live session, listed and rendered.
+"""The brightfield overview frames of the live session, listed and rendered.
 
-"in embryos tab the DIC overview image is not viewable … it appears more
+"in embryos tab the brightfield overview image is not viewable … it appears more
 like an icon, than a clickable image." The event's thumbnail is for
 noticing a frame land; these routes are what a click opens.
 """

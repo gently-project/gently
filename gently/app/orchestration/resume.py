@@ -4,7 +4,7 @@
 restoration."
 
 Two things were lost. The orchestrator checkpoints its runtime state to
-``timelapse.yaml`` every round — cadence, the DIC channel, every embryo's
+``timelapse.yaml`` every round — cadence, the brightfield channel, every embryo's
 stop condition and timepoint count — and nothing ever read it back: the
 loader existed with no caller. A resumed run would have started its numbering
 from whatever the conversation snapshot last said, over the volumes on disk.

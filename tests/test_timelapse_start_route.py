@@ -286,12 +286,12 @@ def test_timelapse_start_requires_control():
 
 
 # ---------------------------------------------------------------------------
-# The plan's two new axes: the DIC channel, and per-embryo termination
+# The plan's two new axes: the brightfield channel, and per-embryo termination
 # ---------------------------------------------------------------------------
 
 
 def test_a_plan_without_dic_calls_start_exactly_as_before():
-    """A run with no DIC channel must not grow a `dic=` kwarg — the old
+    """A run with no brightfield channel must not grow a `dic=` kwarg — the old
     assertions above are the contract, and this keeps them honest."""
     orch = _make_orchestrator()
     _app(orch).post("/api/devices/timelapse/start", json={"interval_seconds": 60})

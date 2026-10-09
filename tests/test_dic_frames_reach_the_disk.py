@@ -1,6 +1,6 @@
-"""A DIC overview frame reaches the disk on a real device layer.
+"""A brightfield overview frame reaches the disk on a real device layer.
 
-A night's run logged 24 DIC frames acquired. None were on disk.
+A night's run logged 24 brightfield frames acquired. None were on disk.
 
 The client swaps each staged file for its pixels and keeps the path on the
 result, so the bottom-camera capture reported no path; the run asked

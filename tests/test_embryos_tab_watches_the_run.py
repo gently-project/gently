@@ -3,7 +3,7 @@
 "the embryos tab - it has not been looked at in ages - can you see how we can
 improve that view? especialy now that dic images are being sent there."
 
-A brightfield-only run (volumes off, the DIC channel on) has no embryos; the
+A brightfield-only run (volumes off, the brightfield channel on) has no embryos; the
 tab used to call it "No active timelapse" under a strip of live frames. Now the
 status comes from the run, the stats from what kind of run it is, the frames
 get the stage, and the embryo rail is tiles on the stage ramp, not emoji.

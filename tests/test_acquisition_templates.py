@@ -98,7 +98,7 @@ def test_a_saved_plan_reaches_the_orchestrator_whole():
     assert kw["embryo_ids"] == ["embryo_1", "embryo_2"]
     assert kw["base_interval_seconds"] == 300
     assert kw["stop_condition"] == "duration:12h"
-    assert kw["dic"] == PLAN["dic"], "the DIC channel was dropped on the way"
+    assert kw["dic"] == PLAN["dic"], "the brightfield channel was dropped on the way"
     assert kw["stop_conditions"] == {"embryo_2": "hatching"}, "the per-embryo endings were dropped"
 
 

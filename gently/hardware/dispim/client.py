@@ -1214,7 +1214,7 @@ class DiSPIMMicroscope(Microscope):
             # pixels and kept the path on the result, so _extract_image finds
             # an array and reports no path. Every caller that archives the
             # frame asks `if image_path`, so on a real device layer none of
-            # them ever archived one: a night's DIC overview was 24 frames
+            # them ever archived one: a night's brightfield overview was 24 frames
             # acquired and none on disk.
             if fpath is None and result.get("volume_path"):
                 from pathlib import Path

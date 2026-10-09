@@ -147,7 +147,7 @@ class TimelapseOrchestrator:
         self._acquisition_task: asyncio.Task | None = None
         self._stop_requested = False
 
-        # The DIC overview channel (see DicOverview). A subject of its own in
+        # The brightfield overview channel (see DicOverview). A subject of its own in
         # the due-loop: one frame of the whole field on its own clock.
         self._dic: DicOverview | None = None
         self._dic_references: dict | None = None
@@ -259,7 +259,7 @@ class TimelapseOrchestrator:
         condition_value : any, optional
             Value for stop condition (e.g., number of timepoints)
         dic : DicOverview or dict, optional
-            The DIC overview channel: one bottom-camera frame of the whole
+            The brightfield overview channel: one bottom-camera frame of the whole
             field per round, on its own clock. Off when omitted.
         stop_conditions : dict, optional
             Per-embryo overrides of ``stop_condition``, keyed by embryo id.
@@ -377,7 +377,7 @@ class TimelapseOrchestrator:
                 unknown_overrides,
             )
 
-        # The DIC overview. Its first frame is due now, ahead of the first
+        # The brightfield overview. Its first frame is due now, ahead of the first
         # embryo, so the series starts at t0 like the volumes do.
         self._dic = DicOverview.from_dict(dic) if dic is not None else None
         self._dic_frames = 0
@@ -781,7 +781,7 @@ class TimelapseOrchestrator:
         return None, min(wait_s, 5.0)
 
     # ------------------------------------------------------------------
-    # The DIC overview channel
+    # The brightfield overview channel
     # ------------------------------------------------------------------
 
     def _subject_centroid(self, embryo_ids: list[str]) -> dict[str, float] | None:
@@ -850,7 +850,7 @@ class TimelapseOrchestrator:
                     else ""
                 )
                 + (f", {dic.exposure_ms:g} ms" if dic.exposure_ms else "")
-                + "). Take them from Acquisition › DIC overview › References."
+                + "). Take them on Bottom cam › Overview frames."
             )
             logger.warning(msg)
             try:
@@ -894,7 +894,7 @@ class TimelapseOrchestrator:
                 return False
             self._dic_frames = frame
             self._dic_last_at = last_at
-            logger.info("DIC overview frame %d acquired (%d field(s))", frame, len(fields))
+            logger.info("brightfield overview frame %d acquired (%d field(s))", frame, len(fields))
             return got_any
         finally:
             # The next frame is one interval after this one was DUE, not after
@@ -942,7 +942,7 @@ class TimelapseOrchestrator:
                 if image is not None and getattr(image, "ndim", 0) == 2:
                     image_b64 = image_to_base64(normalize_to_uint8(downsample_mean(image, 512)))
             except Exception as exc:
-                logger.debug("DIC thumbnail skipped: %s", exc)
+                logger.debug("brightfield thumbnail skipped: %s", exc)
             stored: Path | None = None
             # The client's empty-capture placeholder is a 100x100 of zeros.
             real = (
@@ -979,13 +979,15 @@ class TimelapseOrchestrator:
                             self._session_id, "dic", image, metadata=meta
                         )
                 except Exception as exc:
-                    logger.warning("DIC overview frame %d captured but not filed: %s", frame, exc)
+                    logger.warning(
+                        "brightfield overview frame %d captured but not filed: %s", frame, exc
+                    )
                 # Never silently. The frame used to be skipped without a word
                 # whenever the capture reported no path, which on a real device
                 # layer was every time.
                 if stored is None:
                     logger.warning(
-                        "DIC overview frame %d was NOT filed: no staged file and no image",
+                        "brightfield overview frame %d was NOT filed: no staged file and no image",
                         frame,
                     )
             got = stored is not None if filing else bool(real or image_path)
@@ -1008,7 +1010,7 @@ class TimelapseOrchestrator:
             )
             return got, captured_at
         except Exception as exc:
-            logger.warning("DIC overview frame %d, field %d failed: %s", frame, field, exc)
+            logger.warning("brightfield overview frame %d, field %d failed: %s", frame, field, exc)
             return False, None
 
     async def _dic_light_on(self, light: str, frame: int) -> str | None:
@@ -1031,7 +1033,7 @@ class TimelapseOrchestrator:
                 res = await self.client.set_room_light("on")
                 if isinstance(res, dict) and res.get("success") is False:
                     logger.warning(
-                        "DIC overview frame %d: the room light did not come on (%s); "
+                        "brightfield overview frame %d: the room light did not come on (%s); "
                         "taking the frame as it is",
                         frame,
                         res.get("error") or res,
@@ -1051,7 +1053,10 @@ class TimelapseOrchestrator:
             raise
         except Exception as exc:
             logger.warning(
-                "DIC overview frame %d: could not switch the %s light on: %s", frame, light, exc
+                "brightfield overview frame %d: could not switch the %s light on: %s",
+                frame,
+                light,
+                exc,
             )
         return None
 
@@ -1072,7 +1077,7 @@ class TimelapseOrchestrator:
                 raise RuntimeError(res.get("error") or res)
         except Exception as exc:
             logger.warning(
-                "DIC overview frame %d: the LED could not be set to %s%% (%s); "
+                "brightfield overview frame %d: the LED could not be set to %s%% (%s); "
                 "taking the frame at the brightness it has",
                 frame,
                 pct,
@@ -1096,14 +1101,14 @@ class TimelapseOrchestrator:
             except Exception as exc:
                 why = exc
             logger.warning(
-                "DIC overview frame %d: the %s light did not go off (attempt %d): %s",
+                "brightfield overview frame %d: the %s light did not go off (attempt %d): %s",
                 frame,
                 lit,
                 attempt,
                 why,
             )
         logger.error(
-            "DIC overview frame %d: the %s light is STILL ON. The volumes that follow "
+            "brightfield overview frame %d: the %s light is STILL ON. The volumes that follow "
             "are being imaged with it on.",
             frame,
             lit,
@@ -1112,7 +1117,7 @@ class TimelapseOrchestrator:
             EventType.ERROR_OCCURRED,
             {
                 "source": "dic",
-                "message": f"The {lit} light did not switch off after the DIC overview",
+                "message": f"The {lit} light did not switch off after the brightfield overview",
                 "frame": frame,
             },
         )
@@ -2134,7 +2139,7 @@ class TimelapseOrchestrator:
         the loop that images them is gone, and ``start()`` would begin a new
         run. This resumes the old one: every embryo still going is due now
         (the interruption was of unknown length), numbering carries on from
-        the checkpoint (the volumes on disk are never written over), the DIC
+        the checkpoint (the volumes on disk are never written over), the brightfield
         channel keeps its clock, and the run keeps its started_at so the
         status still says how long it has been going.
         """

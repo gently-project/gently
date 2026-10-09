@@ -145,7 +145,7 @@ test('what is not a brightness is refused, not sent', () => {
 test('a volume run can set the overview\'s brightness too', () => {
     const plan = P.fromForm({ dic: true, dicLight: 'led', dicLedPct: 30 });
     assert.equal(P.toPayload(plan, IDS).dic.led_intensity_pct, 30);
-    assert.match(P.describe(plan, SUBJECTS), /one DIC overview per round from the centroid, under the LED at 30 %/);
+    assert.match(P.describe(plan, SUBJECTS), /one brightfield overview per round from the centroid, under the LED at 30 %/);
 });
 
 /* ── saved, and read back ─────────────────────────────────────────────── */

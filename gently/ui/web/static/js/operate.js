@@ -2482,7 +2482,7 @@ const OperateManager = (function () {
     /**
      * The session's last plan, back in the form. A resumed session used to
      * come back with the pane's defaults — five minutes, fifty slices, no
-     * DIC, manual — whatever it had been running.
+     * brightfield, manual — whatever it had been running.
      */
     async function restorePlan() {
         if (_planRestored) return;
@@ -2706,7 +2706,7 @@ const OperateManager = (function () {
         const cap = $('op-plan-spim-cap');
         if (cap) cap.textContent = volumes ? 'every embryo, every round' : 'off — a brightfield run';
         const name = $('op-plan-dic-name');
-        if (name) name.textContent = volumes ? 'DIC overview' : 'Brightfield';
+        if (name) name.textContent = volumes ? 'Brightfield overview' : 'Brightfield';
         const dic = $('op-plan-dic');
         if (dic) {
             if (!volumes) dic.checked = true;
@@ -2910,7 +2910,7 @@ const OperateManager = (function () {
             if (st.seconds_until_next_round != null) bits.push(`next ${fmtWhen(st.seconds_until_next_round)}`);
             if (st.duration_minutes) bits.push(`${Math.round(st.duration_minutes)} min in`);
             if (st.dic && !brightfield) {
-                bits.push(`DIC ${st.dic.frames || 0} frame${st.dic.frames === 1 ? '' : 's'}` +
+                bits.push(`brightfield ${st.dic.frames || 0} frame${st.dic.frames === 1 ? '' : 's'}` +
                     (st.dic.seconds_until_next != null && running ? `, next ${fmtWhen(st.dic.seconds_until_next)}` : ''));
             }
             parts.push(`<div class="op-run-status">${escapeHtml(bits.join(' · '))}</div>`);
