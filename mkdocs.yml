@@ -13,6 +13,7 @@ nav:
       - Sample and Hardware Domains: architecture/sample-hardware-domains.md
       - Sample Tracking Metrics: architecture/sample-tracking-metrics.md
       - Hardware Profile Template: architecture/hardware-profile-template.md
+      - The Project Layer (study): architecture/project-layer-study.md
 markdown_extensions:
   - admonition
   - tables
