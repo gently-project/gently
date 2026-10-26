@@ -353,6 +353,8 @@ def create_router(server) -> APIRouter:
         from gently.calibration import METHODS
 
         args: dict = {}
+        if payload.get("side") in ("A", "B"):
+            args["side"] = payload["side"]
         if payload.get("method") is not None:
             if payload["method"] not in METHODS:
                 raise HTTPException(status_code=400, detail=f"method must be one of {METHODS}")
@@ -3127,6 +3129,10 @@ def create_router(server) -> APIRouter:
             # volume routes its own lines, so without this the preset chosen
             # on the pane lasted until the first volume.
             start_kwargs["laser_config"] = str(preset)
+        # Which imaging paths a round takes; absent is a run on A, as ever.
+        sides = payload.get("sides")
+        if isinstance(sides, list) and sides and volumes:
+            start_kwargs["sides"] = [str(x) for x in sides]
         try:
             result = await orchestrator.start(**start_kwargs)
         except Exception as exc:
@@ -3152,6 +3158,7 @@ def create_router(server) -> APIRouter:
                     "laser_powers": {str(wl): pct for wl, pct in laser_powers.items()} or None,
                     "bf": bf_cfg,
                     "volumes": volumes,
+                    "sides": start_kwargs.get("sides") or ["A"],
                     "stop_conditions": stop_overrides or None,
                     "embryo_ids": list(embryo_ids or []),
                     # "What to run": the pane's set and mode, so a resumed
