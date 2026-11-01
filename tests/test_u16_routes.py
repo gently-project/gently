@@ -191,3 +191,39 @@ def test_max_asks_for_a_size_and_the_route_picks_the_scale(tmp_path):
     assert (r.headers["x-image-scale"], r.headers["x-image-width"]) == ("4", "160")
     r = c.get(f"/api/bf/frames/{stem}.u16?max=100")
     assert (r.headers["x-image-scale"], r.headers["x-image-width"]) == ("7", "91")
+
+
+def test_corrected_counts_are_the_frame_with_the_dark_and_flat_divided_out(tmp_path):
+    """?corrected=1 on the counts route is the same arithmetic the PNG path
+    uses (gently.app.brightfield.correct), in uint16, found through the
+    session's reference record for the frame's own light and exposure."""
+    from gently.app import brightfield as bf
+
+    store = FileStore(tmp_path)
+    store.create_session("s1")
+    spec = bf.ReferenceSpec(light="led", led_intensity_pct=1, exposure_ms=20.0)
+    folder = bf.open_record(store, "s1", spec)
+    rng = np.random.default_rng(3)
+    dark = rng.integers(90, 110, (24, 32)).astype(np.uint16)
+    flat = (3000 + rng.integers(-300, 300, (24, 32))).astype(np.uint16)
+    bf.file_image(folder, "dark", dark, spec, {"stats": bf.stats(dark)})
+    bf.file_image(folder, "flat", flat, spec, {"stats": bf.stats(flat)})
+    frame = (800 + rng.integers(0, 2000, (24, 32))).astype(np.uint16)
+    meta = {"channel": "bf", "frame": 1, "light": "led", "led_intensity_pct": 1}
+    meta["exposure_ms"] = 20.0
+    store.put_snapshot("s1", "bf", frame, metadata=meta, stem="c1")
+    (rec,) = store.list_snapshots("s1", "bf")
+    from pathlib import Path
+
+    stem = Path(rec["file_path"]).stem
+    c = _client(store, active="s1")
+    raw = c.get(f"/api/bf/frames/{stem}.u16")
+    assert np.array_equal(np.frombuffer(raw.content, "<u2").reshape(24, 32), frame)
+    r = c.get(f"/api/bf/frames/{stem}.u16?corrected=1")
+    assert r.status_code == 200, r.text
+    got = np.frombuffer(r.content, "<u2").reshape(24, 32)
+    want = bf.correct(frame, dark, flat)
+    assert want.dtype == np.uint16 and np.array_equal(got, want)
+    assert not np.array_equal(got, frame)
+    r = c.get(f"/api/bf/frames/{stem}.u16?corrected=1&max=16")
+    assert r.headers["x-image-scale"] == "2" and r.headers["x-image-width"] == "16"

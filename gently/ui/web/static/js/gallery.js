@@ -1287,6 +1287,8 @@ const SpimLivePreview = {
             base64_png: data.base64_png,
             metadata: md,
             data_type: data.data_type,
+            uid: data.uid,
+            has_counts: !!data.has_counts,   // the server kept the numbers: the thumb draws them
             ts: Date.now(),
         };
 
@@ -1311,12 +1313,35 @@ const SpimLivePreview = {
 
         if (img) {
             if (latest) {
-                img.src = `data:image/png;base64,${latest.base64_png}`;
+                // The thumb is the counts when the server kept them (gently.core.u16),
+                // drawn by the viewer in a host beside the <img>; the PNG otherwise.
+                const counts = latest.has_counts && latest.uid && typeof U16View !== 'undefined';
+                let pix = document.getElementById('cal-spim-pix');
+                if (counts) {
+                    if (!pix) {
+                        pix = document.createElement('span');
+                        pix.id = 'cal-spim-pix'; pix.className = 'cal-spim-thumb cal-spim-pix';
+                        img.insertAdjacentElement('afterend', pix);
+                        pix._view = U16View.create(pix, { bar: false });
+                    }
+                    const view = pix._view, keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+                    view.load(`/api/images/${encodeURIComponent(latest.uid)}.u16?max=192`)
+                        .then(m => { if (m && keep) view.setRange(keep[0], keep[1], keep[2]); })
+                        .catch(() => { pix.hidden = true; img.style.display = ''; img.src = `data:image/png;base64,${latest.base64_png}`; });
+                    pix.hidden = false; pix.classList.add('has-frame'); img.style.display = 'none';
+                } else {
+                    if (pix) pix.hidden = true;
+                    img.style.display = '';
+                    img.src = `data:image/png;base64,${latest.base64_png}`;
+                }
                 img.classList.add('has-frame');
                 if (placeholder) placeholder.hidden = true;
                 if (metaEl) metaEl.textContent = this._formatMeta(latest);
                 if (led) led.classList.remove('idle');
             } else {
+                const pix = document.getElementById('cal-spim-pix');
+                if (pix) pix.hidden = true;
+                img.style.display = '';
                 img.removeAttribute('src');
                 img.classList.remove('has-frame');
                 if (placeholder) placeholder.hidden = false;
