@@ -141,6 +141,17 @@ const ProjectionViewer = {
         document.getElementById('pv-timepoint').textContent = `T${timepoint}`;
         document.getElementById('pv-shape').textContent = '';
 
+        // The counts projection is on disk and loads in milliseconds; the
+        // renderings below can take seconds on a big volume. So the three-view
+        // card comes up first, on counts, and the rest join it when they come.
+        if (this._sid() && typeof U16View !== 'undefined') {
+            this.projections = [{ method: 'three_view', data: '', description: 'The counts the store keeps. The other views are on their way.' }];
+            loading.style.display = 'none';
+            content.style.display = 'block';
+            this.renderProjections();
+            this.renderTabs();
+        }
+
         try {
             // Load projections and volume data in parallel
             const [projResponse, volResponse] = await Promise.all([
@@ -198,6 +209,12 @@ const ProjectionViewer = {
         }
     },
 
+    /** The session the counts live under, when the page knows it. */
+    _sid() {
+        return (typeof SharedState !== 'undefined' && SharedState.get && SharedState.get('sessionId'))
+            || (typeof EmbryosManager !== 'undefined' && EmbryosManager.currentSessionId) || null;
+    },
+
     renderProjections() {
         const grid = document.getElementById('pv-grid');
 
@@ -225,8 +242,7 @@ const ProjectionViewer = {
         // contrast and a readout, when the session is known. The other methods
         // are renderings (depth colour, a montage) and stay as the pictures the
         // server draws; so does this one if the counts cannot be had.
-        const sid = (typeof SharedState !== 'undefined' && SharedState.get && SharedState.get('sessionId'))
-            || (typeof EmbryosManager !== 'undefined' && EmbryosManager.currentSessionId) || null;
+        const sid = this._sid();
         const counts = proj => proj.method === 'three_view' && sid && typeof U16View !== 'undefined'
             ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(this.currentEmbryoId)}/volumes/${encodeURIComponent(this.currentTimepoint)}/projection.u16?max=1024`
             : null;

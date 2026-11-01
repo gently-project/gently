@@ -99,3 +99,18 @@ def test_the_projection_viewer_draws_the_three_view_as_counts() -> None:
     assert "proj.method === 'three_view'" in body and "/projection.u16?max=1024" in body
     assert 'class="pv-pix"' in body and "U16View.create(host, { bar: true })" in body
     assert "host.replaceWith(img)" in body, "no fallback to the picture"
+
+
+def test_the_spim_live_indicator_thumb_and_the_projection_viewer_lead_with_counts() -> None:
+    """The last camera-frame <img>: the Calibration tab's SPIM live indicator
+    draws a pushed frame's counts when the server kept them. ProjectionViewer
+    shows its counts card before the slow renderings arrive."""
+    gallery = (WEB / "static" / "js" / "gallery.js").read_text(encoding="utf-8")
+    body = gallery.split("    applyForEmbryo(embryoId) {")[1].split("\n    },\n")[0]
+    assert "latest.has_counts && latest.uid" in body and "cal-spim-pix" in body
+    assert "/api/images/${encodeURIComponent(latest.uid)}.u16?max=" in body
+    assert "has_counts: !!data.has_counts" in gallery
+    pv = (WEB / "static" / "js" / "projection-viewer.js").read_text(encoding="utf-8")
+    opened = pv.split("    async open(embryoId, timepoint) {")[1].split("\n    },\n")[0]
+    assert "this.projections = [{ method: 'three_view'" in opened
+    assert opened.index("this.renderProjections();") < opened.index("await Promise.all(")
