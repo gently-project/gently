@@ -629,6 +629,83 @@ def pushed_counts(array: np.ndarray) -> tuple[np.ndarray, dict[str, Any]] | None
     return counts_projection(arr)
 
 
+def _shown_volume(volume: np.ndarray) -> np.ndarray:
+    """The 3D volume a projection is made from: view A of a 4D stack, the
+    channel the rig says to show."""
+    vol = np.squeeze(volume)
+    if vol.ndim == 4:
+        vol = vol[0]
+    return shown_channel(vol) if vol.ndim == 3 else vol
+
+
+def counts_dual_view(
+    volume: np.ndarray, voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625)
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """The dual view in counts: the XY maximum over the XZ maximum, the side
+    panel as tall as the physical depth asks (dz/dx display pixels a plane,
+    never under a third of the height), a black band between. The layout the
+    explorer's projection_dual_view draws, without its boundary overlay,
+    which is a drawing and not counts."""
+    from .u16 import as_u16
+
+    vol = _shown_volume(volume)
+    if vol.ndim != 3:
+        flat = as_u16(vol)
+        return flat, {"views": "xy", "xy": [int(flat.shape[0]), int(flat.shape[1])]}
+    z_depth, height, width = vol.shape
+    dz, dy, dx = voxel_size
+    top = as_u16(np.max(vol, axis=0))
+    side = as_u16(np.max(vol, axis=1))
+    side_h = max(height // 3, int(round(z_depth * dz / dx)), 1)
+    side_scaled = _resize(side, (width, side_h)) if PIL_AVAILABLE else side
+    sep = np.zeros((3, width), dtype=np.uint16)
+    combined = np.concatenate([top, sep, side_scaled], axis=0)
+    return combined, {"views": "xy/xz", "xy": [int(height), int(width)]}
+
+
+def counts_montage(volume: np.ndarray, n_slices: int = 6) -> tuple[np.ndarray, dict[str, Any]]:
+    """A montage of n evenly spaced planes in counts: two rows, black 2 px
+    bands between, the layout the explorer's projection_multi_slice draws.
+    The layout says which planes and how many columns, so a cursor position
+    can be read back to a plane."""
+    from .u16 import as_u16
+
+    vol = _shown_volume(volume)
+    if vol.ndim != 3:
+        flat = as_u16(vol)
+        return flat, {"views": "xy", "xy": [int(flat.shape[0]), int(flat.shape[1])]}
+    z_depth, height, width = vol.shape
+    n = max(1, int(n_slices))
+    if z_depth <= n:
+        indices = list(range(z_depth))
+    else:
+        indices = np.linspace(0, z_depth - 1, n, dtype=int).tolist()
+    tiles = [as_u16(vol[i]) for i in indices]
+    n_cols = (len(tiles) + 1) // 2
+    n_rows = 2 if len(tiles) > 1 else 1
+    while len(tiles) < n_rows * n_cols:
+        tiles.append(np.zeros((height, width), dtype=np.uint16))
+    v_sep = np.zeros((height, 2), dtype=np.uint16)
+    rows: list[np.ndarray] = []
+    for r in range(n_rows):
+        parts: list[np.ndarray] = []
+        for i, tile in enumerate(tiles[r * n_cols : (r + 1) * n_cols]):
+            if i:
+                parts.append(v_sep)
+            parts.append(tile)
+        rows.append(np.concatenate(parts, axis=1))
+    h_sep = np.zeros((2, rows[0].shape[1]), dtype=np.uint16)
+    out: np.ndarray = rows[0]
+    for row_arr in rows[1:]:
+        out = np.concatenate([out, h_sep, row_arr], axis=0)
+    return out, {
+        "views": "montage",
+        "xy": [int(height), int(width)],
+        "planes": [int(i) for i in indices],
+        "cols": int(n_cols),
+    }
+
+
 def write_counts_projection(arr: np.ndarray, layout: dict[str, Any], output_path: Path) -> Path:
     """A counts projection to disk: a plain uint16 TIFF, its layout as JSON in
     the TIFF description, so Fiji shows it and the .u16 routes read it in a

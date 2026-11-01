@@ -227,3 +227,41 @@ def test_corrected_counts_are_the_frame_with_the_dark_and_flat_divided_out(tmp_p
     assert not np.array_equal(got, frame)
     r = c.get(f"/api/bf/frames/{stem}.u16?corrected=1&max=16")
     assert r.headers["x-image-scale"] == "2" and r.headers["x-image-width"] == "16"
+
+
+def test_the_dual_view_and_the_montage_come_as_counts_in_the_explorer_layouts(tmp_path):
+    """The two renderings that are made of counts come as counts: XY over XZ
+    with the side panel at physical depth, and a two-row montage of evenly
+    spaced planes, black bands between, the planes named in the headers."""
+    import tifffile
+
+    from gently.core.imaging import counts_dual_view, counts_montage
+
+    store = FileStore(tmp_path)
+    store.create_session("s1")
+    store.register_embryo("s1", "e01", position_x=0, position_y=0)
+    vdir = store._embryo_dir("s1", "e01") / "volumes"
+    vdir.mkdir(parents=True, exist_ok=True)
+    vol = (np.arange(5 * 8 * 6, dtype=np.uint16).reshape(5, 8, 6) * 7) % 60000
+    tifffile.imwrite(str(vdir / store._volume_filename(3)), vol, compression="zlib")
+    c = _client(store)
+    r = c.get("/api/sessions/s1/embryos/e01/volumes/3/dual.u16")
+    assert r.status_code == 200 and r.headers["x-image-views"] == "xy/xz"
+    want, layout = counts_dual_view(vol)
+    side_h = max(8 // 3, round(5 * 1.0 / 0.1625))
+    assert want.shape == (8 + 3 + side_h, 6)
+    got = np.frombuffer(r.content, "<u2").reshape(want.shape)
+    assert np.array_equal(got, want) and np.array_equal(got[:8], vol.max(axis=0))
+    assert (got[8:11] == 0).all()
+    r = c.get("/api/sessions/s1/embryos/e01/volumes/3/montage.u16?n=4")
+    assert r.status_code == 200 and r.headers["x-image-views"] == "montage"
+    assert r.headers["x-image-montage-planes"] == "0,1,2,4"
+    assert r.headers["x-image-montage-cols"] == "2"
+    want, layout = counts_montage(vol, 4)
+    assert want.shape == (8 + 2 + 8, 6 + 2 + 6)
+    got = np.frombuffer(r.content, "<u2").reshape(want.shape)
+    assert np.array_equal(got, want)
+    assert np.array_equal(got[:8, :6], vol[0]) and np.array_equal(got[10:, 8:], vol[4])
+    assert c.get("/api/sessions/s1/embryos/e01/volumes/9/montage.u16").status_code == 404
+    r = c.get("/api/sessions/s1/embryos/e01/volumes/3/dual.u16?max=7")
+    assert r.headers["x-image-scale"] == "6"  # the longer side, 42 rows, within 7
