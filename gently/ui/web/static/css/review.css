@@ -588,6 +588,8 @@
     color: var(--accent-purple, #a78bfa);
     border-color: var(--accent-purple, #a78bfa);
 }
+/* In a row the pills sit on the meta line, which wraps; its gap spaces them. */
+.session-meta .session-active-badge { margin-left: 0; }
 .session-item.active-session::before { background: var(--accent-green); }
 .session-item.active-session.active::before { background: linear-gradient(var(--accent) 50%, var(--accent-green) 50%); }
 
@@ -788,10 +790,14 @@
 .th-step:disabled { opacity: .35; cursor: default; }
 .th-empty { color: var(--text-muted); font-style: italic; font-weight: 400; }
 .th-when { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
-.th-stage { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; }
-.th-img { display: block; max-width: 100%; width: 720px; }
-.th-img .u16-c { max-height: 70vh; width: 100%; height: auto; object-fit: contain; }
-.th-stage .th-pin { z-index: 2; }
+.th-stage { position: relative; display: inline-block; max-width: 100%; }
+/* The viewer's host: 720 px, or less where the pane is narrower. The canvas
+   keeps the frame's shape under its height cap (never a letterbox). The pins
+   sit on the viewer's layer, so the border moves from the canvas to the stage
+   around it: the layer is then the pixels exactly, not the pixels plus 1 px. */
+.th-img { max-width: 100%; width: 720px; }
+.th-img .u16-stage { border: 1px solid var(--border); border-radius: 8px; background: var(--img-bg, #000); }
+.th-img .u16-c { max-height: 70vh; cursor: crosshair; border: 0; border-radius: 7px; }
 .th-pin { position: absolute; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; pointer-events: none; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
 .th-pin.is-open { background: #f59e0b; }
 .th-table { margin-top: 10px; border-collapse: collapse; font-size: 12px; }
