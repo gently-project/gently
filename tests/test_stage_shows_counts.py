@@ -96,7 +96,8 @@ def test_the_projection_viewer_draws_the_three_view_as_counts() -> None:
     pictures, and so does this one if the counts cannot be had."""
     pv = (WEB / "static" / "js" / "projection-viewer.js").read_text(encoding="utf-8")
     body = pv.split("    renderProjections() {")[1].split("\n    },\n")[0]
-    assert "proj.method === 'three_view'" in body and "/projection.u16?max=1024" in body
+    assert "three_view: 'projection.u16', dual_view: 'dual.u16', multi_slice: 'montage.u16'" in body
+    assert "?max=1024" in body
     assert 'class="pv-pix"' in body and "U16View.create(host, { bar: true })" in body
     assert "host.replaceWith(img)" in body, "no fallback to the picture"
 
@@ -112,5 +113,9 @@ def test_the_spim_live_indicator_thumb_and_the_projection_viewer_lead_with_count
     assert "has_counts: !!data.has_counts" in gallery
     pv = (WEB / "static" / "js" / "projection-viewer.js").read_text(encoding="utf-8")
     opened = pv.split("    async open(embryoId, timepoint) {")[1].split("\n    },\n")[0]
-    assert "this.projections = [{ method: 'three_view'" in opened
+    assert "{ method: 'three_view', data: ''" in opened
+    assert "{ method: 'multi_slice', data: ''" in opened
+    assert "await Promise.race([Promise.all(this._countsLoads" in opened, (
+        "the legacy fetch starts before the counts cards have loaded, and it blocks the server"
+    )
     assert opened.index("this.renderProjections();") < opened.index("await Promise.all(")

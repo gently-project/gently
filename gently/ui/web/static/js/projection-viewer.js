@@ -145,11 +145,19 @@ const ProjectionViewer = {
         // renderings below can take seconds on a big volume. So the three-view
         // card comes up first, on counts, and the rest join it when they come.
         if (this._sid() && typeof U16View !== 'undefined') {
-            this.projections = [{ method: 'three_view', data: '', description: 'The counts the store keeps. The other views are on their way.' }];
+            this.projections = [
+                { method: 'three_view', data: '', description: 'The counts the store keeps.' },
+                { method: 'dual_view', data: '', description: 'XY over XZ, in counts.' },
+                { method: 'multi_slice', data: '', description: 'Six planes, in counts. The renderings are on their way.' },
+            ];
             loading.style.display = 'none';
             content.style.display = 'block';
             this.renderProjections();
             this.renderTabs();
+            // The legacy route renders on the server's loop and holds it for
+            // seconds on a big volume: let the counts land first, within reason.
+            await Promise.race([Promise.all(this._countsLoads || []), new Promise(r => setTimeout(r, 6000))]);
+            if (this.currentEmbryoId !== embryoId || this.currentTimepoint !== timepoint || !this.isOpen) return;
         }
 
         try {
@@ -237,14 +245,17 @@ const ProjectionViewer = {
             ? this.projections.filter(p => p.method === this.selectedMethod)
             : this.projections;
 
-        // The three-view card is the counts (gently.core.u16): the projection
-        // the store keeps beside the JPEG, drawn by the viewer with its own
-        // contrast and a readout, when the session is known. The other methods
-        // are renderings (depth colour, a montage) and stay as the pictures the
-        // server draws; so does this one if the counts cannot be had.
+        // The three-view, dual-view and montage cards are the counts
+        // (gently.core.u16): the stored projection, and the dual view and the
+        // montage made from the volume on request, drawn by the viewer with its
+        // own contrast and a readout, when the session is known. The depth
+        // colouring encodes depth as colour and the spin is an animation: those
+        // are renderings and stay the pictures the server draws; so does any
+        // card whose counts cannot be had.
         const sid = this._sid();
-        const counts = proj => proj.method === 'three_view' && sid && typeof U16View !== 'undefined'
-            ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(this.currentEmbryoId)}/volumes/${encodeURIComponent(this.currentTimepoint)}/projection.u16?max=1024`
+        const COUNTS = { three_view: 'projection.u16', dual_view: 'dual.u16', multi_slice: 'montage.u16' };
+        const counts = proj => COUNTS[proj.method] && sid && typeof U16View !== 'undefined'
+            ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(this.currentEmbryoId)}/volumes/${encodeURIComponent(this.currentTimepoint)}/${COUNTS[proj.method]}?max=1024`
             : null;
         grid.innerHTML = toShow.map(proj => `
             <div class="projection-card ${this.selectedMethod === proj.method ? 'selected' : ''}"
@@ -261,9 +272,9 @@ const ProjectionViewer = {
                 <div class="projection-card-desc">${proj.description || ''}</div>
             </div>
         `).join('');
-        grid.querySelectorAll('.pv-pix').forEach(host => {
+        this._countsLoads = [...grid.querySelectorAll('.pv-pix')].map(host => {
             const view = U16View.create(host, { bar: true });
-            view.load(host.dataset.u16).catch(() => {
+            return view.load(host.dataset.u16).catch(() => {
                 const img = document.createElement('img');
                 img.src = host.dataset.jpg; img.alt = host.dataset.alt;
                 host.replaceWith(img);

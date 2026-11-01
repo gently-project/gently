@@ -1289,6 +1289,56 @@ def create_router(server) -> APIRouter:
             body, media_type=MEDIA_TYPE, headers={"Cache-Control": "private, max-age=60", **headers}
         )
 
+    def _volume_made(
+        session_id: str, embryo: str, t: int, kind: str, scale: int, max_dim: int | None, n: int
+    ) -> Response:
+        """A picture made from the whole volume, in counts: the dual view or
+        a montage of planes (gently.core.imaging). Read with threaded decode,
+        made on request; neither is kept on disk."""
+        import tifffile
+
+        from gently.core.imaging import counts_dual_view, counts_montage
+        from gently.core.u16 import MEDIA_TYPE, u16_payload
+
+        store = _file_store()
+        path = store.get_volume_path(session_id, embryo, t) if store is not None else None
+        if path is None:
+            raise HTTPException(status_code=404, detail="Volume not found")
+        with tifffile.TiffFile(str(path)) as tf:
+            vol = np.asarray(tf.asarray(maxworkers=8))
+        arr, layout = counts_dual_view(vol) if kind == "dual" else counts_montage(vol, n)
+        extra: dict = {"Views": layout.get("views")}
+        if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
+            extra["XY-Height"], extra["XY-Width"] = layout["xy"]
+        if layout.get("planes") is not None:
+            extra["Montage-Planes"] = ",".join(str(i) for i in layout["planes"])
+            extra["Montage-Cols"] = layout.get("cols")
+        body, headers = u16_payload(arr, scale, extra, max_dim=max_dim)
+        return Response(
+            body, media_type=MEDIA_TYPE, headers={"Cache-Control": "private, max-age=60", **headers}
+        )
+
+    @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/dual.u16")
+    async def volume_dual_u16(
+        session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
+    ):
+        """The volume's dual view (XY over XZ) as uint16 bytes."""
+        return await asyncio.to_thread(_volume_made, session_id, embryo, t, "dual", scale, max, 0)
+
+    @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/montage.u16")
+    async def volume_montage_u16(
+        session_id: str,
+        embryo: str,
+        t: int,
+        n: int = 6,
+        scale: int = 1,
+        max: int | None = None,
+    ):
+        """A montage of n evenly spaced planes as uint16 bytes."""
+        return await asyncio.to_thread(
+            _volume_made, session_id, embryo, t, "montage", scale, max, n
+        )
+
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/projection.u16")
     async def volume_projection_u16(
         session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
