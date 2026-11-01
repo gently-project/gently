@@ -298,7 +298,9 @@ def create_router(server) -> APIRouter:
                         "created_at": s.get("created_at", ""),
                         "last_active": s.get("last_active", ""),
                         "embryo_count": held.get("embryo_count", 0),
+                        # How far the run got, and every embryo's volumes together.
                         "timepoints": held.get("timepoints", 0),
+                        "volumes": held.get("volumes", 0),
                         "last_image_at": held.get("last_image_at"),
                         "run": held.get("run"),
                         "last_run": held.get("last_run"),

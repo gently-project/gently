@@ -107,10 +107,20 @@ const ReviewApp = {
         sessions.forEach(s => {
             const meta = list.querySelector(`.session-item[data-session-id="${CSS.escape(s.session_id)}"] .session-meta`);
             if (!meta) return;
-            meta.innerHTML = `<span>${this.formatDate(s.created_at)}</span>`
-                + this.holdings(s).map(h => `<span class="dot"></span><span>${h}</span>`).join('')
-                + this.runBadge(this.runOf(s));
+            meta.innerHTML = this.metaHtml(s);
         });
+    },
+
+    // A row's second line: when, what it holds, how its run ended, and the
+    // pills — live now, recorded with diagnostics on. The pills are here,
+    // where the line wraps, and not on the name: that is one line cut with an
+    // ellipsis, and a pill on it ran under the row's buttons.
+    metaHtml(s) {
+        return `<span>${this.formatDate(s.created_at)}</span>`
+            + this.holdings(s).map(h => `<span class="dot"></span><span>${h}</span>`).join('')
+            + this.runBadge(this.runOf(s))
+            + (s.active ? '<span class="session-active-badge">active</span>' : '')
+            + (s.advanced_diagnostics ? '<span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : '');
     },
 
     // ---- projects: a session has one home, and may serve items elsewhere ----
@@ -737,16 +747,11 @@ const ReviewApp = {
     },
 
     rowHtml(s) {
-            const held = this.holdings(s);
             const open = this.currentSession && this.currentSession.session_id === s.session_id;
             return `
             <div class="session-item ${s.active ? 'active-session' : ''}${open ? ' active' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
-                <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
-                <div class="session-meta">
-                    <span>${this.formatDate(s.created_at)}</span>
-                    ${held.map(h => `<span class="dot"></span><span>${h}</span>`).join('')}
-                    ${this.runBadge(this.runOf(s))}
-                </div>
+                <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}</div>
+                <div class="session-meta">${this.metaHtml(s)}</div>
                 <div class="session-project">${this.projectChip(s)}</div>
                 ${this._filing && this._filing.sid === s.session_id && this._filing.where === 'list' ? this.renderFilingPopover(s) : ''}
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
@@ -1353,7 +1358,12 @@ const ReviewApp = {
     renderRun(run) {
         if (!run || !run.status) return '';
         const bits = [];
-        if (run.total_timepoints) bits.push(`${run.total_timepoints} timepoints`);
+        // How far the run got: the most timepoints any one embryo has. The
+        // checkpoint's total is the sum over embryos — four embryos imaged
+        // once are 1 timepoint, not 4 — and stands in only for a checkpoint
+        // written before the per-embryo figure was.
+        const tp = run.timepoints ?? run.total_timepoints;
+        if (tp) bits.push(`${tp} timepoint${tp === 1 ? '' : 's'}`);
         if (run.rounds) bits.push(`${run.rounds} rounds`);
         if (run.interval_seconds) bits.push(`every ${this.fmtInterval(run.interval_seconds)}`);
         if (run.started_at) bits.push(`started ${this.formatDateTime(run.started_at)}`);

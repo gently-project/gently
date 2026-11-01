@@ -109,6 +109,60 @@ class TestTheList:
         assert s["run"] is None
         assert s["last_run"]["status"] == "completed" and s["last_run"]["total_timepoints"] == 3
 
+    def test_timepoints_are_how_far_the_run_got_not_the_sum_over_embryos(self, store):
+        # "4 embryo spim images, 1 timepoints each, the side card shows 4
+        # timepoints" — every embryo's count was added up, as the checkpoint's
+        # total is. A round gives each embryo one timepoint: four embryos
+        # imaged once hold 1 timepoint, and 4 volumes.
+        sid = "s4"
+        store.create_session(sid)
+        rows = {}
+        for n in range(1, 5):
+            eid = f"embryo_{n}"
+            store.register_embryo(sid, eid, position_x=1.0, position_y=2.0, role="test")
+            proj = store._embryo_dir(sid, eid) / "projections"
+            proj.mkdir(parents=True, exist_ok=True)
+            (proj / "t0001.jpg").write_bytes(b"jpg")
+            rows[eid] = {"is_complete": True, "timepoints_acquired": 1}
+        (store._session_dir(sid) / "timelapse.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "status": "completed",
+                    "started_at": "2026-10-22T15:39:45",
+                    "saved_at": "2026-10-22T15:40:07",
+                    "current_round": 3,
+                    "total_timepoints": 4,
+                    "base_interval_seconds": 30,
+                    "embryos": rows,
+                }
+            ),
+            encoding="utf-8",
+        )
+        s = _client(store).get("/api/sessions").json()["sessions"][0]
+        assert (s["embryo_count"], s["timepoints"], s["volumes"]) == (4, 1, 4)
+        assert s["last_run"]["timepoints"] == 1 and s["last_run"]["total_timepoints"] == 4
+        # The pane's run line says the same, and falls back to the checkpoint's
+        # total only for one written without the per-embryo figure.
+        run = REVIEW_JS[REVIEW_JS.index("renderRun(run) {") :][:900]
+        assert "run.timepoints ?? run.total_timepoints" in run
+        assert "timepoint${tp === 1 ? '' : 's'}" in run
+
+    def test_the_pills_sit_on_the_meta_line_not_the_name(self):
+        # "the advanced diagnostic text is a bit overlapping on something
+        # else": the name is one line cut with an ellipsis, and a pill on it
+        # ran under the row's Make live and Folder buttons.
+        row = REVIEW_JS[REVIEW_JS.index("rowHtml(s) {") :][:2400]
+        name = row[row.index('<div class="session-name') : row.index("</div>")]
+        assert "badge" not in name
+        assert '<div class="session-meta">${this.metaHtml(s)}</div>' in row
+        meta = REVIEW_JS[REVIEW_JS.index("metaHtml(s) {") :][:900]
+        assert "session-diag-badge" in meta
+        assert '<span class="session-active-badge">active</span>' in meta
+        # A batch of sizes repaints the line whole, pills included.
+        fill = REVIEW_JS[REVIEW_JS.index("repaintHoldings(sessions) {") :][:600]
+        assert "meta.innerHTML = this.metaHtml(s);" in fill
+        assert ".session-meta .session-active-badge { margin-left: 0; }" in REVIEW_CSS
+
 
 class TestTheDetail:
     def test_the_plan_the_pictures_and_the_stage_calls_come_without_restoring(self, store):
