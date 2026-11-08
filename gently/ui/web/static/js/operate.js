@@ -138,6 +138,12 @@ const OperateManager = (function () {
     // read, a span to draw the line with.
     const _range = { A: null, B: null };
     const RANGE_DEFAULT = { galvo: [-5, 5], piezo: [-100, 100] };
+    // When this pane last chose a side. A frame of the old side that lands
+    // inside the window was grabbed before the switch and is dropped; outside
+    // the window, a frame of another side means the device layer is on a side
+    // this pane never chose, and the pane follows it (adoptLsParams).
+    const SIDE_SWITCH_MS = 2000;
+    let _sideChangedAt = 0;
     let _mode = 'single';
     let _selectedLib = null;
     let _runPaused = false;
@@ -1284,6 +1290,9 @@ const OperateManager = (function () {
         const done = pending(b, _spimOn ? 'Stopping…' : 'Starting…');
         try {
             const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
+            // Before the first frame: the side and pose the device layer is
+            // on, so the frames that follow are the ones this pane shows.
+            if (!_spimOn) await adoptLsParams();
             const d = await postJSON(ep, {});
             done(() => {
                 applySpim(!!d.streaming);
@@ -1329,10 +1338,11 @@ const OperateManager = (function () {
         if (side !== 'A' && side !== 'B' && side !== 'Multi') return;
         if (side === _side) return;
         _side = side;
+        _sideChangedAt = Date.now();
         renderPose();
         fetchRange(side);
         // The frame on screen is the other side's until the next one lands.
-        if (_spimOn) clearImg('op-img-spim', 'op-ph-spim', `Switching to side ${side}…`);
+        if (_spimOn) clearImg('op-img-spim', 'op-ph-spim', side === 'Multi' ? 'Switching to Multi…' : `Switching to side ${side}…`);
         postLsParams();
     }
     // One axis row: the line's ends are the extent, its knob the pose, the
@@ -1362,6 +1372,37 @@ const OperateManager = (function () {
             p.piezo = Math.min(r.piezo[1], Math.max(r.piezo[0], p.piezo));
             renderPose();
         } catch (_) { /* no controller to ask: the default span stands */ }
+    }
+    // The device layer outlives this page (an app restart, a reload, a second
+    // browser on the rig) and keeps the live side and pose it was last given.
+    // The pane takes them from it rather than assuming A at 0/0: assumed, the
+    // stream came tagged with a side the pane had not chosen and every frame
+    // was dropped as the other side's, the view blank for good. Read-only:
+    // nothing on the rig moves. Asked when the view starts, when the pane is
+    // entered and when the stream says otherwise; one read in flight at a
+    // time, and none inside a switch this pane has just made, whose post is
+    // the truth then.
+    let _adopting = null;
+    function adoptLsParams() {
+        if (_adopting) return _adopting;
+        _adopting = (async () => {
+            try {
+                if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;
+                const r = await getJSON('/api/devices/lightsheet/live/params');
+                const p = r && r.params;
+                if (!p || (p.side !== 'A' && p.side !== 'B' && p.side !== 'Multi')) return;
+                if (p.side !== 'Multi') {
+                    const pose = _pose[p.side];
+                    if (Number.isFinite(p.galvo)) pose.galvo = p.galvo;
+                    if (Number.isFinite(p.piezo)) pose.piezo = p.piezo;
+                }
+                _side = p.side;
+                renderPose();
+                fetchRange(p.side);
+            } catch (_) { /* no device layer to ask: the pane's own side stands */ }
+            finally { _adopting = null; }
+        })();
+        return _adopting;
     }
     // The knob moved: the pose takes the number, line and readout follow, and
     // the device layer hears it on the debounce tick.
@@ -3195,7 +3236,7 @@ const OperateManager = (function () {
             render() { renderMarkCount(); drawMarkers(); bz.render(); },
         },
         spim: {
-            onEnter() { fetchRange(_side); },
+            onEnter() { adoptLsParams(); },
             onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
             render() { renderSpimTarget(); fd.render(); },
         },
@@ -3574,8 +3615,13 @@ const OperateManager = (function () {
     }
     function onSpimFrame(p) {
         if (!_active || _pane !== 'spim' || !p || !p.jpeg_b64) return;
-        // A frame tagged with the other side was grabbed before the switch.
-        if (p.side && p.side !== _side) return;
+        if (p.side && p.side !== _side) {
+            // Inside the switch window the frame is the old side's, grabbed
+            // before the switch: dropped. Outside it the device layer is on a
+            // side this pane never chose, and the pane follows it.
+            if (Date.now() - _sideChangedAt > SIDE_SWITCH_MS) adoptLsParams();
+            return;
+        }
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
@@ -3692,7 +3738,7 @@ const OperateManager = (function () {
         if (gvIn) gvIn.addEventListener('input', () => setAxis('galvo', Number(gvIn.value)));
         const pzIn = $('op-pz-in');
         if (pzIn) pzIn.addEventListener('input', () => setAxis('piezo', Number(pzIn.value)));
-        fetchRange(_side);
+        adoptLsParams();
         document.querySelectorAll('#op-spim-side [data-side]').forEach(b =>
             b.addEventListener('click', () => setSpimSide(b.dataset.side)));
         document.querySelectorAll('[data-backoff]').forEach(b =>

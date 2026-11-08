@@ -121,3 +121,17 @@ def test_the_controls_the_markup_offers_are_the_ones_js_knows() -> None:
         assert f"$('{i}')" in body, (
             f"{i} exists in the markup but wire() never binds it — it will render and do nothing"
         )
+
+
+def test_the_view_takes_its_side_from_the_device_layer() -> None:
+    """The device layer outlives the page and keeps the live side. A pane that
+    assumed A dropped every frame of a stream on B as the other side's and sat
+    blank; so the pane asks before its first frame, on entering, and when the
+    stream disagrees with it."""
+    src = OPERATE.read_text(encoding="utf-8")
+    assert "if (!_spimOn) await adoptLsParams();" in src, "view start does not adopt the side"
+    assert "onEnter() { adoptLsParams(); }" in src, "entering the pane does not adopt the side"
+    assert "getJSON('/api/devices/lightsheet/live/params')" in src, "no read of the live params"
+    assert "if (Date.now() - _sideChangedAt > SIDE_SWITCH_MS) adoptLsParams();" in src, (
+        "a stream on another side is dropped for good instead of followed"
+    )

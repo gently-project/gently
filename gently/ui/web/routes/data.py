@@ -1412,6 +1412,22 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
         return res
 
+    @router.get("/api/devices/lightsheet/live/params")
+    async def lightsheet_live_params_get():
+        """The live sheet's side, galvo, piezo and exposure as the device layer
+        holds them. Read-only: an empty params post is how the device layer
+        answers with what it has, unchanged. It keeps them across an app
+        restart or a page reload, which is when the pane has to ask rather
+        than assume."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_lightsheet_live_params()
+        except Exception as exc:
+            logger.exception("lightsheet live params read failed")
+            raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
+
     @router.get("/api/devices/lightsheet/live/range")
     async def lightsheet_live_range(side: str = "A"):
         """The galvo and piezo extents of a side, from the controller. Read-only."""
