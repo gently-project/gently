@@ -85,10 +85,11 @@ def test_the_stacked_layout_does_not_bury_the_instrument_rail() -> None:
     stacked = re.search(r"@container operate \(max-width: 900px\) \{(.*?)\n\}", css, re.S)
     assert stacked, "the stacked-layout container query is gone"
     body = stacked.group(1)
-    assert re.search(r"\.op-main\s*\{[^}]*grid-row:\s*2", body), (
+    # Rows 1 and 2: the XY lock banner that held row 1 is gone (2026-11-08).
+    assert re.search(r"\.op-main\s*\{[^}]*grid-row:\s*1", body), (
         "stacked, .op-main no longer claims its own row"
     )
-    assert re.search(r"\.op-inst\s*\{[^}]*grid-row:\s*3", body), (
+    assert re.search(r"\.op-inst\s*\{[^}]*grid-row:\s*2", body), (
         "stacked, the instrument rail shares a cell with the camera again — "
         "the camera's placeholder will swallow its clicks"
     )
