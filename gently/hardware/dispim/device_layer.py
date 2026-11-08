@@ -204,6 +204,7 @@ class DeviceLayerServer(Service):
             "mode": "snap",
         }
         self._ls_seq_started: bool = False
+        self._ls_range: dict[str, dict] = {}  # per side, the axes' extents, read once
         self._ls_applied: dict = {}  # last-applied galvo/piezo/exposure
         self._ls_parked: dict = {}  # last-parked galvo/piezo setPosition values
         self._ls_spim_idle: bool = False  # whether SPIM state machine was set Idle this session
@@ -1574,6 +1575,53 @@ class DeviceLayerServer(Service):
             if body["side"] != previous and body["side"] != "Multi":
                 await asyncio.to_thread(self._follow_beam_to_side, body["side"])
         return web.json_response({"params": self._ls_params})
+
+    def _read_lightsheet_range_sync(self, side: str) -> dict[str, Any]:
+        """The extents of a side's galvo and piezo, from the controller.
+
+        The ASIdiSPIM plugin bounds its sheet sliders by the micro-mirror
+        card's deflection limits and sends both axes Home to 0; this is the
+        same source: the card's limits on the slice axis, and the piezo's soft
+        limits, in micrometres. A controller that does not answer leaves the
+        device class's limits. Read once per side; limits do not move.
+        """
+        if side in self._ls_range:
+            return self._ls_range[side]
+        b = side == "B"
+        scanner = self.devices.get("scanner_b" if b and "scanner_b" in self.devices else "scanner")
+        piezo = self.devices.get("piezo_b" if b and "piezo_b" in self.devices else "piezo")
+        out: dict[str, Any] = {"side": side}
+        if scanner is not None:
+            try:
+                out["galvo"] = [
+                    float(scanner.core.getProperty(scanner.name, "MinDeflectionY(deg)")),
+                    float(scanner.core.getProperty(scanner.name, "MaxDeflectionY(deg)")),
+                ]
+            except Exception:
+                out["galvo"] = list(getattr(scanner, "limits", (-5.0, 5.0)))
+        if piezo is not None:
+            try:
+                out["piezo"] = [
+                    1000.0 * float(piezo.core.getProperty(piezo.name, "LowerLim(mm)")),
+                    1000.0 * float(piezo.core.getProperty(piezo.name, "UpperLim(mm)")),
+                ]
+            except Exception:
+                out["piezo"] = list(getattr(piezo, "limits", (-200.0, 200.0)))
+        self._ls_range[side] = out
+        return out
+
+    async def handle_lightsheet_range(self, request):
+        """GET /api/lightsheet/live/range?side=A|B — the galvo and piezo extents
+        of a side, from the controller (see _read_lightsheet_range_sync)."""
+        side = request.query.get("side", "A")
+        if side not in ("A", "B"):
+            return web.json_response({"success": False, "error": "side must be A or B"}, status=400)
+        try:
+            out = await asyncio.to_thread(self._read_lightsheet_range_sync, side)
+            return web.json_response(out)
+        except Exception as exc:
+            logger.exception("[lightsheet] range read failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
 
     def _follow_beam_to_side(self, side: str) -> None:
         """An armed beam follows the live view to its side.
@@ -4694,6 +4742,7 @@ class DeviceLayerServer(Service):
         # Lightsheet (SPIM) live stream — continuous sequence acquisition
         self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
         self._app.router.add_post("/api/lightsheet/live/params", self.handle_lightsheet_params)
+        self._app.router.add_get("/api/lightsheet/live/range", self.handle_lightsheet_range)
         self._app.router.add_get("/api/cameras", self.handle_get_cameras)
 
         # Start plan executor

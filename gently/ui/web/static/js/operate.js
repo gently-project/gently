@@ -131,8 +131,13 @@ const OperateManager = (function () {
     const ledIsOpen = () => (SharedState.get('light') || {}).led === 'Open';
     // The live sheet's pose, per side: B's scanner and piezo are different
     // devices with their own numbers, so switching sides must not carry A's.
+    // Both axes start at 0, the origin the ASIdiSPIM plugin's Home goes to.
     let _side = 'A';
-    const _pose = { A: { galvo: 0.0, piezo: 50.0 }, B: { galvo: 0.0, piezo: 50.0 } };
+    const _pose = { A: { galvo: 0.0, piezo: 0.0 }, B: { galvo: 0.0, piezo: 0.0 } };
+    // The axes' extents per side, from the controller (fetchRange); until
+    // read, a span to draw the line with.
+    const _range = { A: null, B: null };
+    const RANGE_DEFAULT = { galvo: [-5, 5], piezo: [-100, 100] };
     let _mode = 'single';
     let _selectedLib = null;
     let _runPaused = false;
@@ -1308,9 +1313,9 @@ const OperateManager = (function () {
     function renderPose() {
         const multi = _side === 'Multi';
         const p = _pose[multi ? 'A' : _side];
-        const gv = $('op-gv'); if (gv) gv.textContent = multi ? '—' : p.galvo.toFixed(1);
-        const pz = $('op-pz'); if (pz) pz.textContent = multi ? '—' : p.piezo.toFixed(0);
-        document.querySelectorAll('[data-gv],[data-pz]').forEach(b => { b.disabled = multi; });
+        const r = _range[multi ? 'A' : _side] || RANGE_DEFAULT;
+        renderAxis('op-gv', r.galvo, p.galvo, 2, multi);
+        renderAxis('op-pz', r.piezo, p.piezo, 1, multi);
         const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
         document.querySelectorAll('#op-spim-side [data-side]').forEach(b => {
             const on = b.dataset.side === _side;
@@ -1325,21 +1330,44 @@ const OperateManager = (function () {
         if (side === _side) return;
         _side = side;
         renderPose();
+        fetchRange(side);
         // The frame on screen is the other side's until the next one lands.
         if (_spimOn) clearImg('op-img-spim', 'op-ph-spim', `Switching to side ${side}…`);
         postLsParams();
     }
-    function nudgeGalvo(d) {
-        if (_side === 'Multi') return;
-        const p = _pose[_side];
-        p.galvo = Math.max(-5, Math.min(5, p.galvo + d));
-        renderPose();
-        postLsParams();
+    // One axis row: the line's ends are the extent, its knob the pose, the
+    // readout the number. Multi has no sheet of its own: the line is off and
+    // the readout blank.
+    function renderAxis(id, ext, v, digits, off) {
+        const inp = $(id + '-in');
+        if (inp) { inp.min = ext[0]; inp.max = ext[1]; inp.value = v; inp.disabled = off; }
+        const lo = $(id + '-min'), hi = $(id + '-max');
+        if (lo) lo.textContent = fmtExt(ext[0]);
+        if (hi) hi.textContent = fmtExt(ext[1]);
+        const out = $(id); if (out) out.textContent = off ? '—' : v.toFixed(digits);
     }
-    function nudgePiezo(d) {
-        if (_side === 'Multi') return;
-        const p = _pose[_side];
-        p.piezo = Math.max(0, Math.min(200, p.piezo + d));
+    const fmtExt = x => (x > 0 ? '+' : x < 0 ? '−' : '') + String(Number(Math.abs(x).toFixed(2)));
+    // The extents, from the controller, once per side: the micro-mirror card's
+    // deflection limits on the slice axis and the piezo's soft limits, the
+    // same source the plugin bounds its sliders by. A pose outside them is
+    // pulled inside.
+    async function fetchRange(side) {
+        if ((side !== 'A' && side !== 'B') || _range[side]) return;
+        try {
+            const r = await getJSON(`/api/devices/lightsheet/live/range?side=${side}`);
+            if (!r || !Array.isArray(r.galvo) || !Array.isArray(r.piezo)) return;
+            _range[side] = r;
+            const p = _pose[side];
+            p.galvo = Math.min(r.galvo[1], Math.max(r.galvo[0], p.galvo));
+            p.piezo = Math.min(r.piezo[1], Math.max(r.piezo[0], p.piezo));
+            renderPose();
+        } catch (_) { /* no controller to ask: the default span stands */ }
+    }
+    // The knob moved: the pose takes the number, line and readout follow, and
+    // the device layer hears it on the debounce tick.
+    function setAxis(key, v) {
+        if (_side === 'Multi' || !Number.isFinite(v)) return;
+        _pose[_side][key] = v;
         renderPose();
         postLsParams();
     }
@@ -3167,7 +3195,7 @@ const OperateManager = (function () {
             render() { renderMarkCount(); drawMarkers(); bz.render(); },
         },
         spim: {
-            onEnter() {},
+            onEnter() { fetchRange(_side); },
             onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
             render() { renderSpimTarget(); fd.render(); },
         },
@@ -3660,10 +3688,11 @@ const OperateManager = (function () {
         if (anyway) anyway.addEventListener('click', () => calibrateSelected({ anyway: true }));
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
-        document.querySelectorAll('[data-gv]').forEach(b =>
-            b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
-        document.querySelectorAll('[data-pz]').forEach(b =>
-            b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
+        const gvIn = $('op-gv-in');
+        if (gvIn) gvIn.addEventListener('input', () => setAxis('galvo', Number(gvIn.value)));
+        const pzIn = $('op-pz-in');
+        if (pzIn) pzIn.addEventListener('input', () => setAxis('piezo', Number(pzIn.value)));
+        fetchRange(_side);
         document.querySelectorAll('#op-spim-side [data-side]').forEach(b =>
             b.addEventListener('click', () => setSpimSide(b.dataset.side)));
         document.querySelectorAll('[data-backoff]').forEach(b =>

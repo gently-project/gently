@@ -234,3 +234,60 @@ async def test_the_counts_route_serves_one_camera_s_frame_or_none(monkeypatch):
     dl._ls_params["side"] = "Multi"
     await one_frame(lambda: np.zeros((8, 8, 3), np.uint8))
     assert dl._last_ls_frame is None
+
+
+@pytest.mark.asyncio
+async def test_the_axes_extents_are_the_controller_s_per_side():
+    """The slider's ends are the card's deflection limits and the piezo's soft
+    limits, per side, read once; a controller that does not answer leaves the
+    device class's limits."""
+    import json
+    from unittest.mock import MagicMock
+
+    dl = _make_dl(with_camera_b=True, with_scanner_b=True, with_piezo_b=True)
+    dl._ls_range = {}
+    props = {
+        ("Scanner:AB:33", "MinDeflectionY(deg)"): "-4",
+        ("Scanner:AB:33", "MaxDeflectionY(deg)"): "4",
+        ("Scanner:CD:33", "MinDeflectionY(deg)"): "-3.5",
+        ("Scanner:CD:33", "MaxDeflectionY(deg)"): "3.5",
+        ("PiezoStage:P:34", "LowerLim(mm)"): "-0.075",
+        ("PiezoStage:P:34", "UpperLim(mm)"): "0.075",
+        ("PiezoStage:Q:35", "LowerLim(mm)"): "-0.1",
+        ("PiezoStage:Q:35", "UpperLim(mm)"): "0.1",
+    }
+    reads: list = []
+
+    class Core:
+        def getProperty(self, dev, prop):
+            reads.append((dev, prop))
+            return props[(dev, prop)]
+
+    for k in ("scanner", "scanner_b", "piezo", "piezo_b"):
+        dl.devices[k].core = Core()
+
+    async def ask(side):
+        req = MagicMock()
+        req.query = {"side": side}
+        return json.loads((await dl.handle_lightsheet_range(req)).text)
+
+    assert await ask("B") == {"side": "B", "galvo": [-3.5, 3.5], "piezo": [-100.0, 100.0]}
+    assert await ask("A") == {"side": "A", "galvo": [-4.0, 4.0], "piezo": [-75.0, 75.0]}
+    n = len(reads)
+    await ask("A")
+    assert len(reads) == n  # read once per side
+
+    req = MagicMock()
+    req.query = {"side": "C"}
+    assert (await dl.handle_lightsheet_range(req)).status == 400
+
+    class Mute:
+        def getProperty(self, dev, prop):
+            raise RuntimeError("no answer")
+
+    dl._ls_range = {}
+    dl.devices["scanner"].core = Mute()
+    dl.devices["piezo"].core = Mute()
+    dl.devices["scanner"].limits = (-5.0, 5.0)
+    dl.devices["piezo"].limits = (-200.0, 200.0)
+    assert await ask("A") == {"side": "A", "galvo": [-5.0, 5.0], "piezo": [-200.0, 200.0]}

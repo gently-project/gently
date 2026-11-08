@@ -1100,6 +1100,10 @@ class DiSPIMMicroscope(Microscope):
             body["side"] = str(side)
         return await self._api_post("/api/lightsheet/live/params", body)
 
+    async def get_lightsheet_live_range(self, side: str = "A") -> dict:
+        """The live sheet's galvo and piezo extents for a side, from the controller."""
+        return await self._api_get(f"/api/lightsheet/live/range?side={side}")
+
     async def set_camera_led_mode(self, use_led: bool = False) -> dict:
         """Enable/disable automatic LED for bottom camera captures."""
         return await self._api_post("/api/camera/led_mode", {"use_led": use_led})

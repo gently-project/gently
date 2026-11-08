@@ -1412,6 +1412,18 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
         return res
 
+    @router.get("/api/devices/lightsheet/live/range")
+    async def lightsheet_live_range(side: str = "A"):
+        """The galvo and piezo extents of a side, from the controller. Read-only."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_lightsheet_live_range(side)
+        except Exception as exc:
+            logger.exception("lightsheet range read failed")
+            raise HTTPException(status_code=502, detail=f"range failed: {exc}") from exc
+
     # ------------------------------------------------------------------
     # LED / laser / camera
     # ------------------------------------------------------------------
