@@ -594,10 +594,18 @@ const OperateManager = (function () {
         if (img.naturalWidth && img.naturalHeight) setCamAspect(img);
         else img.addEventListener('load', () => setCamAspect(img), { once: true });
     }
+    // The frame's aspect, on the fit box and on the viewport box around it:
+    // the fit draws its chrome to it, and the SPIM pane's row sizes the box
+    // from it (operate.css, "SPIM head"); the fit inherits what the box has.
+    function setCamAr(fit, ar) {
+        fit.style.setProperty('--cam-ar', ar);
+        const box = fit.closest('.op-cam');
+        if (box) box.style.setProperty('--cam-ar', ar);
+    }
     function setCamAspect(img) {
         const fit = img.closest('.op-cam-fit');
         if (fit && img.naturalWidth && img.naturalHeight) {
-            fit.style.setProperty('--cam-ar', `${img.naturalWidth} / ${img.naturalHeight}`);
+            setCamAr(fit, `${img.naturalWidth} / ${img.naturalHeight}`);
         }
     }
 
@@ -644,7 +652,7 @@ const OperateManager = (function () {
             view.set(new Uint16Array(buf), meta);
             const fit = fitOf(pane), ph = $(phId);
             fit.classList.add('has-pixels');
-            fit.style.setProperty('--cam-ar', `${meta.width} / ${meta.height}`);
+            setCamAr(fit, `${meta.width} / ${meta.height}`);
             if (ph) ph.style.display = 'none';
             if (typeof ImageView !== 'undefined' && ImageView.frameArrived) ImageView.frameArrived(box);
         } catch (_) {

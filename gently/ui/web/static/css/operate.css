@@ -1880,3 +1880,50 @@
 .op-setup-hint { color: var(--text-muted); }
 .op-setup-clear { margin-left: auto; font: inherit; font-size: 12px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); padding: 2px 8px; cursor: pointer; }
 .op-setup-clear:hover { color: var(--text); border-color: var(--accent); }
+
+/* ── SPIM head: the image hugs its own width, the panels take the rest ──────
+   The frame is height-driven (see .op-cam-fit), so at a desk-sized window it
+   was a 450 px square centred in an 1100 px column while four panels queued
+   in a 260 px rail that scrolled. Here the image and the rail share one row:
+   the image box takes the width its aspect gives it at the row's height and
+   sits at the left; the rail takes the rest, its panels flowing into as many
+   240 px columns as fit, so at a desk-sized window nothing scrolls. The
+   caption and the display strip stay beneath, full width. The aspect ratio
+   has to be on the box itself for the row to size it (setCamAr in operate.js
+   puts --cam-ar on the box, which the fit inherits). Scoped to this pane; the
+   bottom camera keeps its rail and its fold-away cards. */
+#op-pane-spim { grid-template-columns: minmax(0, 1fr); }
+#op-pane-spim .op-view-row {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    align-items: stretch;
+    gap: var(--op-3);
+}
+#op-pane-spim .op-cam {
+    flex: 0 1 auto;
+    height: 100%;
+    aspect-ratio: var(--cam-ar, 1 / 1);
+    /* The rail keeps at least its old width; a tall, narrow window shrinks
+       the image instead, which then letterboxes inside its box. */
+    max-width: calc(100% - 260px - var(--op-3));
+}
+#op-pane-spim .op-inst {
+    grid-column: auto;
+    grid-row: auto;
+    flex: 1 1 260px;
+    min-width: 260px;
+    display: grid;
+    /* 240 px is what a panel had in the old rail (260 less its gutter), so
+       a laptop window gets two columns where 250 would have left it one. */
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    align-content: start;
+    /* Each panel keeps its own height rather than stretching to its row's
+       tallest neighbour: a 100 px panel drawn 260 px tall reads as empty. */
+    align-items: start;
+}
+@container operate (max-width: 900px) {
+    #op-pane-spim .op-view-row { flex-direction: column; }
+    #op-pane-spim .op-cam { flex: 0 0 auto; width: 100%; height: auto; max-width: none; }
+    #op-pane-spim .op-inst { display: flex; flex-direction: column; min-width: 0; }
+}
