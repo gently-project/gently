@@ -722,18 +722,38 @@
 
                     <div class="op-block">
                       <div class="op-block-head">Sheet alignment</div>
-                      <div class="op-row"><span class="op-label">Galvo</span>
-                        <span class="op-micro">
-                          <button class="op-nbtn" data-gv="-0.1" type="button">−</button>
-                          <b class="op-num" id="op-gv">0.0</b>
-                          <button class="op-nbtn" data-gv="0.1" type="button">+</button>
+                      <!-- A or B: one sheet, one camera; the armed beam follows the
+                           choice (device layer), since two sheets on at once light each
+                           camera with the other's edge-on. Multi is Micro-Manager's
+                           Multi Camera, as the ASIdiSPIM plugin names it: both cameras
+                           in one exposure, A red over B green, for alignment. Galvo and
+                           piezo belong to a side; each side keeps its numbers. -->
+                      <div class="op-row"><span class="op-label">View</span>
+                        <span class="op-micro" id="op-spim-side" role="radiogroup" aria-label="Light-sheet view">
+                          <button class="op-nbtn is-on" data-side="A" type="button" aria-pressed="true" title="Scanner AB · piezo P · camera 1">A</button>
+                          <button class="op-nbtn" data-side="B" type="button" aria-pressed="false" title="Scanner CD · piezo Q · camera 2">B</button>
+                          <button class="op-nbtn" data-side="Multi" type="button" aria-pressed="false" title="Both cameras in one frame: A red, B green">Multi</button>
                         </span></div>
-                      <div class="op-row"><span class="op-label">Piezo</span>
-                        <span class="op-micro">
-                          <button class="op-nbtn" data-pz="-1" type="button">−</button>
-                          <b class="op-num" id="op-pz">50</b>
-                          <button class="op-nbtn" data-pz="1" type="button">+</button>
-                        </span></div>
+                      <div class="op-cap" id="op-spim-multi-note" hidden>Pick A or B to move a sheet.</div>
+                      <!-- Each axis is a line with 0 at its centre: the ASIdiSPIM plugin's
+                           Home sends both axes to 0, and its Setup tab bounds its sliders
+                           by the micro-mirror card's deflection limits. The ends here are
+                           the controller's, read once per side (the card's limits on the
+                           slice axis, the piezo's soft limits); until read, a default span. -->
+                      <div class="op-row op-axis"><span class="op-label">Galvo</span>
+                        <span class="op-ext" id="op-gv-min">−5</span>
+                        <input class="op-range" id="op-gv-in" type="range" min="-5" max="5" step="0.01" value="0"
+                               list="op-gv-ticks" aria-label="Galvo angle in degrees">
+                        <datalist id="op-gv-ticks"><option value="0"></option></datalist>
+                        <span class="op-ext" id="op-gv-max">+5</span>
+                        <span class="op-micro"><b class="op-num" id="op-gv">0.00</b><i class="op-unit">°</i></span></div>
+                      <div class="op-row op-axis"><span class="op-label">Piezo</span>
+                        <span class="op-ext" id="op-pz-min">−100</span>
+                        <input class="op-range" id="op-pz-in" type="range" min="-100" max="100" step="0.5" value="0"
+                               list="op-pz-ticks" aria-label="Piezo position in micrometres">
+                        <datalist id="op-pz-ticks"><option value="0"></option></datalist>
+                        <span class="op-ext" id="op-pz-max">+100</span>
+                        <span class="op-micro"><b class="op-num" id="op-pz">0.0</b><i class="op-unit">µm</i></span></div>
                     </div>
 
                   </aside>

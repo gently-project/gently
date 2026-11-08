@@ -204,6 +204,7 @@ class DeviceLayerServer(Service):
             "mode": "snap",
         }
         self._ls_seq_started: bool = False
+        self._ls_range: dict[str, dict] = {}  # per side, the axes' extents, read once
         self._ls_applied: dict = {}  # last-applied galvo/piezo/exposure
         self._ls_parked: dict = {}  # last-parked galvo/piezo setPosition values
         self._ls_spim_idle: bool = False  # whether SPIM state machine was set Idle this session
@@ -1202,6 +1203,10 @@ class DeviceLayerServer(Service):
         """
         p = self._ls_params
         side = p.get("side", "A")
+        if side == "Multi":
+            # Both cameras, no side of its own: the sheets stay wherever A and
+            # B were last parked, and the beams wherever the operator left them.
+            return
 
         # Resolve scanner for the requested side (with fallback to A).
         if side == "B":
@@ -1240,6 +1245,10 @@ class DeviceLayerServer(Service):
                 except Exception:
                     pass
             self._ls_spim_idle = True
+        # The cache is per side: the same numbers on the other side are a
+        # different scanner and piezo, which have not been parked yet.
+        if self._ls_parked.get("side") != side:
+            self._ls_parked = {"side": side}
         # setPosition only when the value changed from last-applied.
         if scanner is not None:
             want = float(p["galvo"])
@@ -1278,10 +1287,13 @@ class DeviceLayerServer(Service):
         # Resolve the camera for the requested side
         if side == "B" and "camera_b" in self.devices:
             cam = self.devices["camera_b"]
+        elif side == "Multi" and "camera_multi" in self.devices:
+            cam = self.devices["camera_multi"]
         else:
-            if side == "B":
+            if side in ("B", "Multi"):
                 logger.warning(
-                    "Side B requested but camera_b not registered; falling back to side A"
+                    "Side %s requested but its camera is not registered; falling back to side A",
+                    side,
                 )
             cam = self.devices.get("camera")
 
@@ -1353,6 +1365,30 @@ class DeviceLayerServer(Service):
                 _safe_obtain = None
             core = self.system.core
             mode = self._ls_params.get("mode", "snap")
+            multi = (
+                self._ls_params.get("side") == "Multi" and self._ls_applied.get("side") == "Multi"
+            )
+            if multi:
+                # One exposure on both cameras, then each channel is matched
+                # to its camera by name, the way the ASIdiSPIM plugin reads
+                # the "Camera" tag off every frame rather than trusting an
+                # order. The adapter numbers channels in "Physical Camera N"
+                # order, so with the rig's config 0 is A and 1 is B; the
+                # fallback keeps that when names are not readable.
+                core.snapImage()
+                a_name = getattr(self.devices.get("camera"), "name", None)
+                b_name = getattr(self.devices.get("camera_b"), "name", None)
+                by_name: dict[str, Any] = {}
+                try:
+                    for ch in range(int(core.getNumberOfCameraChannels())):
+                        by_name[str(core.getCameraChannelName(ch))] = core.getImage(ch)
+                except Exception:
+                    by_name = {}
+                if a_name in by_name and b_name in by_name:
+                    a, b = by_name[a_name], by_name[b_name]
+                else:
+                    a, b = core.getImage(0), core.getImage(1)
+                return self._compose_multi(np.asarray(a), np.asarray(b))
             if mode == "snap":
                 core.snapImage()
                 img = core.getImage()
@@ -1371,6 +1407,33 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.debug("Lightsheet grab failed: %s", exc)
             return None
+
+    @staticmethod
+    def _compose_multi(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Side A in red, side B in green, each auto-contrasted on its own.
+
+        Returned as an 8-bit BGR frame, which is what the JPEG encoder takes
+        as-is. The two sensors are the same model, but a shape mismatch is
+        cropped to the common size rather than failed.
+        """
+
+        def to8(x: np.ndarray) -> np.ndarray:
+            flat = x.ravel()
+            step = max(1, flat.size // 4096)
+            sample = flat[::step]
+            lo = float(np.percentile(sample, 1))
+            hi = float(np.percentile(sample, 99))
+            if hi <= lo:
+                hi = lo + 1.0
+            return np.clip((x.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(
+                np.uint8
+            )
+
+        h = min(a.shape[0], b.shape[0])
+        w = min(a.shape[1], b.shape[1])
+        red = to8(a[:h, :w])
+        green = to8(b[:h, :w])
+        return np.dstack([np.zeros_like(red), green, red])
 
     def _stop_lightsheet_sequence_sync(self) -> None:
         try:
@@ -1403,7 +1466,10 @@ class DeviceLayerServer(Service):
                 tick = time.monotonic()
                 img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
                 if img is not None:
-                    self._last_ls_frame = img
+                    # Multi's A-red-over-B-green frame is a rendering, drawn from
+                    # its JPEG; the counts route serves one camera's frame or none.
+                    # ponytail: a two-colour U16View would put Multi on counts too.
+                    self._last_ls_frame = img if img.ndim == 2 else None
                 payload = (
                     self._encode_frame_for_stream(
                         img, self._ls_target_max_dim, self._ls_jpeg_quality
@@ -1412,6 +1478,7 @@ class DeviceLayerServer(Service):
                     else None
                 )
                 if payload is not None:
+                    payload["side"] = self._ls_params.get("side", "A")
                     await self._broadcast_lightsheet(payload)
                 elapsed = time.monotonic() - tick
                 # Pace to at least the exposure; peek-rate caps near the camera rate.
@@ -1494,16 +1561,88 @@ class DeviceLayerServer(Service):
     async def handle_lightsheet_params(self, request):
         """POST /api/lightsheet/live/params — update live galvo/piezo/exposure/side.
 
-        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"} (all optional).
+        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"|"Multi"}
+        (all optional). "Multi" is Micro-Manager's Multi Camera, both sides in one frame.
         Galvo/piezo apply on the next grab; exposure or side change triggers sequence restart.
         """
         body = await request.json()
         for k in ("galvo", "piezo", "exposure"):
             if k in body and body[k] is not None:
                 self._ls_params[k] = float(body[k])
-        if "side" in body and body["side"] in ("A", "B"):
+        if "side" in body and body["side"] in ("A", "B", "Multi"):
+            previous = self._ls_params.get("side", "A")
             self._ls_params["side"] = body["side"]
+            if body["side"] != previous and body["side"] != "Multi":
+                await asyncio.to_thread(self._follow_beam_to_side, body["side"])
         return web.json_response({"params": self._ls_params})
+
+    def _read_lightsheet_range_sync(self, side: str) -> dict[str, Any]:
+        """The extents of a side's galvo and piezo, from the controller.
+
+        The ASIdiSPIM plugin bounds its sheet sliders by the micro-mirror
+        card's deflection limits and sends both axes Home to 0; this is the
+        same source: the card's limits on the slice axis, and the piezo's soft
+        limits, in micrometres. A controller that does not answer leaves the
+        device class's limits. Read once per side; limits do not move.
+        """
+        if side in self._ls_range:
+            return self._ls_range[side]
+        b = side == "B"
+        scanner = self.devices.get("scanner_b" if b and "scanner_b" in self.devices else "scanner")
+        piezo = self.devices.get("piezo_b" if b and "piezo_b" in self.devices else "piezo")
+        out: dict[str, Any] = {"side": side}
+        if scanner is not None:
+            try:
+                out["galvo"] = [
+                    float(scanner.core.getProperty(scanner.name, "MinDeflectionY(deg)")),
+                    float(scanner.core.getProperty(scanner.name, "MaxDeflectionY(deg)")),
+                ]
+            except Exception:
+                out["galvo"] = list(getattr(scanner, "limits", (-5.0, 5.0)))
+        if piezo is not None:
+            try:
+                out["piezo"] = [
+                    1000.0 * float(piezo.core.getProperty(piezo.name, "LowerLim(mm)")),
+                    1000.0 * float(piezo.core.getProperty(piezo.name, "UpperLim(mm)")),
+                ]
+            except Exception:
+                out["piezo"] = list(getattr(piezo, "limits", (-200.0, 200.0)))
+        self._ls_range[side] = out
+        return out
+
+    async def handle_lightsheet_range(self, request):
+        """GET /api/lightsheet/live/range?side=A|B — the galvo and piezo extents
+        of a side, from the controller (see _read_lightsheet_range_sync)."""
+        side = request.query.get("side", "A")
+        if side not in ("A", "B"):
+            return web.json_response({"success": False, "error": "side must be A or B"}, status=400)
+        try:
+            out = await asyncio.to_thread(self._read_lightsheet_range_sync, side)
+            return web.json_response(out)
+        except Exception as exc:
+            logger.exception("[lightsheet] range read failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    def _follow_beam_to_side(self, side: str) -> None:
+        """An armed beam follows the live view to its side.
+
+        Two sheets on at once light each camera with the other side's sheet
+        edge-on, so a view of B with A's beam armed is a view of a stripe. If
+        either side is armed, the chosen side ends armed and the other not;
+        if neither is, nothing is touched. Best effort: the view must not die
+        on a beam write.
+        """
+        try:
+            beam = self._read_beam()
+            if not any(beam.get(k) for k in self._BEAM_SIDES):
+                return
+            for key, dev_name in self._BEAM_SIDES.items():
+                dev = self.devices.get(dev_name)
+                if dev is not None:
+                    dev.enable_beam(key == side.lower())
+            logger.info("[beam] followed the live view to side %s", side)
+        except Exception:
+            logger.warning("[beam] could not follow the live view to side %s", side, exc_info=True)
 
     # =========================================================================
     # MMCore Push Callbacks
@@ -4124,7 +4263,9 @@ class DeviceLayerServer(Service):
         return {"success": False, "error": "Could not read position"}
 
     def _extract_volume(self, documents: dict, params: dict) -> dict:
-        val = self._extract_from_events(documents, ["volume_scanner", "camera", "camera_image"])
+        val = self._extract_from_events(
+            documents, ["volume_scanner", "volume_scanner_b", "camera", "camera_image"]
+        )
         if val is not None:
             result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
@@ -4601,6 +4742,7 @@ class DeviceLayerServer(Service):
         # Lightsheet (SPIM) live stream — continuous sequence acquisition
         self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
         self._app.router.add_post("/api/lightsheet/live/params", self.handle_lightsheet_params)
+        self._app.router.add_get("/api/lightsheet/live/range", self.handle_lightsheet_range)
         self._app.router.add_get("/api/cameras", self.handle_get_cameras)
 
         # Start plan executor

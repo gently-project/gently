@@ -8,8 +8,8 @@ took **eight** unrelated handlers with it:
 
     op-spim-toggle    start/stop the light-sheet view
     op-calibrate      run the calibration
-    [data-gv]         galvo nudges
-    [data-pz]         piezo nudges
+    [data-gv]         galvo nudges (since then the galvo line, op-gv-in)
+    [data-pz]         piezo nudges (since then the piezo line, op-pz-in)
     [data-backoff]    the interlock banner's "Back off 100 µm"
     op-modes          the run-mode chooser
     op-tl-stop        the stop-condition select
@@ -52,8 +52,8 @@ CONTROLS = {
     "op-clear": "$('op-clear')",
     "op-cam-toggle": "$('op-cam-toggle')",
     "op-target-scope": "$('op-target-scope')",
-    "[data-gv]": "[data-gv]",
-    "[data-pz]": "[data-pz]",
+    "op-gv-in": "$('op-gv-in')",
+    "op-pz-in": "$('op-pz-in')",
     "[data-backoff]": "[data-backoff]",
     "[data-mode]": "[data-mode]",
     "[data-lib]": "[data-lib]",

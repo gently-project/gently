@@ -607,9 +607,21 @@
 .op-micro { display: inline-flex; align-items: center; gap: var(--op-1); }
 .op-micro .op-num { min-width: 34px; }
 
+/* An axis as a line: the ends are the controller's limits, 0 its centre. */
+.op-axis .op-label { flex: 0 0 auto; }
+.op-range { flex: 1 1 auto; min-width: 72px; margin: 0; accent-color: var(--accent); }
+.op-range:disabled { opacity: 0.4; cursor: not-allowed; }
+.op-ext {
+    font-family: var(--op-mono);
+    font-size: 0.56rem;
+    color: var(--op-ink-dim);
+    white-space: nowrap;
+}
+.op-unit { font-style: normal; font-size: 0.6rem; color: var(--op-ink-dim); margin-left: 2px; }
+
 .op-seg { display: flex; flex-wrap: wrap; gap: var(--op-1); }
 .op-segbtn { padding: var(--op-2) var(--op-3); font-size: 0.68rem; }
-.op-segbtn.is-on { border-color: var(--accent); color: var(--accent); }
+.op-segbtn.is-on, .op-nbtn.is-on { border-color: var(--accent); color: var(--accent); }
 
 .op-field { display: flex; align-items: center; justify-content: space-between; gap: var(--op-2); }
 .op-num-in, .op-sel {
