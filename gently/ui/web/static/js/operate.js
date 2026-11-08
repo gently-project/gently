@@ -462,6 +462,24 @@ const OperateManager = (function () {
      * The SPIM head fully up, to the F-drive's top limit. A long move — the
      * button says so while it travels, and HALT stays live beside it.
      */
+    /**
+     * The SPIM head to a height, by name: "To 1000 µm". A long move from the
+     * load height, so the button says it is travelling and HALT stays live.
+     */
+    async function headTo(um) {
+        const b = $('op-fd-to');
+        if (b) { b.disabled = true; b.textContent = 'Going…'; }
+        try {
+            const r = await postJSON('/api/devices/spim/fdrive/goto', { position: um });
+            const at = r && r.position != null ? Math.round(r.position) : null;
+            toast(at != null ? `SPIM head at ${at} µm` : `SPIM head sent to ${um} µm`);
+        } catch (e) {
+            toastFail(`Move to ${um} µm failed (${why(e)})`);
+        } finally {
+            if (b) { b.disabled = false; b.textContent = `To ${um} µm`; }
+            fd.refresh();
+        }
+    }
     async function raiseHead() {
         const b = $('op-fd-raise');
         if (b) { b.disabled = true; b.textContent = 'Raising…'; }
@@ -3689,6 +3707,8 @@ const OperateManager = (function () {
         });
         const keptOpen = $('op-cal-kept-open');
         if (keptOpen) keptOpen.addEventListener('click', openCalFolder);
+        const to = $('op-fd-to');
+        if (to) to.addEventListener('click', () => headTo(Number(to.dataset.fdTo)));
         const raise = $('op-fd-raise');
         if (raise) raise.addEventListener('click', raiseHead);
 

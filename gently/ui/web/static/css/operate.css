@@ -437,7 +437,10 @@
 .op-gauge-nudge { grid-area: nudge; }
 .op-gauge-foot { grid-area: foot; }
 
-.op-gauge-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--op-2); }
+.op-gauge-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--op-2); flex-wrap: wrap; row-gap: var(--op-1); }
+/* The gauge's verbs — Raise head, To 1000 µm — on a line of their own under
+   the name, HALT and the readout, so neither line squeezes the other. */
+.op-gauge-verbs { order: 10; flex: 1 0 100%; display: flex; gap: var(--op-2); }
 .op-gauge-read b { font-size: 0.92rem; }
 .op-gauge-read i {
     font-style: normal;
@@ -1961,3 +1964,23 @@
     .op-pane-row .op-block-display { height: auto; }
     .op-pane-row .op-inst { display: flex; flex-direction: column; min-width: 0; }
 }
+
+/* ── Light panel: the laser as its lines ──────────────────────────────────
+   One row per line the rig has: a swatch in the line's colour that glows while
+   that line is emitting, the wavelength, its power. A line the preset does not
+   route is dimmed, slider off: the row says what the preset did to its line. */
+.lp-lines { display: flex; flex-direction: column; gap: 2px; }
+.lp-line { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+.lp-line:not(.is-routed) { opacity: 0.5; }
+.lp-swatch {
+    flex: 0 0 auto;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--wl);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.lp-line.is-lit .lp-swatch { box-shadow: 0 0 6px 1px var(--wl); }
+.lp-wl { flex: 0 0 30px; font-family: var(--op-mono); font-size: 0.72rem; color: var(--text); }
+.lp-line .lp-lim { white-space: nowrap; }
+.lp-beam .lp-seg { margin-right: 4px; }

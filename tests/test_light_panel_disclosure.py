@@ -53,7 +53,7 @@ def test_display_asks_a_narrower_question_than_emission() -> None:
 
 def test_the_detail_is_revealed_not_always_present() -> None:
     src = _light()
-    assert "lines.length ? laserDetail(" in src, (
+    assert "s.config != null ? laserDetail(" in src, (
         "the laser detail is no longer conditional — an unknown config renders empty controls again"
     )
 

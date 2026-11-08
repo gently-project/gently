@@ -40,6 +40,7 @@ INDEX = WEB / "templates" / "index.html"
 CONTROLS = {
     "op-spim-toggle": "$('op-spim-toggle')",
     "op-halt": "$('op-halt')",
+    "op-fd-to": "$('op-fd-to')",
     "op-calibrate": "$('op-calibrate')",
     "op-modes": "$('op-modes')",
     "op-tl-stop": "$('op-tl-stop')",

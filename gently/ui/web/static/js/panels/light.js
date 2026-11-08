@@ -444,17 +444,82 @@ const LightPanel = (() => {
     }
 
     /** The config select, then the laser's own settings once a line is routed. */
+    const LINE_COLOUR = { 405: '#8b5cf6', 488: '#38bdf8', 561: '#a3e635', 637: '#ef4444' };
+
+    /**
+     * The laser as its lines: every line the rig has, one row each — a swatch
+     * in the line's colour that glows while that line is emitting, the
+     * wavelength, its power. Routing is still the Micro-Manager preset (the
+     * PLogic offers those combinations and no others), chosen above the rows;
+     * a row says what the preset did to its line, and a line not routed is
+     * dimmed with its slider off. The beam is per side, A and B, each the
+     * state the scanner card reports, since the live view keeps the beam on
+     * the side it shows.
+     */
     function laserBranch(s, armed, lines) {
         return `
           <div class="lp-sub">
             <div class="lp-row">
-              <span class="lp-label" title="The Laser config group — which lines the PLogic routes to the SPIM trigger">Config</span>
-              <select class="lp-select" data-config aria-label="Laser config">
+              <span class="lp-label" title="Which lines the PLogic routes to the sheet — a preset of the Laser config group">Routed</span>
+              <select class="lp-select" data-config aria-label="Laser lines routed">
                 ${configOptions(s.config)}
               </select>
             </div>
-            ${lines.length ? laserDetail(s, armed, lines) : ''}
+            ${s.config != null ? laserDetail(s, armed, lines) : ''}
           </div>`;
+    }
+
+    /**
+     * The lines and the beam, once the routing is known. An unknown config
+     * is not "nothing routed": with it unread, every row would dim as if the
+     * rig were dark, so the detail waits for the read.
+     */
+    function laserDetail(s, armed, lines) {
+        const known = limits ? Object.keys(limits).map(Number) : [405, 488, 561, 637];
+        const rows = known.map(wl => {
+            const routed = lines.includes(wl);
+            const lim = (limits && limits[wl]) || { min: 0, max: 100 };
+            const val = (s.power || {})[wl];
+            const lit = routed && armed === true && val != null && val > 0;
+            return `
+              <div class="lp-line ${routed ? 'is-routed' : ''} ${lit ? 'is-lit' : ''}" data-line="${wl}">
+                <span class="lp-swatch" style="--wl:${LINE_COLOUR[wl] || '#999'}"
+                      title="${wl} nm: ${routed ? (lit ? 'emitting' : 'routed, not emitting') : 'not routed'}"></span>
+                <span class="lp-wl">${wl}</span>
+                <input class="lp-range" type="range" data-power="${wl}"
+                       min="${lim.min}" max="${lim.max}" step="0.1"
+                       value="${val == null ? lim.min : val}"
+                       ${val == null ? 'disabled' : ''}
+                       aria-label="${wl} nm power percent">
+                <span class="lp-val">${val == null ? '—' : Number(val).toFixed(1)} %</span>
+                <span class="lp-lim">${lim.min}–${lim.max}</span>
+              </div>`;
+        }).join('');
+        const contradicts = lines.length && armed === false;
+        return `
+            <div class="lp-lines">${rows}</div>
+            <div class="lp-row lp-beam">
+              <span class="lp-label" title="BeamEnabled on each side's scanner card: the mirror unparked, so a routed line reaches the sample from that arm. The live view keeps the beam on the side it shows.">Beam</span>
+              ${beamSides(s.beam)}
+              ${armed ? '<button class="lp-btn is-armed" data-beam="off" title="Disarm both sides">Off</button>' : ''}
+            </div>
+            ${contradicts
+                ? `<p class="lp-warn">Lines are routed but the beam is off — this
+                   configuration will not emit. Every volume acquisition leaves
+                   BeamEnabled at No.</p>`
+                : ''}`;
+    }
+
+    /** One toggle per side, each the state the hardware reports, never remembered. */
+    function beamSides(beam) {
+        const sides = beam && Object.keys(beam).length ? Object.keys(beam) : ['a', 'b'];
+        const btns = sides.map(k => {
+            const v = beam ? beam[k] : null;
+            const on = v === true;
+            return `<button class="lp-mbtn ${on ? 'is-on' : ''}" data-beam-side="${k}" data-beam-on="${on}"
+                            aria-pressed="${on}" title="Side ${k.toUpperCase()}: ${v == null ? 'not read' : on ? 'armed' : 'off'}">${k.toUpperCase()} ${v == null ? '?' : on ? 'on' : 'off'}</button>`;
+        }).join('');
+        return `<span class="lp-seg" role="group" aria-label="Beam per side">${btns}</span>`;
     }
 
     /**
@@ -465,51 +530,6 @@ const LightPanel = (() => {
         return `<p class="lp-warn">The LED is open and the laser is routing
                 ${routedLines(s).join(', ')} nm — fluorescence sits on top of
                 brightfield. Pick a mode.</p>`;
-    }
-
-    /**
-     * The laser's own settings, revealed once a line is routed.
-     *
-     * Nested for SCOPE, not for dependency. Beam and power only matter once
-     * something is routed, which is why they are hidden until then — but they
-     * are not caused by the config, and #106 is exactly what happens when
-     * someone assumes they are. So the contradiction gets a line of its own
-     * rather than being softened by the indent.
-     */
-    function laserDetail(s, armed, lines) {
-        const contradicts = lines.length && armed === false;
-        const powerRows = lines.map(wl => {
-            const lim = (limits && limits[wl]) || { min: 0, max: 100 };
-            const val = (s.power || {})[wl];
-            return `
-              <div class="lp-row">
-                <span class="lp-label">${wl}</span>
-                <input class="lp-range" type="range" data-power="${wl}"
-                       min="${lim.min}" max="${lim.max}" step="0.1"
-                       value="${val == null ? lim.min : val}"
-                       ${val == null ? 'disabled' : ''}
-                       aria-label="${wl} nm power percent">
-                <span class="lp-val">${val == null ? '—' : Number(val).toFixed(1)} %</span>
-                <span class="lp-lim">${lim.min}–${lim.max}</span>
-              </div>`;
-        }).join('');
-
-        return `
-          <div class="lp-sub">
-            <div class="lp-row">
-              <span class="lp-label" title="BeamEnabled on the scanner card — the Micro-Manager property name">BeamEnabled</span>
-              <button class="lp-btn ${armed ? 'is-armed' : ''}" data-beam="${armed ? 'off' : 'on'}"
-                      aria-pressed="${armed === true}">${armed ? 'Set No' : 'Set Yes'}</button>
-              <span class="lp-val">${armed == null ? '—' : armed ? 'Yes' : 'No'}</span>
-              ${sideDetail(s.beam)}
-            </div>
-            ${contradicts
-                ? `<p class="lp-warn">Lines are routed but the beam is off — this
-                   configuration will not emit. Every volume acquisition leaves
-                   BeamEnabled at No.</p>`
-                : ''}
-            ${powerRows}
-          </div>`;
     }
 
     /**
@@ -527,20 +547,15 @@ const LightPanel = (() => {
         return '<p class="lp-note">Beam is armed, but no lines are routed — nothing emits.</p>';
     }
 
-    /** Only worth showing when the two sides disagree, which is a real state. */
-    function sideDetail(beam) {
-        if (!beam) return '';
-        const vals = Object.values(beam);
-        if (vals.length < 2 || vals.every(v => v === vals[0])) return '';
-        const txt = Object.entries(beam)
-            .map(([k, v]) => `${k.toUpperCase()} ${v === null ? '?' : v ? 'on' : 'off'}`).join(' · ');
-        return `<span class="lp-lim">${txt}</span>`;
-    }
-
     function wire(el, scope) {
         const beam = el.querySelector('[data-beam]');
         if (beam) beam.onclick = () => act(() =>
             send('/api/devices/beam', { enabled: beam.dataset.beam === 'on' }));
+        // A side's toggle arms or disarms that side alone.
+        el.querySelectorAll('[data-beam-side]').forEach(b => {
+            b.onclick = () => act(() => send('/api/devices/beam',
+                { enabled: b.dataset.beamOn !== 'true', side: b.dataset.beamSide }));
+        });
 
         const cfg = el.querySelector('[data-config]');
         if (cfg) cfg.onchange = () => act(() =>

@@ -1203,6 +1203,10 @@ class DiSPIMMicroscope(Microscope):
         """The SPIM head fully up, to the F-drive's top limit (load height)."""
         return await self._api_post("/api/spim/fdrive/raise", {})
 
+    async def goto_fdrive(self, position: float) -> dict:
+        """The SPIM head to an absolute height in µm, fenced by the device layer."""
+        return await self._api_post("/api/spim/fdrive/goto", {"position": float(position)})
+
     async def capture_bottom_image(
         self, use_led: bool = False, exposure_ms: float | None = None
     ) -> dict:

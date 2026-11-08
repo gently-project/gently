@@ -2863,6 +2863,23 @@ def create_router(server) -> APIRouter:
             logger.exception("fdrive raise failed")
             raise HTTPException(status_code=502, detail=f"fdrive raise failed: {exc}") from exc
 
+    @router.post("/api/devices/spim/fdrive/goto", dependencies=[Depends(require_control)])
+    async def goto_fdrive(payload: dict = Body(...)):  # noqa: B008
+        """The SPIM head to an absolute height {position} µm, fenced by the
+        device layer to the F-drive's own limits. The pane's one number is
+        1000 µm: the clean stop on the way down from the load height."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        position = _num(payload.get("position"))
+        if position is None:
+            raise HTTPException(status_code=400, detail="position required")
+        try:
+            return await client.goto_fdrive(position)
+        except Exception as exc:
+            logger.exception("fdrive goto failed")
+            raise HTTPException(status_code=502, detail=f"fdrive goto failed: {exc}") from exc
+
     # ------------------------------------------------------------------
     # Acquisition
     # ------------------------------------------------------------------

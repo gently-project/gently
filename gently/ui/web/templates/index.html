@@ -683,6 +683,19 @@
                           <div class="op-actions">
                             <button class="op-btn op-btn-toggle" id="op-spim-toggle" type="button">Start view</button>
                           </div>
+                          <!-- A or B: one sheet, one camera; the armed beam follows the
+                               choice (device layer), since two sheets on at once light each
+                               camera with the other's edge-on. Multi is Micro-Manager's
+                               Multi Camera, as the ASIdiSPIM plugin names it: both cameras
+                               in one exposure, A red over B green, for alignment. The galvo
+                               and piezo lines in Sheet alignment belong to the side chosen here. -->
+                          <div class="op-row"><span class="op-label">View</span>
+                            <span class="op-micro" id="op-spim-side" role="radiogroup" aria-label="Light-sheet view">
+                              <button class="op-nbtn is-on" data-side="A" type="button" aria-pressed="true" title="Scanner AB · piezo P · camera 1">A</button>
+                              <button class="op-nbtn" data-side="B" type="button" aria-pressed="false" title="Scanner CD · piezo Q · camera 2">B</button>
+                              <button class="op-nbtn" data-side="Multi" type="button" aria-pressed="false" title="Both cameras in one frame: A red, B green">Multi</button>
+                            </span></div>
+                          <div class="op-cap" id="op-spim-multi-note" hidden>Pick A or B to move a sheet.</div>
                           <div id="op-cam-panel-spim"></div>
                         </div>
 
@@ -702,7 +715,11 @@
                             <!-- The head fully up, to the F-drive's top limit — the load
                                  height. Beside HALT because that is where the hand goes
                                  when the head must get out of the way. -->
-                            <button class="op-btn op-btn-raise" id="op-fd-raise" type="button" title="Raise the SPIM head fully, to 25000 µm (load height)">Raise head</button>
+                            <span class="op-gauge-verbs">
+                              <button class="op-btn op-btn-raise" id="op-fd-raise" type="button" title="Raise the SPIM head fully, to 25000 µm (load height)">Raise head</button>
+                              <!-- The clean stop on the way down: well above the sample, where the nudges take over. -->
+                              <button class="op-btn op-btn-raise" id="op-fd-to" type="button" data-fd-to="1000" title="Bring the SPIM head to 1000 µm">To 1000 µm</button>
+                            </span>
                             <button class="op-btn op-btn-halt" id="op-halt" type="button" title="Stop all stage motion now">HALT</button>
                             <span class="op-gauge-read"><b class="op-num" id="op-fd-pos">—</b><i>µm</i></span>
                           </div>
@@ -726,19 +743,8 @@
 
                         <div class="op-block">
                           <div class="op-block-head">Sheet alignment</div>
-                          <!-- A or B: one sheet, one camera; the armed beam follows the
-                               choice (device layer), since two sheets on at once light each
-                               camera with the other's edge-on. Multi is Micro-Manager's
-                               Multi Camera, as the ASIdiSPIM plugin names it: both cameras
-                               in one exposure, A red over B green, for alignment. Galvo and
-                               piezo belong to a side; each side keeps its numbers. -->
-                          <div class="op-row"><span class="op-label">View</span>
-                            <span class="op-micro" id="op-spim-side" role="radiogroup" aria-label="Light-sheet view">
-                              <button class="op-nbtn is-on" data-side="A" type="button" aria-pressed="true" title="Scanner AB · piezo P · camera 1">A</button>
-                              <button class="op-nbtn" data-side="B" type="button" aria-pressed="false" title="Scanner CD · piezo Q · camera 2">B</button>
-                              <button class="op-nbtn" data-side="Multi" type="button" aria-pressed="false" title="Both cameras in one frame: A red, B green">Multi</button>
-                            </span></div>
-                          <div class="op-cap" id="op-spim-multi-note" hidden>Pick A or B to move a sheet.</div>
+                          <!-- The side these lines belong to is chosen in the Light sheet
+                               block above (View: A, B or Multi). -->
                           <!-- Each axis is a line with 0 at its centre: the ASIdiSPIM plugin's
                                Home sends both axes to 0, and its Setup tab bounds its sliders
                                by the micro-mirror card's deflection limits. The ends here are
