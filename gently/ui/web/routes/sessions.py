@@ -6,11 +6,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import numpy as np
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
 from gently.core.session_summary import interaction_stats, signal_counts
-from gently.core.session_summary import notable_events as _notable_events
 from gently.core.session_summary import read_checkpoint as _checkpoint
 from gently.core.session_summary import what_a_session_holds as _what_a_session_holds
 from gently.ui.web.auth import require_control
@@ -188,6 +188,14 @@ def folder_bytes(
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
+    def _session_tools(store, sid: str) -> list[str]:
+        from gently.tools import session_tools
+
+        try:
+            return session_tools(store, sid)
+        except Exception:
+            return []
+
     def _file_store():
         """The live FileStore (current Gently3 layout), via the agent."""
         bridge = getattr(server, "agent_bridge", None)
@@ -245,12 +253,15 @@ def create_router(server) -> APIRouter:
             return {}
 
     @router.get("/api/sessions")
-    async def list_sessions(project_id: str | None = None, unfiled: bool = False):
+    async def list_sessions(
+        project_id: str | None = None, unfiled: bool = False, detail: bool | None = None
+    ):
         """List available sessions (from the live FileStore).
 
         ``project_id`` narrows to one project's sessions and ``unfiled`` to
         those in none. Either adds what the project view shows: errors and
-        warnings from the event capture, the agent's turns and corrections.
+        warnings from the event capture, the agent's turns and corrections;
+        ``detail=0`` leaves those out for a caller that only counts rows.
         Every row carries its project and the plan items it served.
         """
         store = _file_store()
@@ -258,7 +269,7 @@ def create_router(server) -> APIRouter:
             return {"sessions": []}
         active_id = _active_session_id()
         cs = getattr(server, "context_store", None)
-        detail = project_id is not None or unfiled
+        detail = (project_id is not None or unfiled) if detail is None else detail
 
         def gather() -> list[dict]:
             out = []
@@ -278,6 +289,9 @@ def create_router(server) -> APIRouter:
                     {
                         "session_id": sid,
                         "project_id": s.get("project_id"),
+                        "projects": s.get("projects") or [],
+                        "operators": [str(x) for x in (s.get("operators") or [])],
+                        "tags": s.get("tags") or [],
                         "plan_items": served.get(sid, []),
                         **extra,
                         "name": s.get("name") or sid,
@@ -292,9 +306,9 @@ def create_router(server) -> APIRouter:
                         # The walk over a session's files is the one slow read
                         # left here: a cached size comes now, the rest arrive
                         # through /api/sessions/sizes once the list is drawn.
-                        "bytes": folder_bytes(
-                            store._session_dir(sid), fresh=sid == active_id, cached_only=True
-                        ),
+                        # Never a walk from the list, the live session's included:
+                        # its row shows the last size counted, the detail counts afresh.
+                        "bytes": folder_bytes(store._session_dir(sid), cached_only=True),
                         "brightfield_references": _reference_count(store, sid),
                         "suggested_name": derive_session_name(
                             created_at=s.get("created_at"),
@@ -382,6 +396,9 @@ def create_router(server) -> APIRouter:
                 if held is None:
                     continue
                 held["active"] = sid == active
+                info = store.get_session(sid) or {}
+                held["project_id"] = info.get("project_id")
+                held["operators"] = [str(x) for x in (info.get("operators") or [])]
                 out.append(held)
                 if len(out) >= limit:
                     break
@@ -517,7 +534,7 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"switch failed: {e}") from e
 
     @router.post("/api/sessions/new", dependencies=[Depends(require_control)])
-    async def new_session():
+    async def new_session(request: Request):
         """Open a fresh session from inside the app — until now that meant
         closing Gently and opening it again. The current session is saved;
         the embryo list, transcript and per-session logs start empty; a
@@ -532,6 +549,7 @@ def create_router(server) -> APIRouter:
             server.rehydrate_session(sid)
         except Exception:
             logger.debug("rehydrate of a fresh session failed", exc_info=True)
+        _remember_operator(request, sid)
         server.gate_passed = True
         try:
             await server.manager.broadcast({"type": "session_changed", "session_id": sid})
@@ -539,8 +557,20 @@ def create_router(server) -> APIRouter:
             pass
         return {"ok": True, "session_id": sid, "previous": got.get("previous")}
 
+    def _remember_operator(request: Request, sid: str | None) -> None:
+        """A session remembers who opened or resumed it."""
+        from gently.ui.web.auth import current_username
+
+        try:
+            store = _file_store()
+            who = current_username(request)
+            if sid and store is not None and who:
+                store.add_session_operator(sid, who)
+        except Exception:
+            logger.debug("could not stamp the operator on %s", sid, exc_info=True)
+
     @router.post("/api/sessions/{session_id}/resume", dependencies=[Depends(require_control)])
-    async def resume_session(session_id: str):
+    async def resume_session(session_id: str, request: Request):
         """Make a saved session live: new images, the transcript and the
         stage targets belong to it from here on. Viewing a session needs
         none of this — the Sessions tab reads the folder. The current
@@ -576,6 +606,7 @@ def create_router(server) -> APIRouter:
         # assistant. gate_passed is in-memory and resets on any backend restart,
         # which is exactly what made a resume-to-view land on the launch gate.
         server.gate_passed = True
+        _remember_operator(request, session_id)
         # Tell every connected browser to reload — they'll reconnect to the
         # new session's state (embryos, transcript, rehydrated imagery).
         try:
@@ -621,13 +652,14 @@ def create_router(server) -> APIRouter:
         if store is None or store.get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="Session not found")
         from gently.app.filing import file_session_under, unfile_session
+        from gently.ui.web.auth import current_username
 
         campaign_id = body.get("campaign_id")
         if not campaign_id:
             return {
                 "ok": True,
-                "unfiled": unfile_session(store, cs, session_id),
-                "project_id": None,
+                "unfiled": unfile_session(store, cs, session_id, body.get("from") or None),
+                "project_id": (store.get_session(session_id) or {}).get("project_id"),
             }
         if cs is None:
             raise HTTPException(status_code=503, detail="Context store not available")
@@ -639,9 +671,13 @@ def create_router(server) -> APIRouter:
                 campaign_id,
                 body.get("plan_item_id") or None,
                 move=bool(body.get("move")),
+                role=body.get("role") or None,
+                by=current_username(request) or None,
             )
         except KeyError:
             raise HTTPException(status_code=404, detail="Campaign not found") from None
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
         return {"ok": True, **result}
 
     @router.get("/api/sessions/{session_id}/plans")
@@ -672,65 +708,75 @@ def create_router(server) -> APIRouter:
         """Get session state for review, from the live FileStore.
 
         Maps the FileStore session snapshot onto the shape the Sessions review
-        view expects (embryo_states / conversation). detection_history isn't
-        reconstructed here (per-timepoint predictions live elsewhere).
+        view expects (embryo_states / conversation). Every read happens in one
+        worker thread: a session's folder is many small files, and the event
+        loop has other people's requests to answer.
         """
         store = _file_store()
         if store is None:
             raise HTTPException(status_code=503, detail="Store not available")
-        info = store.get_session(session_id)
-        if info is None:
-            raise HTTPException(status_code=404, detail="Session not found")
-        snapshot = store.load_session_snapshot(session_id) or {}
-        experiment = snapshot.get("experiment_data", {}) or {}
-        held = await asyncio.to_thread(_what_a_session_holds, store, session_id)
-        embryos, bf_frames = await asyncio.to_thread(_what_to_look_at, store, session_id)
-        acquisition = store.get_acquisition_plan(session_id)
-        state = _checkpoint(store, session_id)
-        _add_dose(embryos, state)
-        events, temperature, removed = await asyncio.to_thread(_what_happened, store, session_id)
-        return {
-            "session_id": session_id,
-            "project_id": info.get("project_id"),
-            "plan_items": _plan_items_by_session(getattr(server, "context_store", None)).get(
-                session_id, []
-            ),
-            "stage_ontology": _stage_ontology(),
-            "name": info.get("name"),
-            "suggested_name": derive_session_name(
-                created_at=info.get("created_at"),
-                embryo_count=len(embryos),
-                last_run=(held or {}).get("last_run"),
-                acquisition=acquisition,
-                embryos=embryos,
-            ),
-            "description": info.get("description", ""),
-            "created_at": info.get("created_at", ""),
-            "last_active": info.get("last_active", ""),
-            "run": (held or {}).get("run"),
-            "last_run": (held or {}).get("last_run"),
-            "bytes": await asyncio.to_thread(
-                folder_bytes, store._session_dir(session_id), fresh=True
-            ),
-            "acquisition": acquisition,
-            "embryos": embryos,
-            "bf_frames": bf_frames,
-            "events": events,
-            "temperature": temperature,
-            "removed_embryos": removed,
-            "embryo_states": experiment.get("embryos", {}) or {},
-            "conversation": snapshot.get("conversation_history", []) or [],
-            "detection_history": {},
-        }
+        cs = getattr(server, "context_store", None)
+        active = _active_session_id()
 
-    def _what_to_look_at(store, sid: str) -> tuple[list[dict], list[dict]]:
+        def gather() -> dict | None:
+            info = store.get_session(session_id)
+            if info is None:
+                return None
+            snapshot = store.load_session_snapshot(session_id) or {}
+            experiment = snapshot.get("experiment_data", {}) or {}
+            held = _what_a_session_holds(store, session_id) or {}
+            embryos, bf_frames = _what_to_look_at(store, session_id, snapshot)
+            acquisition = store.get_acquisition_plan(session_id)
+            _add_dose(embryos, _checkpoint(store, session_id))
+            return {
+                "session_id": session_id,
+                "project_id": info.get("project_id"),
+                "projects": store.links_of(info),
+                "plan_items": _plan_items_by_session(cs).get(session_id, []),
+                "stage_ontology": _stage_ontology(),
+                "name": info.get("name"),
+                "suggested_name": derive_session_name(
+                    created_at=info.get("created_at"),
+                    embryo_count=len(embryos),
+                    last_run=held.get("last_run"),
+                    acquisition=acquisition,
+                    embryos=embryos,
+                ),
+                "description": info.get("description", ""),
+                "created_at": info.get("created_at", ""),
+                "last_active": info.get("last_active", ""),
+                "run": held.get("run"),
+                "last_run": held.get("last_run"),
+                # A fresh count only for the live session, whose folder is growing;
+                # a finished session's size is what the cache last counted.
+                "bytes": folder_bytes(store._session_dir(session_id), fresh=session_id == active),
+                "acquisition": acquisition,
+                "embryos": embryos,
+                "bf_frames": bf_frames,
+                "tools": _session_tools(store, session_id),
+                "operators": [str(x) for x in (info.get("operators") or [])],
+                "edited": info.get("edited"),
+                "removed_embryos": _removed(store, session_id),
+                "embryo_states": experiment.get("embryos", {}) or {},
+                "conversation": snapshot.get("conversation_history", []) or [],
+                "detection_history": {},
+            }
+
+        data = await asyncio.to_thread(gather)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return data
+
+    def _what_to_look_at(
+        store, sid: str, snapshot: dict | None = None
+    ) -> tuple[list[dict], list[dict]]:
         """Per embryo: its latest projection and last predicted stage. Per
         brightfield frame: where to fetch it. Paths never leave the server; the
         client gets URLs the routes below resolve through the store."""
         embryos: list[dict] = []
-        states = ((store.load_session_snapshot(sid) or {}).get("experiment_data", {}) or {}).get(
-            "embryos", {}
-        ) or {}
+        if snapshot is None:
+            snapshot = store.load_session_snapshot(sid) or {}
+        states = (snapshot.get("experiment_data", {}) or {}).get("embryos", {}) or {}
         for e in store.list_embryos(sid) or []:
             eid = e.get("embryo_id")
             try:
@@ -777,26 +823,12 @@ def create_router(server) -> APIRouter:
                     ],
                 }
             )
-        frames: list[dict] = []
-        try:
-            recs = store.list_snapshots(sid, "bf") or []
-        except Exception:
-            recs = []
-        for rec in recs:
-            fp = rec.get("file_path")
-            if not fp:
-                continue
-            stem = Path(fp).stem
-            meta = rec.get("metadata") or {}
-            frames.append(
-                {
-                    "stem": stem,
-                    "frame": meta.get("frame"),
-                    "captured_at": meta.get("captured_at") or rec.get("captured_at"),
-                    "url": f"/api/sessions/{sid}/snapshot/{stem}.png",
-                }
-            )
-        return embryos, frames
+        from gently.app.brightfield import overview_frames
+
+        return embryos, [
+            {**f, "url": f"/api/sessions/{sid}/snapshot/{f['stem']}.png"}
+            for f in overview_frames(store, sid)
+        ]
 
     def _add_dose(embryos: list[dict], state: dict) -> None:
         """Each embryo's light dose so far against its budget, from the
@@ -818,25 +850,10 @@ def create_router(server) -> APIRouter:
                     budget = float(base)
             e["dose_budget_ms"] = budget
 
-    def _what_happened(store, sid: str) -> tuple[list[dict], list[dict], list[dict]]:
-        """The run's notable events, the night's temperature, and the embryos
-        set aside — what you ask before resuming: did anything go wrong."""
-        folder = store._session_dir(sid)
-        events: list[dict] = []
-        if folder is not None:
-            events = _notable_events(Path(folder) / "events.jsonl")
+    def _removed(store, sid: str) -> list[dict]:
+        """The embryos set aside, with why: what you ask before resuming."""
         try:
-            samples = store.read_temperature_log(sid) or []
-        except Exception:
-            samples = []
-        step = max(1, -(-len(samples) // 240))  # ceil: at most 240 points
-        temperature = [
-            {"t": r.get("t"), "water_c": r.get("water_c"), "setpoint_c": r.get("setpoint_c")}
-            for r in samples[::step]
-            if r.get("water_c") is not None
-        ]
-        try:
-            removed = [
+            return [
                 {
                     "embryo_id": r.get("embryo_id"),
                     "nickname": r.get("nickname"),
@@ -847,11 +864,10 @@ def create_router(server) -> APIRouter:
                 for r in store.list_removed_embryos(sid) or []
             ]
         except Exception:
-            removed = []
-        return events, temperature, removed
+            return []
 
     @router.patch("/api/sessions/{session_id}", dependencies=[Depends(require_control)])
-    async def rename_session(session_id: str, body: dict):
+    async def rename_session(session_id: str, body: dict, request: Request):
         """Give a session a name and a line about it. Written to its
         session.yaml; the folder keeps its slug."""
         store = _file_store()
@@ -868,6 +884,9 @@ def create_router(server) -> APIRouter:
         if description is not None and len(description) > 600:
             raise HTTPException(status_code=400, detail="description is too long (600 chars)")
         info = store.update_session(session_id, name=name, description=description)
+        from gently.ui.web.auth import current_username
+
+        store.note_session_edit(session_id, current_username(request), "name")
         if info is None:
             raise HTTPException(status_code=404, detail="Session not found")
         return {
@@ -1168,5 +1187,170 @@ def create_router(server) -> APIRouter:
         if rec is None:
             raise HTTPException(status_code=404, detail=f"no snapshot {stem!r} in this session")
         return await asyncio.to_thread(tiff_png_response, Path(rec["file_path"]), stem, max)
+
+    @router.get("/api/sessions/{session_id}/snapshot/{stem}.u16")
+    async def session_snapshot_u16(
+        session_id: str, stem: str, scale: int = 1, max: int | None = None
+    ):
+        """A session's snapshot as uint16 bytes (see gently.core.u16): the
+        numbers, for a viewer that draws its own contrast and reads values."""
+        from gently.ui.web.routes.bf import tiff_u16_response
+
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+
+        def find() -> dict | None:
+            one = getattr(store, "get_snapshot", None)
+            if callable(one):
+                got = one(session_id, stem)
+                if isinstance(got, dict) or got is None:
+                    return got
+            try:
+                recs = store.list_snapshots(session_id) or []
+            except Exception:
+                recs = []
+            return next((r for r in recs if Path(r.get("file_path") or "").stem == stem), None)
+
+        rec = await asyncio.to_thread(find)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"no snapshot {stem!r} in this session")
+        return await asyncio.to_thread(
+            tiff_u16_response, Path(rec["file_path"]), stem, scale, None, max
+        )
+
+    def _volume_u16(
+        session_id: str, embryo: str, t: int, z: int | None, scale: int, max_dim: int | None
+    ) -> Response:
+        """One plane of a volume TIFF, or its projection, as uint16 bytes."""
+        import tifffile
+
+        from gently.core.u16 import MEDIA_TYPE, u16_payload
+
+        store = _file_store()
+        path = store.get_volume_path(session_id, embryo, t) if store is not None else None
+        if path is None:
+            raise HTTPException(status_code=404, detail="Volume not found")
+        extra: dict = {}
+        if z is None:
+            # The projection written at acquisition (gently.core.imaging): the
+            # three-view layout in counts, read in a few milliseconds. An older
+            # session has only the JPEG, so its counts are made from the volume
+            # once, here, and kept beside it for the next time.
+            from gently.core.imaging import (
+                counts_projection,
+                read_counts_projection,
+                write_counts_projection,
+            )
+
+            stored = path.parent.parent / "projections" / f"t{t:04d}.tif"
+            if stored.exists():
+                arr, layout = read_counts_projection(stored)
+            else:
+                with tifffile.TiffFile(str(path)) as tf:
+                    vol = np.asarray(tf.asarray(maxworkers=8))
+                arr, layout = counts_projection(vol)
+                try:
+                    write_counts_projection(arr, layout, stored)
+                except Exception as exc:
+                    logger.debug("counts projection not kept for %s: %s", stored, exc)
+            extra = {"Projection": "max", "Views": layout.get("views")}
+            if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
+                extra["XY-Height"], extra["XY-Width"] = layout["xy"]
+            # How many planes stand behind it, so a viewer can offer them.
+            meta = store.get_volume_meta(session_id, embryo, t) if store is not None else None
+            shape = (meta or {}).get("shape")
+            if isinstance(shape, list) and len(shape) >= 3:
+                extra["Planes"] = int(shape[-3])
+        else:
+            # Volumes are written one page per plane, zlib-compressed, so a plane
+            # is one page decoded on its own. A file that holds the stack in one
+            # page (a small or foreign TIFF) is read whole.
+            with tifffile.TiffFile(str(path)) as tf:
+                series = tf.series[0]
+                shape = tuple(series.shape)
+                planes = int(np.prod(shape[:-2])) if len(shape) > 2 else 1
+                pages = series.pages
+                if z < 0 or z >= planes:
+                    raise HTTPException(
+                        status_code=404, detail=f"no plane {z}; the volume has {planes}"
+                    )
+                if planes > 1 and len(pages) == planes and (pg := pages[z]) is not None:
+                    arr = np.asarray(pg.asarray())
+                else:
+                    arr = np.asarray(series.asarray()).reshape(-1, *shape[-2:])[z]
+                # The channel the projection shows, so a plane lines up with it.
+                from gently.core.imaging import shown_channel
+
+                arr = shown_channel(arr)
+                extra = {"Planes": planes, "Plane": z}
+        body, headers = u16_payload(arr, scale, extra, max_dim=max_dim)
+        return Response(
+            body, media_type=MEDIA_TYPE, headers={"Cache-Control": "private, max-age=60", **headers}
+        )
+
+    def _volume_made(
+        session_id: str, embryo: str, t: int, kind: str, scale: int, max_dim: int | None, n: int
+    ) -> Response:
+        """A picture made from the whole volume, in counts: the dual view or
+        a montage of planes (gently.core.imaging). Read with threaded decode,
+        made on request; neither is kept on disk."""
+        import tifffile
+
+        from gently.core.imaging import counts_dual_view, counts_montage
+        from gently.core.u16 import MEDIA_TYPE, u16_payload
+
+        store = _file_store()
+        path = store.get_volume_path(session_id, embryo, t) if store is not None else None
+        if path is None:
+            raise HTTPException(status_code=404, detail="Volume not found")
+        with tifffile.TiffFile(str(path)) as tf:
+            vol = np.asarray(tf.asarray(maxworkers=8))
+        arr, layout = counts_dual_view(vol) if kind == "dual" else counts_montage(vol, n)
+        extra: dict = {"Views": layout.get("views")}
+        if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
+            extra["XY-Height"], extra["XY-Width"] = layout["xy"]
+        if layout.get("planes") is not None:
+            extra["Montage-Planes"] = ",".join(str(i) for i in layout["planes"])
+            extra["Montage-Cols"] = layout.get("cols")
+        body, headers = u16_payload(arr, scale, extra, max_dim=max_dim)
+        return Response(
+            body, media_type=MEDIA_TYPE, headers={"Cache-Control": "private, max-age=60", **headers}
+        )
+
+    @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/dual.u16")
+    async def volume_dual_u16(
+        session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
+    ):
+        """The volume's dual view (XY over XZ) as uint16 bytes."""
+        return await asyncio.to_thread(_volume_made, session_id, embryo, t, "dual", scale, max, 0)
+
+    @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/montage.u16")
+    async def volume_montage_u16(
+        session_id: str,
+        embryo: str,
+        t: int,
+        n: int = 6,
+        scale: int = 1,
+        max: int | None = None,
+    ):
+        """A montage of n evenly spaced planes as uint16 bytes."""
+        return await asyncio.to_thread(
+            _volume_made, session_id, embryo, t, "montage", scale, max, n
+        )
+
+    @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/projection.u16")
+    async def volume_projection_u16(
+        session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
+    ):
+        """The maximum projection of a stored volume, as the numbers."""
+        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, None, scale, max)
+
+    @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/slice/{z}.u16")
+    async def volume_slice_u16(
+        session_id: str, embryo: str, t: int, z: int, scale: int = 1, max: int | None = None
+    ):
+        """One plane of a stored volume, as the numbers."""
+        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, z, scale, max)
 
     return router

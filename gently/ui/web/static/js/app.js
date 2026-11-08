@@ -290,11 +290,8 @@ const PresenceManager = {
     clientId: null,
     name: null,
     clients: [],
-    // Whether the name is one somebody chose. One that was not follows
-    // what the server says about this browser.
-    chosen: false,
-    // What this browser is, from the server: signed in or not, and whether
-    // it is the microscope's own computer.
+    // What this browser is, from the server: the person the landing page's
+    // cookie names, or the account signed in, or where the browser is.
     me: null,
     ready: null,
 
@@ -308,24 +305,25 @@ const PresenceManager = {
             this.clientId = this.generateId();
             localStorage.setItem('gently-client-id', this.clientId);
         }
+        // The name is the server's to say: the person, the account, the place.
+        // Nothing is kept in this browser; the landing page's cookie is the one record.
+        localStorage.removeItem('gently-user-name');
+        this.name = this.GUEST;
+        this.ready = this.refresh();
 
-        // A name somebody gave wins. The animal names this used to make up
-        // ("Anonymous Eagle") were never chosen by anybody.
-        const saved = localStorage.getItem('gently-user-name');
-        this.chosen = !!saved && !/^anonymous\b/i.test(saved);
-        this.name = this.chosen ? saved : this.GUEST;
+        // Subscribe to presence updates via event bus
+        ClientEventBus.on('PRESENCE_UPDATE', (clients) => this.handlePresenceUpdate(clients));
+    },
 
-        // Without one: the account's name, or where this browser is.
-        this.ready = fetch('/api/auth/me')
+    /** Ask the server who this browser is, and take that name. */
+    refresh() {
+        return fetch('/api/auth/me')
             .then(r => (r.ok ? r.json() : null))
             .catch(() => null)
             .then(me => {
                 this.me = me || {};
-                if (!this.chosen) this.name = this.unnamedName();
+                this.name = this.unnamedName();
             });
-
-        // Subscribe to presence updates via event bus
-        ClientEventBus.on('PRESENCE_UPDATE', (clients) => this.handlePresenceUpdate(clients));
     },
 
     generateId() {
@@ -334,9 +332,18 @@ const PresenceManager = {
         );
     },
 
-    /** What this browser is called when nobody has named it. */
+    /** Who this browser is, for the colour: the person's id, else the account. */
+    personId() {
+        const me = this.me || {};
+        if (me.operator && me.operator.id) return me.operator.id;
+        if (me.authenticated && me.username) return me.username;
+        return null;
+    },
+
+    /** What this browser is called: the person, the account, then the place. */
     unnamedName() {
         const me = this.me || {};
+        if (me.operator && me.operator.name) return me.operator.name;
         if (me.authenticated && me.username) return me.username;
         return me.unnamed || (me.local ? this.AT_THE_RIG : this.GUEST);
     },
@@ -349,7 +356,8 @@ const PresenceManager = {
                 state.ws.send(JSON.stringify({
                     type: 'join',
                     client_id: this.clientId,
-                    name: this.name
+                    name: this.name,
+                    person: this.personId()
                 }));
             }
         };
@@ -390,16 +398,23 @@ const PresenceManager = {
             } else {
                 avatar.textContent = this.getInitials(client.name);
             }
-            avatar.setAttribute('data-tooltip', client.is_you
-                ? `${this.shown(client.name)} (you) · click to give your name`
-                : this.shown(client.name));
 
-            // Click on your own avatar to change name
             if (client.is_you) {
-                avatar.style.cursor = 'pointer';
-                avatar.addEventListener('click', () => this.showNamePrompt());
+                // You, by name: who is on this view. Set at the landing page and
+                // nowhere else, so a record's `by` is never changed mid-night by
+                // a click up here.
+                const you = document.createElement('span');
+                you.className = 'presence-you';
+                you.setAttribute('data-tooltip', 'Who is on this view. Set at the landing page.');
+                you.appendChild(avatar);
+                const label = document.createElement('span');
+                label.className = 'presence-you-name';
+                label.textContent = this.shown(client.name);
+                you.appendChild(label);
+                container.appendChild(you);
+                return;
             }
-
+            avatar.setAttribute('data-tooltip', this.shown(client.name));
             container.appendChild(avatar);
         });
 
@@ -434,44 +449,16 @@ const PresenceManager = {
         return (words[0][0] + words[1][0]).toUpperCase();
     },
 
-    setName(name) {
-        if (!name || name.trim() === '') return;
-
-        this.name = name.trim();
-        localStorage.setItem('gently-user-name', this.name);
-        this.announce();
-    },
-
     /** Tell the others what this browser is called now. Saves nothing. */
     announce() {
         if (state.ws && state.ws.readyState === WebSocket.OPEN) {
             state.ws.send(JSON.stringify({
                 type: 'set_name',
-                name: this.name
+                name: this.name,
+                person: this.personId()
             }));
         }
     },
-
-    showNamePrompt() {
-        const unnamed = this.unnamedName();
-        const newName = prompt(
-            `Your name, as the others watching see it.\nLeave it blank to go by "${unnamed}".`,
-            this.chosen ? this.name : ''
-        );
-
-        if (newName === null) return; // Cancelled
-
-        if (newName.trim() === '') {
-            // Back to what the server says this browser is.
-            localStorage.removeItem('gently-user-name');
-            this.chosen = false;
-            this.name = unnamed;
-            this.announce();
-        } else {
-            this.chosen = true;
-            this.setName(newName);
-        }
-    }
 };
 
 /**
@@ -725,6 +712,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // The people, once: every page shows a record's person by name and colour.
+    if (typeof Who !== 'undefined') Who.load();
     // Initialize presence manager (before WebSocket so ID is ready)
     PresenceManager.init();
     // Diagnostics is chosen at the launch gate and costs disk for as long
@@ -788,10 +777,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial statusbar update (subsequent updates are event-driven from websocket.js)
     setTimeout(updateStatusbar, 500);
 
-    // Handle hash-based tab routing (e.g., /#plans, /#sessions, /#plans:campaignId)
+    // Handle hash-based tab routing (e.g., /#plans, /#sessions, /#plans:campaignId,
+    // /#sessions:sessionId:noteId — a session, landing on one line of its stream)
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
-        const [tab, param] = hash.split(':');
+        const [tab, param, item] = hash.split(':');
         if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK || tab === TABS.GALLERY || tab === TABS.DEVICES || tab === TABS.SETTINGS) {
             switchTab(tab);
             if (tab === TABS.SETTINGS && param && typeof SettingsTab !== 'undefined') {
@@ -799,6 +789,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);
+            }
+            if (tab === TABS.SESSIONS && param && typeof ReviewApp !== 'undefined') {
+                setTimeout(() => ReviewApp.openNote(param, item || null), 200);
             }
         }
         // Clean up the hash

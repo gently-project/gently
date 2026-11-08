@@ -13,16 +13,25 @@ function ageDays(iso) {
     return Number.isFinite(t) ? (Date.now() - t) / 86400000 : Infinity;
 }
 
+// Errors are said in a toast, not a modal that stops the page.
+function reviewToast(msg) {
+    if (typeof showGentlyToast === 'function') showGentlyToast(msg, null, null, 6000, 'error');
+    else console.error(msg);
+}
+
 const ReviewApp = {
     sessions: [],
     currentSession: null,
     currentTab: 'embryos',
 
     _initialized: false,
+    _loadRun: 0,            // the click a session detail answers; an older answer is dropped
+    _stale: false,          // rows changed while the tab was hidden
 
     async init() {
         if (this._initialized) return;
         this._initialized = true;
+        fetch('/api/tools').then(r => r.json()).then(d => { window.GentlyToolCatalog = d.tools || []; }).catch(() => {});
         await this.loadSessions();
         this.updateStatusbar();
 
@@ -36,19 +45,30 @@ const ReviewApp = {
 
     async loadSessions() {
         const list = document.getElementById('session-list');
-        list.innerHTML = '<div class="loading">Loading sessions...</div>';
+        // Rows that are already drawn stay until the new ones replace them.
+        if (!this.sessions.length) list.innerHTML = '<div class="loading">Loading sessions...</div>';
 
         try {
             const [resp] = await Promise.all([fetch('/api/sessions'), this.loadProjects()]);
             const data = await resp.json();
             this.sessions = data.sessions || [];
+            this.sessions.forEach(s => {
+                s._hay = [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
+                    .filter(Boolean).join(' ').toLowerCase();
+            });
             this.renderSessionList();
             this.fillSizes();
         } catch (e) {
-            list.innerHTML = '<div class="error">Failed to load sessions</div>';
+            if (!this.sessions.length) list.innerHTML = '<div class="error">Failed to load sessions</div>';
             console.error('Failed to load sessions:', e);
         }
         this.watchForFiling();
+    },
+
+    /** Is the Sessions tab on screen? Work for a hidden tab waits for it. */
+    showing() {
+        const panel = document.getElementById('sessions-content');
+        return !!(panel && panel.classList.contains('active'));
     },
 
     // ---- sizes come after the list. A walk over a session's files is the one
@@ -132,15 +152,27 @@ const ReviewApp = {
         return out;
     },
 
+    // The links a session carries, the home first. The list's row has them;
+    // a session.yaml from before the list reads as one link to its project_id.
+    linksOf(s) {
+        if (!s) return [];
+        const src = Array.isArray(s.projects) ? s : (this.sessions.find(x => x.session_id === s.session_id) || s);
+        const links = (src.projects || []).filter(x => x && x.id);
+        if (links.length) return links;
+        return src.project_id ? [{ id: src.project_id, phase: null, role: null, by: null, at: null }] : [];
+    },
+
     projectChip(s) {
-        if (!s.project_id) {
+        const links = this.linksOf(s);
+        if (!links.length) {
             return `<span class="chip chip-unfiled">unfiled</span> <a href="#" class="session-file-link" onclick="event.preventDefault(); event.stopPropagation(); ReviewApp.openFiling('${this.escapeHtml(s.session_id)}')">file under…</a>`;
         }
-        const items = (s.plan_items || []).filter(it => this.rootOf(it.campaign_id) === s.project_id);
+        const chips = links.map((l, i) => `<span class="chip chip-proj" title="${i === 0 ? 'Its home project' : 'Also in this project'}${l.role ? ' · ' + this.escapeHtml(l.role) : ''}">${this.escapeHtml(this.projectName(l.id))}${l.role ? `<small>${this.escapeHtml(l.role)}</small>` : ''}</span>`).join(' ');
+        const items = (s.plan_items || []).filter(it => this.rootOf(it.campaign_id) === links[0].id);
         const served = items.length
             ? `<span class="session-plan-served">plan: ${items.map(it => this.escapeHtml(it.title) + (it.origin === 'manual' ? ' · manual' : '')).join(', ')}</span>`
             : '';
-        return `<span class="chip chip-proj" title="Filed under this project">${this.escapeHtml(this.projectName(s.project_id))}</span>${served}`;
+        return `${chips}${served}`;
     },
 
     // Filing done elsewhere (the agent, the Projects tab) shows up here.
@@ -151,31 +183,68 @@ const ReviewApp = {
         let timer = null;
         const bump = () => {
             if (timer) clearTimeout(timer);
-            timer = setTimeout(() => { timer = null; this.loadSessions().catch(() => {}); }, 500);
+            timer = setTimeout(() => {
+                timer = null;
+                if (!this.showing()) { this._stale = true; return; }
+                this.loadSessions().catch(() => {});
+            }, 500);
         };
-        ClientEventBus.on('PLAN_UPDATED', bump);
-        ClientEventBus.on('CONTEXT_UPDATED', bump);
+        // What changes a row: a filing or a plan link (PLAN_UPDATED), a session
+        // starting, restored or ending. A note or a tactic changes no row, so
+        // CONTEXT_UPDATED no longer reloads the list.
+        ['PLAN_UPDATED', 'SESSION_STARTED', 'SESSION_RESTORED', 'ACQUISITION_COMPLETED', 'ACQUISITION_STOPPED']
+            .forEach(ev => ClientEventBus.on(ev, bump));
+        ClientEventBus.on('TAB_CHANGED', tab => {
+            if (tab === 'sessions' && this._stale) { this._stale = false; this.loadSessions().catch(() => {}); }
+        });
+        // A line written elsewhere on the open session shows up in its stream.
+        ClientEventBus.on('CONTEXT_UPDATED', d => {
+            if ((!d || !d.kind || d.kind === 'note') && this.currentSession && this.showing()) this.mountStream(this.currentSession.session_id, true);
+        });
     },
 
-    // ---- filing: one home, chosen here; a second project reached through its item ----
+    // ---- filing: a session informs several projects, in a role per link; the
+    // first link is its home. Adding one is here, so is taking one out, and so
+    // is making another the home. ----
 
-    _filing: null,   // {sid, where: 'list'|'detail', choice, also, newName, error}
+    _filing: null,   // {sid, where: 'list'|'detail', choice, role, also, newName, error}
 
     openFiling(sid, where) {
-        const s = this.sessions.find(x => x.session_id === sid) || this.currentSession || {};
-        this._filing = { sid, where: where || 'list', choice: s.project_id || '', also: '', newName: '', error: '' };
-        this.renderSessionList();
-        if (this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
+        this._filing = { sid, where: where || 'list', choice: '', role: '', also: '', newName: '', error: '' };
+        this._paintFiling();
     },
 
     closeFiling() {
         const sid = this._filing && this._filing.sid;
         this._filing = null;
-        this.renderSessionList();
-        if (sid && this.currentSession && this.currentSession.session_id === sid) this.renderSessionContent();
+        if (sid) this.repaintRow(sid);
+        if (sid && this.currentSession && this.currentSession.session_id === sid) this.repaintFiled();
     },
 
-    filingChoice(value) { if (this._filing) this._filing.choice = value; },
+    // Redraw where the popover lives, that row and the filed line, and keep
+    // the cursor in its text box. The rest of the page does not move.
+    _paintFiling() {
+        const f = this._filing;
+        if (f) this.repaintRow(f.sid);
+        if (f && this.currentSession && this.currentSession.session_id === f.sid) this.repaintFiled();
+        const box = document.querySelector('.filing-pop input[type="text"]');
+        if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+    },
+
+    repaintRow(sid) {
+        const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(sid)}"]`);
+        const s = this.sessions.find(x => x.session_id === sid);
+        if (!el || !s) { this.renderSessionList(); return; }
+        el.outerHTML = this.rowHtml(s);
+    },
+
+    repaintFiled() {
+        const host = document.getElementById('session-filed');
+        if (host && this.currentSession) host.innerHTML = this.renderFiled(this.currentSession);
+    },
+
+    filingChoice(value) { if (this._filing) { this._filing.choice = value; this._paintFiling(); } },
+    filingRole(value) { if (this._filing) this._filing.role = value; },
     filingAlso(value) { if (this._filing) this._filing.also = value; },
     filingNewName(value) { if (this._filing) this._filing.newName = value; },
 
@@ -183,29 +252,32 @@ const ReviewApp = {
         const f = this._filing;
         if (!f) return '';
         const esc = v => this.escapeHtml(v);
-        const home = s.project_id || '';
-        const opts = this.projects.map(t => {
-            const c = t.campaign || {};
-            const p = t.project || {};
-            const on = f.choice === c.id;
-            return `<label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="${esc(c.id)}" ${on ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> ${esc(c.shorthand || c.description || c.id)} <small>· ${p.sessions || 0} session${p.sessions === 1 ? '' : 's'}${c.id === home ? ' · its home now' : ''}</small></label>`;
+        const links = this.linksOf(s);
+        const home = links.length ? links[0].id : '';
+        const already = new Set(links.map(l => l.id));
+        const opts = this.projects.filter(t => (t.campaign || {}).id && !already.has(t.campaign.id)).map(t => {
+            const c = t.campaign, p = t.project || {};
+            return `<option value="${esc(c.id)}" ${f.choice === c.id ? 'selected' : ''}>${esc(c.shorthand || c.description || c.id)} · ${p.sessions || 0} session${p.sessions === 1 ? '' : 's'}</option>`;
         }).join('');
         const newOn = f.choice === '__new__';
-        const items = this.allPlanItems().filter(it => it.root !== (f.choice && f.choice !== '__new__' ? f.choice : home));
-        const already = new Set((s.plan_items || []).map(it => it.id));
-        const alsoOpts = items.filter(it => !already.has(it.id)).map(it =>
+        const servedAlready = new Set((s.plan_items || []).map(it => it.id));
+        const itemOpts = this.allPlanItems().filter(it => !servedAlready.has(it.id)).map(it =>
             `<option value="${esc(it.root)}|${esc(it.campaign_id)}|${esc(it.id)}" ${f.also === `${it.root}|${it.campaign_id}|${it.id}` ? 'selected' : ''}>${esc(this.projectName(it.root))} › ${esc(it.title)}</option>`).join('');
         return `<div class="filing-pop" onclick="event.stopPropagation()">
-            <div class="filing-title">Its project · one</div>
-            ${opts || '<div class="session-plan-served">No projects yet.</div>'}
-            <label class="filing-opt"><input type="radio" name="filing-${esc(s.session_id)}" value="__new__" ${newOn ? 'checked' : ''} onchange="ReviewApp.filingChoice(this.value)"> New project…</label>
-            ${newOn ? `<input type="text" placeholder="What the project asks, in one line" value="${esc(f.newName)}" oninput="ReviewApp.filingNewName(this.value)" autofocus>` : ''}
-            ${alsoOpts ? `<div class="filing-also"><span>Also serves a plan item elsewhere?</span>
-                <select onchange="ReviewApp.filingAlso(this.value)"><option value="">— no —</option>${alsoOpts}</select></div>` : ''}
+            <div class="filing-title">${home ? 'Add to a project' : 'File under a project'}</div>
+            <select onchange="ReviewApp.filingChoice(this.value)">
+                <option value="">a project…</option>${opts}
+                <option value="__new__" ${newOn ? 'selected' : ''}>New project…</option>
+            </select>
+            ${newOn ? `<input type="text" placeholder="What the project asks, in one line" value="${esc(f.newName)}" oninput="ReviewApp.filingNewName(this.value)">` : ''}
+            <div class="filing-also"><span>As</span>
+                <select onchange="ReviewApp.filingRole(this.value)">${['', 'control', 'test', 'reference', 'pilot'].map(r => `<option value="${r}" ${f.role === r ? 'selected' : ''}>${r || '— no role —'}</option>`).join('')}</select></div>
+            ${itemOpts ? `<div class="filing-also"><span>Serves a plan item?</span>
+                <select onchange="ReviewApp.filingAlso(this.value)"><option value="">— no —</option>${itemOpts}</select></div>` : ''}
+            ${home ? `<div class="filing-note">Its home stays <b>${esc(this.projectName(home))}</b>.</div>` : ''}
             ${f.error ? `<div class="filing-err">${esc(f.error)}</div>` : ''}
             <div class="filing-btns">
-                <button type="button" class="go" onclick="ReviewApp.submitFiling()">File</button>
-                ${home ? `<button type="button" class="danger" onclick="ReviewApp.unfileSession('${esc(s.session_id)}')">Unfile</button>` : ''}
+                <button type="button" class="go" ${f.busy ? 'disabled' : ''} onclick="ReviewApp.submitFiling()">${f.busy ? 'Filing…' : (home ? 'Add' : 'File')}</button>
                 <button type="button" onclick="ReviewApp.closeFiling()">Cancel</button>
             </div>
         </div>`;
@@ -220,66 +292,100 @@ const ReviewApp = {
 
     async submitFiling() {
         const f = this._filing;
-        if (!f) return;
-        const s = this.sessions.find(x => x.session_id === f.sid) || this.currentSession || {};
+        if (!f || f.busy) return;          // one press files once
+        f.busy = true;
+        this._paintFiling();
         try {
             let campaignId = f.choice;
             if (campaignId === '__new__') {
                 const name = (f.newName || '').trim();
-                if (!name) { f.error = 'Give the new project a line of description.'; this.renderSessionList(); return; }
+                if (!name) { f.error = 'Give the new project a line of description.'; this._paintFiling(); return; }
                 const made = await this._post('/api/campaigns', { description: name });
                 campaignId = made.campaign.id;
             }
-            if (campaignId && campaignId !== s.project_id) {
-                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, move: !!s.project_id });
+            if (!campaignId && !f.also) { f.error = 'Pick a project.'; this._paintFiling(); return; }
+            if (campaignId) {
+                // No move: the first link is the home, a later one is added beside it.
+                await this._post(`/api/sessions/${encodeURIComponent(f.sid)}/project`, { campaign_id: campaignId, role: f.role || null });
             }
             if (f.also) {
                 const [, itemCampaign, itemId] = f.also.split('|');
                 await this._post(`/api/campaigns/${encodeURIComponent(itemCampaign)}/items/${encodeURIComponent(itemId)}/sessions`, { session_id: f.sid });
             }
             this._filing = null;
-            await this.loadSessions();
-            if (this.currentSession && this.currentSession.session_id === f.sid) await this.loadSession(f.sid);
+            await this._refiled(f.sid);
         } catch (e) {
+            f.busy = false;
             f.error = `Could not file: ${e.message || e}`;
-            this.renderSessionList();
-            if (this.currentSession && this.currentSession.session_id === f.sid) this.renderSessionContent();
+            this._paintFiling();
         }
     },
 
-    async unfileSession(sid) {
+    // After a link changes: the rows again from a fresh list, drawn in place,
+    // and the open session's filed line. No blanking, no tab reset.
+    async _refiled(sid) {
+        await this.loadSessions();
+        if (this.currentSession && this.currentSession.session_id === sid) {
+            const row = this.sessions.find(x => x.session_id === sid);
+            if (row) Object.assign(this.currentSession, { projects: row.projects, project_id: row.project_id, plan_items: row.plan_items });
+            this.repaintFiled();
+        }
+    },
+
+    // Take the session out of one project. Its other links stay, and if that
+    // one was the home the next link is.
+    async unlinkProject(sid, pid) {
         try {
-            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: null });
-            this._filing = null;
-            await this.loadSessions();
-            if (this.currentSession && this.currentSession.session_id === sid) await this.loadSession(sid);
+            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: null, from: pid });
+            await this._refiled(sid);
         } catch (e) {
-            if (this._filing) { this._filing.error = `Could not unfile: ${e.message || e}`; this.renderSessionList(); }
+            reviewToast(`Could not take it out of the project: ${e.message || e}`);
         }
     },
 
-    // The detail header's two lines: where the session lives, and what else it served.
+    // Make one of its projects the home: what a reader that takes one id sees.
+    async makeHome(sid, pid) {
+        try {
+            await this._post(`/api/sessions/${encodeURIComponent(sid)}/project`, { campaign_id: pid, move: true });
+            await this._refiled(sid);
+        } catch (e) {
+            reviewToast(`Could not make it the home: ${e.message || e}`);
+        }
+    },
+
+    // The detail header: its home and each project it also informs, each with
+    // its role and who linked it; then any plan item served somewhere else.
     renderFiled(s) {
         const esc = v => this.escapeHtml(v);
-        const home = s.project_id;
+        const links = this.linksOf(s);
+        const home = links.length ? links[0].id : null;
         const items = s.plan_items || [];
         const own = items.filter(it => this.rootOf(it.campaign_id) === home);
-        const elsewhere = items.filter(it => this.rootOf(it.campaign_id) !== home);
-        const openBtn = (label) => `<button class="session-edit-btn" onclick="ReviewApp.openFiling('${esc(s.session_id)}', 'detail')">${label}</button>`;
-        let first;
+        const elsewhere = items.filter(it => !links.some(l => l.id === this.rootOf(it.campaign_id)));
+        const sid = esc(s.session_id);
+        const openBtn = (label) => `<button class="session-edit-btn" onclick="ReviewApp.openFiling('${sid}', 'detail')">${label}</button>`;
+        const name = (pid) => `<b><a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(pid)}')">${esc(this.projectName(pid))}</a></b>`;
+        const tail = (l, isHome) => [
+            l.role ? `<span class="chip" title="Its role in this project">${esc(l.role)}</span>` : '',
+            l.by ? `<span class="session-filed-by">by ${Who.chip(l.by, { when: l.at })}</span>` : '',
+            isHome ? '' : `<button class="session-edit-btn" onclick="ReviewApp.makeHome('${sid}', '${esc(l.id)}')" title="Make this the session's home project">make home</button>`,
+            `<button class="session-edit-btn" onclick="ReviewApp.unlinkProject('${sid}', '${esc(l.id)}')" title="Take the session out of this project${links.length > 1 ? '; its other links stay' : ''}">${links.length > 1 ? 'remove' : 'unfile'}</button>`,
+        ].filter(Boolean).join(' ');
+        const rows = [];
         if (home) {
             const ownText = own.length
                 ? ` · plan item ${own.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(home)}')">${esc(it.title)}</a>${it.origin === 'manual' ? ' <span class="chip">manual</span>' : ''}`).join(', ')}`
                 : '';
-            first = `<div class="session-filed">in <b>${esc(this.projectName(home))}</b>${ownText} ${openBtn('File elsewhere…')}</div>`;
+            rows.push(`<div class="session-filed">in ${name(home)}${ownText} ${tail(links[0], true)} ${openBtn('Add to a project…')}</div>`);
+            links.slice(1).forEach(l => rows.push(`<div class="session-filed">also in ${name(l.id)} ${tail(l, false)}</div>`));
         } else {
-            first = `<div class="session-filed"><span class="chip chip-unfiled">unfiled</span> in no project yet ${openBtn('File under…')}</div>`;
+            rows.push(`<div class="session-filed"><span class="chip chip-unfiled">unfiled</span> in no project yet ${openBtn('File under…')}</div>`);
         }
-        const also = elsewhere.length
-            ? `<div class="session-filed">also serves ${elsewhere.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(this.rootOf(it.campaign_id))}')">${esc(this.projectName(this.rootOf(it.campaign_id)))} › ${esc(it.title)}</a>`).join(', ')} <button class="session-edit-btn" onclick="ReviewApp.openFiling('${esc(s.session_id)}', 'detail')">+ link to another plan item</button></div>`
-            : '';
+        if (elsewhere.length) {
+            rows.push(`<div class="session-filed">also serves ${elsewhere.map(it => `<a href="#" onclick="event.preventDefault(); ReviewApp.goToProject('${esc(this.rootOf(it.campaign_id))}')">${esc(this.projectName(this.rootOf(it.campaign_id)))} › ${esc(it.title)}</a>`).join(', ')}</div>`);
+        }
         const pop = this._filing && this._filing.sid === s.session_id && this._filing.where === 'detail' ? this.renderFilingPopover(s) : '';
-        return first + also + pop;
+        return rows.join('') + pop;
     },
 
     goToProject(id) {
@@ -289,17 +395,22 @@ const ReviewApp = {
 
     async loadSession(sessionId) {
         const content = document.getElementById('session-content');
-        content.innerHTML = '<div class="loading-content">Loading session...</div>';
+        const same = !!(this.currentSession && this.currentSession.session_id === sessionId);
+        this.highlightActiveSession(sessionId);                 // the row answers the click now
+        if (!same) content.innerHTML = '<div class="loading-content">Loading session...</div>';
+        const run = ++this._loadRun;
 
         try {
             const resp = await fetch(`/api/sessions/${sessionId}`);
             if (!resp.ok) throw new Error('Session not found');
-            this.currentSession = await resp.json();
-            this.currentTab = 'embryos';
+            const data = await resp.json();
+            if (run !== this._loadRun) return;                  // a later click already answered
+            this.currentSession = data;
+            if (!same) this.currentTab = 'embryos';
             this.renderSessionContent();
-            this.highlightActiveSession(sessionId);
             this.updateStatusbar();
         } catch (e) {
+            if (run !== this._loadRun) return;
             content.innerHTML = '<div class="error">Failed to load session</div>';
             console.error('Failed to load session:', e);
         }
@@ -342,6 +453,7 @@ const ReviewApp = {
         if (s.bf_frames) parts.push(`${s.bf_frames} brightfield`);
         if (s.brightfield_references) parts.push('dark/flat ✓');
         if (s.bytes) parts.push(this.fmtBytes(s.bytes));
+        if ((s.operators || []).length) parts.push(s.operators.map(o => Who.name(o)).join(', '));
         return parts;
     },
 
@@ -383,14 +495,23 @@ const ReviewApp = {
     // so a filter never hides sessions silently.
 
     FILTERS: {
-        holds: {
-            label: 'Holds',
+        // What a session holds: anything at all (the usual view hides the
+        // empties), and by channel, SPIM volumes or brightfield frames.
+        content: {
+            label: 'Content',
             chips: {
-                embryos: { label: 'embryos', test: s => s.embryo_count > 0 },
-                brightfield: { label: 'brightfield', test: s => s.bf_frames > 0 },
-                empty: { label: 'empty', test: s => !(s.embryo_count > 0) && !(s.bf_frames > 0) },
+                nonempty: { label: 'non-empty', test: s => s.timepoints > 0 || s.bf_frames > 0 },
+                empty: { label: 'empty', test: s => !(s.timepoints > 0) && !(s.bf_frames > 0) },
             },
-            defaults: ['embryos', 'brightfield'],
+            defaults: ['nonempty'],
+        },
+        channel: {
+            label: 'Channel',
+            chips: {
+                spim: { label: 'SPIM', test: s => s.timepoints > 0 },
+                brightfield: { label: 'brightfield', test: s => s.bf_frames > 0 },
+            },
+            defaults: [],
         },
         run: {
             label: 'Run',
@@ -438,11 +559,11 @@ const ReviewApp = {
     projectChips() {
         const chips = {};
         const seen = new Set();
-        this.sessions.forEach(s => { if (s.project_id) seen.add(s.project_id); });
+        this.sessions.forEach(s => this.linksOf(s).forEach(l => seen.add(l.id)));
         [...seen].sort((a, b) => this.projectName(a).localeCompare(this.projectName(b))).forEach(pid => {
-            chips[pid] = { label: this.projectName(pid), test: s => s.project_id === pid };
+            chips[pid] = { label: this.projectName(pid), test: s => this.linksOf(s).some(l => l.id === pid) };
         });
-        chips.unfiled = { label: 'unfiled', test: s => !s.project_id };
+        chips.unfiled = { label: 'unfiled', test: s => this.linksOf(s).length === 0 };
         return chips;
     },
 
@@ -489,9 +610,16 @@ const ReviewApp = {
         this.renderSessionList();
     },
 
-    passesGroup(s, group, on) {
+    // Every group's chips, built once per render; the project chips come from the rows.
+    chipTable() {
+        const t = {};
+        Object.keys(this.FILTERS).forEach(g => { t[g] = this.chipsOf(g); });
+        return t;
+    },
+
+    passesGroup(s, group, on, table) {
         const def = this.FILTERS[group];
-        const chips = this.chipsOf(group);
+        const chips = table ? table[group] : this.chipsOf(group);
         on = on.filter(k => chips[k]);                                         // a project that is gone filters nothing
         if (def.any) return on.every(k => chips[k].test(s, this));             // requirements
         if (!on.length) return true;                                           // nothing chosen = no filter
@@ -502,10 +630,15 @@ const ReviewApp = {
         const searchBox = document.getElementById('session-search');
         const needle = (searchBox ? searchBox.value : '').trim().toLowerCase();
         const out = needle
-            ? this.sessions.filter(s => [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
-                .some(v => v && String(v).toLowerCase().includes(needle)))
+            ? this.sessions.filter(s => (s._hay || '').includes(needle))
             : this.sessions.slice();
         return { needle, sessions: out };
+    },
+
+    // The search box redraws a little after the last keystroke, not on each one.
+    searchInput() {
+        clearTimeout(this._searchTimer);
+        this._searchTimer = setTimeout(() => this.renderSessionList(), 120);
     },
 
     // What the filters say, in a line: only what differs from the default.
@@ -531,17 +664,19 @@ const ReviewApp = {
         this.renderSessionList();
     },
 
-    renderFilters(searchedSessions) {
+    renderFilters(searchedSessions, table) {
         const host = document.getElementById('session-filters');
         if (!host) return;
         const st = this.filterState();
         const summary = this.filterSummary(st);
         const isDefault = summary.length === 0;
-        const groups = Object.entries(this.FILTERS).map(([g, def]) => {
+        table = table || this.chipTable();
+        // The counts are only drawn when the panel is open, so they are only counted then.
+        const groups = !st.open ? '' : Object.entries(this.FILTERS).map(([g, def]) => {
             // The count a chip shows: the searched sessions that pass every OTHER
             // group and this chip — what turning it on alone would keep.
-            const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || []));
-            const chips = Object.entries(this.chipsOf(g)).map(([k, chip]) => {
+            const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || [], table));
+            const chips = Object.entries(table[g]).map(([k, chip]) => {
                 const n = searchedSessions.filter(s => others(s) && chip.test(s, this)).length;
                 const on = (st.on[g] || []).includes(k);
                 return `<button type="button" class="session-chip${on ? ' is-on' : ''}${n ? '' : ' is-empty'}" onclick="ReviewApp.toggleChip('${g}','${k}')" title="${def.any ? 'Require' : 'Show'} sessions: ${this.escapeHtml(chip.label)}">${this.escapeHtml(chip.label)}${n ? `<span class="n">${n}</span>` : ''}</button>`;
@@ -554,15 +689,16 @@ const ReviewApp = {
             <button type="button" class="session-filters-toggle${isDefault ? '' : ' is-set'}" onclick="ReviewApp.toggleFilters()" aria-expanded="${st.open ? 'true' : 'false'}">
                 <span class="session-filters-caret">${st.open ? '▾' : '▸'}</span>
                 <span class="session-filters-word">Filters</span>
-                <span class="session-filters-summary">${isDefault ? 'embryos or brightfield · newest' : this.escapeHtml(summary.join(' · '))}</span>
+                <span class="session-filters-summary">${isDefault ? 'non-empty · newest' : this.escapeHtml(summary.join(' · '))}</span>
             </button>
             ${st.open ? `<div class="session-filters-grid">${groups}<div class="session-filter-label">Sort</div><div class="session-filter-chips">${sorts}</div></div>
             ${isDefault ? '' : '<button type="button" class="session-filters-reset" onclick="ReviewApp.resetFilters()">Back to the usual view</button>'}` : ''}`;
     },
 
-    applyFilters(sessions) {
+    applyFilters(sessions, table) {
         const st = this.filterState();
-        const kept = sessions.filter(s => Object.keys(this.FILTERS).every(g => this.passesGroup(s, g, st.on[g] || [])));
+        table = table || this.chipTable();
+        const kept = sessions.filter(s => Object.keys(this.FILTERS).every(g => this.passesGroup(s, g, st.on[g] || [], table)));
         const so = this.SORTS[st.sort] || this.SORTS.newest;
         kept.sort((a, b) => {
             const ka = so.key(a), kb = so.key(b);
@@ -575,8 +711,13 @@ const ReviewApp = {
     renderSessionList() {
         const list = document.getElementById('session-list');
         const { needle, sessions: searchedSessions } = this.searched();
-        this.renderFilters(searchedSessions);
-        const filtered = this.applyFilters(searchedSessions);
+        const table = this.chipTable();
+        this.renderFilters(searchedSessions, table);
+        const filtered = this.applyFilters(searchedSessions, table);
+        // Whatever scrolls the list keeps its place across a redraw.
+        const scroller = [list, list.parentElement, list.parentElement && list.parentElement.parentElement]
+            .find(el => el && el.scrollHeight > el.clientHeight + 1);
+        const top = scroller ? scroller.scrollTop : 0;
 
         if (this.sessions.length === 0) {
             list.innerHTML = '<div class="no-sessions">No sessions found</div>';
@@ -591,10 +732,15 @@ const ReviewApp = {
             return;
         }
 
-        list.innerHTML = filtered.map(s => {
+        list.innerHTML = filtered.map(s => this.rowHtml(s)).join('');
+        if (scroller) scroller.scrollTop = top;
+    },
+
+    rowHtml(s) {
             const held = this.holdings(s);
+            const open = this.currentSession && this.currentSession.session_id === s.session_id;
             return `
-            <div class="session-item ${s.active ? 'active-session' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
+            <div class="session-item ${s.active ? 'active-session' : ''}${open ? ' active' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
                 <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
                 <div class="session-meta">
                     <span>${this.formatDate(s.created_at)}</span>
@@ -604,12 +750,13 @@ const ReviewApp = {
                 <div class="session-project">${this.projectChip(s)}</div>
                 ${this._filing && this._filing.sid === s.session_id && this._filing.where === 'list' ? this.renderFilingPopover(s) : ''}
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
-                ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
-                ${typeof Reveal !== 'undefined' ? Reveal.button(
-                    { what: 'session', session_id: s.session_id }, 'show',
-                    { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
+                <div class="session-row-actions">
+                    ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
+                    ${typeof Reveal !== 'undefined' ? Reveal.button(
+                        { what: 'session', session_id: s.session_id }, 'show',
+                        { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
+                </div>
             </div>`;
-        }).join('');
     },
 
     // Two intents, said apart. Looking at a session is this tab: nothing
@@ -641,10 +788,10 @@ const ReviewApp = {
                 window.location.href = '/';
             } else {
                 const d = await resp.json().catch(() => ({}));
-                alert(failure + ': ' + (d.detail || ('HTTP ' + resp.status)));
+                reviewToast(failure + ': ' + (d.detail || ('HTTP ' + resp.status)));
             }
         } catch (e) {
-            alert(failure + ': ' + e);
+            reviewToast(failure + ': ' + e);
         }
     },
 
@@ -663,7 +810,6 @@ const ReviewApp = {
         const s = this.currentSession;
         const embryos = s.embryos || [];
         const frames = s.bf_frames || [];
-        const predictions = embryos.reduce((n, e) => n + ((e.predictions || []).length), 0);
 
         content.innerHTML = `
             <div class="session-header">
@@ -677,17 +823,21 @@ const ReviewApp = {
                         : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
                 </div>
                 <div id="session-name-form"></div>
-                ${this.renderFiled(s)}
+                <div id="session-filed">${this.renderFiled(s)}</div>
                 ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
                 <div class="session-stats">
                     <span>Created: ${this.formatDateTime(s.created_at)}</span>
                     ${s.last_active ? `<span>Last active: ${this.formatDateTime(s.last_active)}</span>` : ''}
+                    ${(s.operators || []).length ? `<span>Worked by ${s.operators.map(o => Who.chip(o)).join(' ')}</span>` : ''}
+                    ${s.edited && s.edited.by ? `<span>Last edit ${Who.chip(s.edited.by, { when: s.edited.at })} (${this.escapeHtml(s.edited.what || '')})</span>` : ''}
                     ${s.bytes != null ? `<span title="Everything in the session's folder">On disk: ${this.fmtBytes(s.bytes)}</span>` : ''}
                 </div>
                 ${this.renderRun(this.runOf(s))}
                 <div class="session-export" id="session-export"></div>
                 <div class="session-movies" id="session-movies"></div>
             </div>
+
+            <div class="session-stream" id="session-stream"></div>
 
             ${this.renderPlan(s.acquisition)}
 
@@ -696,17 +846,13 @@ const ReviewApp = {
                     Embryos
                     <span class="tab-count">${embryos.length}</span>
                 </button>
-                <button class="tab ${this.currentTab === 'detections' ? 'active' : ''}" data-tab="detections">
-                    Stage calls
-                    <span class="tab-count">${predictions}</span>
-                </button>
                 <button class="tab ${this.currentTab === 'conversation' ? 'active' : ''}" data-tab="conversation">
                     Conversation
                     <span class="tab-count">${(s.conversation || []).length}</span>
                 </button>
-                <button class="tab ${this.currentTab === 'events' ? 'active' : ''}" data-tab="events">
-                    What happened
-                    <span class="tab-count">${(s.events || []).length}</span>
+                <button class="tab ${this.currentTab === 'tools' ? 'active' : ''}" data-tab="tools">
+                    Tools
+                    <span class="tab-count">${(s.tools || []).length}</span>
                 </button>
             </div>
 
@@ -719,7 +865,71 @@ const ReviewApp = {
         this.wireScrub();
         this.pollExport(true);
         this.pollMovie(true);
+        this.mountStream(s.session_id);
         void frames;
+    },
+
+    // ---- the stream: what people wrote on this session, and the box -------
+    // The same lines the project's Overview shows for this session, written
+    // here. @ a person in a line to ask them; it reaches their inbox. A tool
+    // note (saved marks) is a line too. `quiet` is a redraw from an event:
+    // it leaves a line someone is still typing alone.
+    async mountStream(sid, quiet) {
+        const host = document.getElementById('session-stream');
+        if (!host || !sid) return;
+        const typing = document.getElementById('session-stream-line');
+        if (quiet && typing && document.activeElement === typing && typing.value) return;
+        let notes = [];
+        try {
+            const [n, t] = await Promise.all([
+                fetch(`/api/notebook/notes?session=${encodeURIComponent(sid)}`).then(r => r.json()),
+                this._toolTitles ? Promise.resolve(null) : fetch('/api/tools').then(r => r.json()).catch(() => ({})),
+            ]);
+            notes = n.notes || [];
+            if (t) this._toolTitles = new Set((t.tools || []).map(x => x.title));
+        } catch (e) { /* the box still works */ }
+        if (!this.currentSession || this.currentSession.session_id !== sid) return;
+        notes.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+        host.innerHTML = `<div class="pj-card session-stream-card">
+            <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed here, in your words; @ a person to ask them</span></div>
+            <div class="rd-add"><input id="session-stream-line" placeholder="One line, in your words. Enter files it to this session." autocomplete="off"></div>
+            <div class="pj-stack rd-stream">${notes.length ? notes.map(n => streamLineHtml(n, this._toolTitles, { cite: false })).join('') : '<div class="pj-none">Nothing written on this session yet.</div>'}</div>
+        </div>`;
+        this.landOnNote();
+        const box = document.getElementById('session-stream-line');
+        Mentions.attach(box);
+        box.onkeydown = async e => {
+            if (e.key !== 'Enter' || !box.value.trim() || box.disabled) return;
+            const text = box.value.trim();
+            box.disabled = true;                                   // one press, one line
+            try { await this._post('/api/notebook/notes', { body: text, sessions: [sid] }); }
+            catch (err) { box.disabled = false; reviewToast(`Could not file the line: ${err.message || err}`); return; }
+            this.mountStream(sid);
+        };
+    },
+
+    // A link in from the Notebook lands on the line itself, not just the
+    // session. openNote(sid, noteId) opens the session (the Sessions tab is
+    // inited if it is not yet) and remembers the line; the stream, once
+    // drawn, scrolls to it and lights it for a moment. Once — the memory is
+    // cleared so a redraw does not jump again. The same thing reached by URL
+    // is /#sessions:<sid>:<noteId>, which app.js routes here.
+    _landOn: null,
+    async openNote(sessionId, noteId) {
+        this._landOn = noteId || null;
+        await this.init();
+        await this.loadSession(sessionId);
+    },
+
+    landOnNote() {
+        const id = this._landOn;
+        if (!id) return;
+        const line = document.querySelector(`.rd-line[data-note-id="${CSS.escape(id)}"]`);
+        if (!line) return;
+        this._landOn = null;
+        line.classList.add('is-target');
+        line.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        setTimeout(() => line.classList.remove('is-target'), 4000);
     },
 
     // ---- export, for Fiji and for finding the experiment again -----------
@@ -766,6 +976,7 @@ const ReviewApp = {
                 : '';
         host.innerHTML = `
             <div class="session-export-row">
+                <span class="session-export-label">Export</span>
                 <button class="session-edit-btn" onclick="ReviewApp.askExport()" title="One folder per embryo, files named in time order, the record beside them; opens in Fiji with Import › Image Sequence">Export for Fiji…</button>
                 ${last}
             </div>
@@ -1033,16 +1244,47 @@ const ReviewApp = {
     wireScrub() {
         document.querySelectorAll('.embryo-thumb[data-embryo]').forEach(el => {
             const eid = el.dataset.embryo;
+            // The card's picture is the counts, drawn by the viewer at the size a
+            // card has (gently.core.u16); the JPEG if they cannot be had.
+            const host = el.querySelector('.embryo-pix');
+            let view = null;
+            if (host) {
+                if (typeof U16View !== 'undefined') view = U16View.tile(host, host.dataset.u16, host.dataset.jpg, host.dataset.alt);
+                else host.replaceWith(Object.assign(document.createElement('img'), { src: host.dataset.jpg, alt: host.dataset.alt, loading: 'lazy' }));
+            }
             const e = (this.currentSession.embryos || []).find(x => x.embryo_id === eid);
             const tps = e && e.projection_timepoints;
             if (!tps || tps.length < 2) return;
             el.classList.add('is-scrubbing');
             const img = el.querySelector('img');
             const cap = el.querySelector('.embryo-thumb-cap');
-            const show = t => {
+            // One frame in flight at a time: a sweep across 300 timepoints asks
+            // for the frames it can show, not every one it crossed.
+            let want = null;
+            const apply = t => {
                 const url = `/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
-                if (img && img.dataset.t !== String(t)) { img.src = url; img.dataset.t = String(t); el.href = url; }
+                img.dataset.loading = '1'; img.dataset.t = String(t); img.src = url; el.href = url;
+            };
+            const landed = () => {
+                img.dataset.loading = '';
+                if (want != null && String(want) !== img.dataset.t) { const t = want; want = null; apply(t); }
+            };
+            if (img) { img.addEventListener('load', landed); img.addEventListener('error', landed); }
+            let shownT = null;
+            const show = t => {
                 if (cap) cap.textContent = `t${t} · ${tps.indexOf(t) + 1}/${tps.length}`;
+                if (view && view.host.isConnected) {
+                    // the viewer: a later load wins, and the range holds across timepoints
+                    if (shownT === t) return;
+                    shownT = t;
+                    const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+                    el.href = `/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
+                    view.load(host.dataset.u16.replace(/\/volumes\/\d+\//, `/volumes/${t}/`)).then(m => { if (m && keep) view.setRange(keep[0], keep[1], keep[2]); }).catch(() => {});
+                    return;
+                }
+                if (!img || img.dataset.t === String(t)) return;
+                if (img.dataset.loading) { want = t; return; }
+                apply(t);
             };
             el.addEventListener('mousemove', ev => {
                 const r = el.getBoundingClientRect();
@@ -1059,6 +1301,16 @@ const ReviewApp = {
         return map[stage] || map[String(stage).replace(/-/g, '')] || null;
     },
 
+    // Consecutive calls of one stage, as one segment: a strip of 300 calls is a few spans.
+    stageRuns(preds) {
+        const runs = [];
+        preds.forEach(p => {
+            const r = runs[runs.length - 1];
+            if (r && r.stage === p.stage) { r.n++; r.last = p; } else runs.push({ stage: p.stage, n: 1, first: p, last: p });
+        });
+        return runs;
+    },
+
     stageBar(e) {
         const preds = e.predictions || [];
         if (!preds.length || typeof stageColor !== 'function') return '';
@@ -1067,7 +1319,7 @@ const ReviewApp = {
         const tip = p => `t${p.timepoint} · ${this.stageText(p.stage)}${this.stageTerm(p.stage) ? ` · ${this.stageTerm(p.stage)}` : ''}`;
         return `
             <div class="stage-bar" title="Stage call per timepoint">
-                ${preds.map(p => `<span style="background:${stageColor(p.stage)}" title="${this.escapeHtml(tip(p))}"></span>`).join('')}
+                ${this.stageRuns(preds).map(r => `<span style="background:${stageColor(r.stage)};flex-grow:${r.n}" title="${this.escapeHtml(r.n === 1 ? tip(r.first) : `t${r.first.timepoint}–t${r.last.timepoint} · ${this.stageText(r.stage)}`)}"></span>`).join('')}
             </div>
             <div class="stage-bar-key"><span>t${preds[0].timepoint} ${this.escapeHtml(this.stageText(preds[0].stage))}</span><span>${this.escapeHtml(this.stageText(last.stage))} t${last.timepoint}</span></div>
             ${term ? `<div class="stage-ontology">${this.escapeHtml(this.stageText(last.stage))} · <a href="https://wormbase.org/species/all/life_stage/${encodeURIComponent(term)}" target="_blank" rel="noopener" title="WormBase life stage">${this.escapeHtml(term)}</a></div>` : ''}`;
@@ -1096,40 +1348,7 @@ const ReviewApp = {
             ).join(' · ')}</div>`;
     },
 
-    renderEventsTab() {
-        const s = this.currentSession;
-        const events = s.events || [];
-        const temp = s.temperature || [];
-        const spark = this.temperatureSpark(temp);
-        if (!events.length && !spark) return '<div class="empty-tab">Nothing recorded beyond the images</div>';
-        return `
-            ${spark}
-            ${events.length ? `<div class="event-list">
-                ${events.map(ev => `<time>${this.formatDateTime(ev.at)}</time><div class="${ev.level === 'warn' ? 'is-warn' : ev.level === 'error' ? 'is-error' : ''}">${this.escapeHtml(ev.text)}</div>`).join('')}
-            </div>` : '<div class="empty-tab">No notable events recorded</div>'}`;
-    },
 
-    temperatureSpark(samples) {
-        const pts = samples.filter(p => Number.isFinite(Number(p.water_c)));
-        if (pts.length < 2) return '';
-        const W = 600, H = 72, pad = 4;
-        const ys = pts.map(p => Number(p.water_c));
-        const sp = pts.map(p => Number(p.setpoint_c)).filter(Number.isFinite);
-        const lo = Math.min(...ys, ...sp) - 0.2, hi = Math.max(...ys, ...sp) + 0.2;
-        const x = i => pad + (i / (pts.length - 1)) * (W - 2 * pad);
-        const y = v => H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad);
-        const line = ys.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-        const set = sp.length ? `<line x1="${pad}" x2="${W - pad}" y1="${y(sp[sp.length - 1]).toFixed(1)}" y2="${y(sp[sp.length - 1]).toFixed(1)}" stroke="var(--temp-setpoint-color)" stroke-dasharray="4 4" stroke-width="1"/>` : '';
-        const minV = Math.min(...ys), maxV = Math.max(...ys);
-        return `
-            <div class="session-temp">
-                <div class="session-temp-head">Water temperature <span>${minV.toFixed(1)}–${maxV.toFixed(1)} °C</span>${sp.length ? `<span>setpoint ${sp[sp.length - 1].toFixed(1)} °C</span>` : ''}<span>${this.formatDateTime(pts[0].t)} → ${this.formatDateTime(pts[pts.length - 1].t)}</span></div>
-                <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Water temperature over the session">
-                    ${set}
-                    <polyline fill="none" stroke="var(--temp-water-color)" stroke-width="1.5" points="${line}"/>
-                </svg>
-            </div>`;
-    },
 
     renderRun(run) {
         if (!run || !run.status) return '';
@@ -1189,6 +1408,7 @@ const ReviewApp = {
                 tab.classList.add('active');
                 document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
                 this.wireScrub();
+                this.mountTools();
             });
         });
     },
@@ -1196,12 +1416,61 @@ const ReviewApp = {
     renderCurrentTab() {
         switch (this.currentTab) {
             case 'embryos': return this.renderEmbryosTab();
-            case 'detections': return this.renderDetectionsTab();
             case 'conversation': return this.renderConversationTab();
-            case 'events': return this.renderEventsTab();
+            case 'tools': return this.renderToolsTab();
             default: return '';
         }
     },
+
+    // ---- tools: optional panes a session imports at any time ---------------
+    // A tool is off until the session names it; importing is one PUT. Each
+    // imported tool mounts itself into its own box (static/js/tools/*.js).
+    renderToolsTab() {
+        const s = this.currentSession;
+        const on = s.tools || [];
+        const avail = (window.GentlyToolCatalog || []).filter(t => (t.scope || 'session') === 'session' && !on.includes(t.name));
+        return `
+            <div class="session-tools-bar">
+                ${avail.length ? `<select id="session-tool-pick">${avail.map(t => `<option value="${t.name}" title="${this.escapeHtml(t.summary)}">${this.escapeHtml(t.title)}</option>`).join('')}</select>
+                <button class="session-edit-btn" onclick="ReviewApp.importTool()">Import</button>` : ''}
+                ${!on.length ? '<span class="hint">No tools on this session yet.</span>' : ''}
+            </div>
+            ${on.map(name => {
+                const t = (window.GentlyToolCatalog || []).find(x => x.name === name) || { title: name };
+                return `<div class="session-tool">
+                    <div class="session-bf-head">${this.escapeHtml(t.title)} <button class="session-edit-btn session-tool-drop" onclick="ReviewApp.dropTool('${name}')" title="Take this tool off the session; its file stays">remove</button></div>
+                    <div class="session-tool-body" data-tool="${name}"></div>
+                </div>`;
+            }).join('')}`;
+    },
+
+    mountTools() {
+        const s = this.currentSession;
+        if (!s || this.currentTab !== 'tools') return;
+        document.querySelectorAll('.session-tool-body[data-tool]').forEach(el => {
+            const tool = (window.GentlyTools || {})[el.dataset.tool];
+            if (tool) tool.mount(el, s.session_id);
+            else el.innerHTML = '<div class="empty-tab">This tool has no pane on this page</div>';
+        });
+    },
+
+    async setTools(tools) {
+        const s = this.currentSession;
+        const r = await fetch(`/api/sessions/${encodeURIComponent(s.session_id)}/tools`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tools }),
+        });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); reviewToast(d.detail || `HTTP ${r.status}`); return; }
+        s.tools = (await r.json()).tools;
+        document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
+        this.mountTools();
+    },
+
+    importTool() {
+        const pick = document.getElementById('session-tool-pick');
+        if (pick) this.setTools([...(this.currentSession.tools || []), pick.value]);
+    },
+
+    dropTool(name) { this.setTools((this.currentSession.tools || []).filter(t => t !== name)); },
 
     renderBfStrip() {
         const frames = this.currentSession.bf_frames || [];
@@ -1211,7 +1480,7 @@ const ReviewApp = {
                 <div class="session-bf-head">Brightfield overview <span class="session-bf-count">${frames.length} frame${frames.length !== 1 ? 's' : ''}</span></div>
                 <div class="session-bf-frames">
                     ${frames.map(f => `
-                        <a class="session-bf-frame" href="${f.url}" target="_blank" rel="noopener" title="Open frame ${f.frame ?? ''}">
+                        <a class="session-bf-frame" href="${f.url}" title="Open frame ${f.frame ?? ''} with its values" onclick="event.preventDefault(); U16View.overlay('${f.url.replace(/\.png$/, '.u16')}', 'frame ${f.frame ?? ''}${f.captured_at ? ' · ' + this.formatTime(f.captured_at) : ''}')">
                             <img src="${f.url}?max=256" alt="brightfield overview frame ${f.frame ?? ''}" loading="lazy">
                             <span class="session-bf-cap">${f.frame ?? ''}${f.captured_at ? ` · ${this.formatTime(f.captured_at)}` : ''}</span>
                         </a>`).join('')}
@@ -1224,7 +1493,7 @@ const ReviewApp = {
         const strip = this.renderBfStrip();
 
         if (embryos.length === 0) {
-            return strip + '<div class="empty-tab">No embryo data recorded</div>';
+            return strip + '<div class="empty-tab">No embryos in this session.</div>';
         }
 
         return strip + `
@@ -1237,18 +1506,16 @@ const ReviewApp = {
                     return `
                     <div class="embryo-card">
                         ${e.thumbnail
-                            ? `<a class="embryo-thumb" data-embryo="${this.escapeHtml(e.embryo_id)}" href="${e.thumbnail}" target="_blank" rel="noopener" title="Move across to scrub through the timepoints; click to open"><img src="${e.thumbnail}" alt="${this.escapeHtml(name)}, timepoint ${e.latest_timepoint}" loading="lazy"><span class="embryo-thumb-cap">t${e.latest_timepoint}</span></a>`
+                            ? `<a class="embryo-thumb" data-embryo="${this.escapeHtml(e.embryo_id)}" href="${e.thumbnail}" target="_blank" rel="noopener" title="Move across to scrub through the timepoints; click to open"><span class="embryo-pix" data-u16="/api/sessions/${encodeURIComponent(this.currentSession.session_id)}/embryos/${encodeURIComponent(e.embryo_id)}/volumes/${e.latest_timepoint}/projection.u16?max=256" data-jpg="${e.thumbnail}" data-alt="${this.escapeHtml(name)}, timepoint ${e.latest_timepoint}"></span><span class="embryo-thumb-cap">t${e.latest_timepoint}</span></a>`
                             : '<div class="embryo-thumb embryo-thumb-empty">no image</div>'}
                         <div class="embryo-header">
                             <h3>${this.escapeHtml(name)}${sub ? ` <small>${this.escapeHtml(sub)}</small>` : ''}</h3>
+                            ${e.role ? `<span class="chip embryo-role" title="Its role in the run">${this.escapeHtml(e.role)}</span>` : ''}
                             ${e.is_complete ? '<span class="status-badge complete">Complete</span>' : ''}
                         </div>
                         <div class="embryo-details">
-                            ${e.role ? `<div class="detail"><span>Role:</span> ${this.escapeHtml(e.role)}</div>` : ''}
-                            ${stage ? `<div class="detail"><span>Stage:</span> ${this.escapeHtml(stage)}${conf}</div>` : ''}
-                            <div class="detail"><span>Timepoints:</span> ${e.timepoints || 0}</div>
-                            ${e.strain ? `<div class="detail"><span>Strain:</span> ${this.escapeHtml(e.strain)}</div>` : ''}
-                            ${e.position && e.position.x != null ? `<div class="detail"><span>Position:</span> (${Number(e.position.x).toFixed(1)}, ${Number(e.position.y).toFixed(1)})</div>` : ''}
+                            ${stage ? `<div class="embryo-stage">${this.escapeHtml(stage)}${conf ? `<span class="embryo-conf">${conf.trim()}</span>` : ''}</div>` : '<div class="embryo-stage is-none">no stage call yet</div>'}
+                            <div class="embryo-meta">${e.timepoints || 0} timepoint${(e.timepoints || 0) === 1 ? '' : 's'}${e.strain ? ` · ${this.escapeHtml(e.strain)}` : ''}${e.position && e.position.x != null ? ` · <span class="embryo-pos" title="Stage position">${Number(e.position.x).toFixed(0)}, ${Number(e.position.y).toFixed(0)}</span>` : ''}</div>
                         </div>
                         ${this.stageBar(e)}
                         ${this.dose(e)}
@@ -1259,37 +1526,12 @@ const ReviewApp = {
         `;
     },
 
-    renderDetectionsTab() {
-        const embryos = (this.currentSession.embryos || []).filter(e => (e.predictions || []).length);
-
-        if (embryos.length === 0) {
-            return '<div class="empty-tab">No stage calls recorded</div>';
-        }
-
-        return `
-            <div class="detections-list">
-                ${embryos.map(e => `
-                    <div class="detection-group">
-                        <h4>${this.escapeHtml(e.nickname || e.embryo_id)}</h4>
-                        <div class="stage-calls">
-                            ${e.predictions.map(p => `
-                                <a class="stage-call" href="/api/sessions/${this.currentSession.session_id}/projection?embryo=${encodeURIComponent(e.embryo_id)}&t=${p.timepoint}" target="_blank" rel="noopener" title="Open timepoint ${p.timepoint}">
-                                    <span class="stage-call-t">t${p.timepoint}</span>
-                                    <span class="stage-call-stage">${this.escapeHtml(this.stageText(p.stage))}</span>
-                                    ${p.confidence != null ? `<span class="stage-call-conf">${Math.round(p.confidence * 100)}%</span>` : ''}
-                                </a>`).join('')}
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-        `;
-    },
 
     renderConversationTab() {
         const conversation = this.currentSession.conversation || [];
 
         if (conversation.length === 0) {
-            return '<div class="empty-tab">No conversation history</div>';
+            return '<div class="empty-tab">No conversation in this session.</div>';
         }
 
         return `

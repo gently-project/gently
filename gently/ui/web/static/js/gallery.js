@@ -18,9 +18,28 @@ function renderRecentList() {
         <div class="recent-strip-item ${state.currentImage?.uid === img.uid ? 'active' : ''}"
              onclick="openSnapshotsLightbox(${index})"
              title="${img.data_type} - ${img.uid.slice(0, 8)}">
-            <img src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
+            ${pushedThumb(img, '')}
         </div>
     `).join('');
+    mountPushedTiles(list);
+}
+
+// A pushed image as its counts when the server kept them (has_counts): the
+// viewer at the size a tile has, the PNG in its place if they cannot be had.
+// Render with pushedThumb, then mountPushedTiles on the element that got the HTML.
+function pushedThumb(img, cls, max = 256) {
+    const png = img && img.base64_png ? `data:image/png;base64,${img.base64_png}` : '';
+    const alt = (img && img.data_type) || 'image';
+    if (img && img.has_counts && img.uid && typeof U16View !== 'undefined') {
+        return `<span class="${cls} gallery-pix" data-cls="${cls}" data-u16="/api/images/${encodeURIComponent(img.uid)}.u16?max=${max}" data-jpg="${png}" data-alt="${alt}"></span>`;
+    }
+    return png ? `<img class="${cls}" src="${png}" alt="${alt}">` : '';
+}
+function mountPushedTiles(root) {
+    (root || document).querySelectorAll('.gallery-pix[data-u16]').forEach(h => {
+        h.classList.remove('gallery-pix');
+        U16View.tile(h, h.dataset.u16, h.dataset.jpg, h.dataset.alt);
+    });
 }
 
 function openSnapshotsLightbox(index) {
@@ -871,8 +890,7 @@ const CalibrationProfileView = {
                 html += `
                     <div class="cal-detail-card">
                         <div class="cal-detail-card-title">${img.data_type}</div>
-                        <img class="cal-detail-img" src="data:image/png;base64,${img.base64_png}"
-                             alt="${img.data_type}"/>
+                        ${pushedThumb(img, 'cal-detail-img', 512)}
                     </div>
                 `;
             });
@@ -1014,7 +1032,7 @@ const CalibrationManager = {
         div.className = 'gallery-item';
         div.onclick = () => CalibrationManager.openLightbox(0);
         div.innerHTML = `
-            <img class="gallery-img" src="data:image/png;base64,${newImage.base64_png}" alt="${newImage.data_type}">
+            ${pushedThumb(newImage, 'gallery-img')}
             <div class="gallery-info">
                 <div class="gallery-type">${newImage.data_type}</div>
                 <div class="gallery-meta">${formatMeta(newImage.metadata)}</div>
@@ -1022,6 +1040,7 @@ const CalibrationManager = {
         `;
 
         grid.insertBefore(div, grid.firstChild);
+        mountPushedTiles(div);
 
         const items = grid.querySelectorAll('.gallery-item');
         items.forEach((item, idx) => {
@@ -1125,6 +1144,7 @@ const CalibrationManager = {
 
         if (this.currentView === 'profile') {
             panel.innerHTML = headerHtml + CalibrationProfileView.render(this.selectedEmbryoId);
+            mountPushedTiles(panel);
             // Re-apply the in-memory SPIM frame for this embryo: the
             // innerHTML reset above replaced the preview's fresh empty
             // DOM, so the cached frame needs to be painted back.
@@ -1133,6 +1153,7 @@ const CalibrationManager = {
             }
         } else {
             panel.innerHTML = headerHtml + this._renderGalleryContent(images);
+            mountPushedTiles(panel);
         }
     },
 
@@ -1181,7 +1202,7 @@ const CalibrationManager = {
                     }
                     return `
                     <div class="gallery-item${isBestFocus ? ' best-focus' : ''}" onclick="CalibrationManager.openLightbox(${idx})">
-                        <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
+                        ${pushedThumb(img, 'gallery-img')}
                         <div class="gallery-info">
                             <div class="gallery-type">${img.data_type}${isBestFocus ? ' ★' : ''}</div>
                             <div class="gallery-meta">${formatMeta(img.metadata)}</div>
@@ -1266,6 +1287,8 @@ const SpimLivePreview = {
             base64_png: data.base64_png,
             metadata: md,
             data_type: data.data_type,
+            uid: data.uid,
+            has_counts: !!data.has_counts,   // the server kept the numbers: the thumb draws them
             ts: Date.now(),
         };
 
@@ -1290,12 +1313,35 @@ const SpimLivePreview = {
 
         if (img) {
             if (latest) {
-                img.src = `data:image/png;base64,${latest.base64_png}`;
+                // The thumb is the counts when the server kept them (gently.core.u16),
+                // drawn by the viewer in a host beside the <img>; the PNG otherwise.
+                const counts = latest.has_counts && latest.uid && typeof U16View !== 'undefined';
+                let pix = document.getElementById('cal-spim-pix');
+                if (counts) {
+                    if (!pix) {
+                        pix = document.createElement('span');
+                        pix.id = 'cal-spim-pix'; pix.className = 'cal-spim-thumb cal-spim-pix';
+                        img.insertAdjacentElement('afterend', pix);
+                        pix._view = U16View.create(pix, { bar: false });
+                    }
+                    const view = pix._view, keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+                    view.load(`/api/images/${encodeURIComponent(latest.uid)}.u16?max=192`)
+                        .then(m => { if (m && keep) view.setRange(keep[0], keep[1], keep[2]); })
+                        .catch(() => { pix.hidden = true; img.style.display = ''; img.src = `data:image/png;base64,${latest.base64_png}`; });
+                    pix.hidden = false; pix.classList.add('has-frame'); img.style.display = 'none';
+                } else {
+                    if (pix) pix.hidden = true;
+                    img.style.display = '';
+                    img.src = `data:image/png;base64,${latest.base64_png}`;
+                }
                 img.classList.add('has-frame');
                 if (placeholder) placeholder.hidden = true;
                 if (metaEl) metaEl.textContent = this._formatMeta(latest);
                 if (led) led.classList.remove('idle');
             } else {
+                const pix = document.getElementById('cal-spim-pix');
+                if (pix) pix.hidden = true;
+                img.style.display = '';
                 img.removeAttribute('src');
                 img.classList.remove('has-frame');
                 if (placeholder) placeholder.hidden = false;
@@ -1438,6 +1484,7 @@ const GalleryTab = {
 
         const html = `<div class="gallery-tab-grid">${items.map((img, idx) => this._itemHtml(img, idx)).join('')}</div>`;
         panel.innerHTML = html;
+        mountPushedTiles(panel);
 
         // Wire click handlers
         panel.querySelectorAll('.gallery-tab-item').forEach(el => {
@@ -1453,7 +1500,7 @@ const GalleryTab = {
         const ts = img.timestamp ? img.timestamp.slice(0, 19).replace('T', ' ') : '';
         const typeLabel = img.data_type || 'image';
         const thumb = img.base64_png
-            ? `<img class="gallery-tab-thumb" src="data:image/png;base64,${img.base64_png}" alt="${typeLabel}">`
+            ? pushedThumb(img, 'gallery-tab-thumb')
             : `<div class="gallery-tab-thumb-placeholder">${typeLabel}</div>`;
         return `
             <div class="gallery-tab-item" data-idx="${idx}" title="${typeLabel}${embryo ? ' · ' + embryo : ''}">

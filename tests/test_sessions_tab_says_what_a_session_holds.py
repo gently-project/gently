@@ -140,8 +140,15 @@ class TestThePane:
         assert 'class="tab-content"' not in REVIEW_JS
         assert "session-tab-content" in REVIEW_JS and ".session-tab-content" in REVIEW_CSS
 
-    def test_the_pane_shows_plan_pictures_frames_and_stage_calls(self):
-        needles = ("renderPlan(", "embryo-thumb", "renderBfStrip(", "stage-call", "tool_result")
+    def test_the_pane_shows_plan_pictures_frames_and_the_stage_strip(self):
+        needles = (
+            "renderPlan(",
+            "embryo-thumb",
+            "renderBfStrip(",
+            "stageBar(",
+            "stageRuns(",
+            "tool_result",
+        )
         for needle in needles:
             assert needle in REVIEW_JS, needle
 
@@ -188,14 +195,13 @@ def _with_a_night(store, sid):
 
 
 class TestWhatHappened:
-    def test_notable_events_temperature_dose_and_set_aside_come_along(self, store):
+    def test_dose_and_set_aside_come_along_and_what_happened_no_longer_does(self, store):
         sid = _session_with_a_run(store)
         _with_a_night(store, sid)
         d = _client(store).get(f"/api/sessions/{sid}").json()
-        kinds = [e["type"] for e in d["events"]]
-        assert kinds == ["ACQUISITION_STARTED", "WARNING_ISSUED", "ACQUISITION_STOPPED"], kinds
-        assert d["events"][1]["level"] == "warn" and "drift" in d["events"][1]["text"]
-        assert 2 <= len(d["temperature"]) <= 240 and d["temperature"][0]["water_c"] == 20.0
+        # The What happened tab is gone, and with it the events, temperature
+        # and actions the detail parsed for it; the dose and the set-aside stay.
+        assert "events" not in d and "temperature" not in d and "actions" not in d
         (e,) = d["embryos"]
         assert e["projection_timepoints"] == [1, 2, 3]
         assert e["dose_ms"] == 750.0 and e["dose_budget_ms"] == 1000.0  # test role: ×1
@@ -302,7 +308,7 @@ class TestNaming:
 
 
 class TestThePaneAgain:
-    def test_the_pane_names_scrubs_bars_doses_and_tells_what_happened(self):
+    def test_the_pane_names_scrubs_bars_doses_and_removed_embryos(self):
         needles = (
             "editName(",
             "suggestName(",
@@ -310,8 +316,6 @@ class TestThePaneAgain:
             "wireScrub(",
             "stageBar(",
             "dose(",
-            "renderEventsTab(",
-            "temperatureSpark(",
             "renderRemoved(",
             "session-search",
         )
@@ -331,7 +335,9 @@ class TestTheFilters:
         assert 'id="session-filters"' in panel and "filter-with-content" not in panel
         for needle in (
             "FILTERS:",
-            "holds:",
+            "content:",
+            "channel:",
+            "spim:",
             "brightfield:",
             "interrupted:",
             "never:",
@@ -346,8 +352,10 @@ class TestTheFilters:
             assert needle in REVIEW_JS, needle
         # Every chip says how many sessions it would keep.
         assert '<span class="n">${n}</span>' in REVIEW_JS
-        # Brightfield-only sessions are content: the old checkbox hid them.
-        assert "defaults: ['embryos', 'brightfield']" in REVIEW_JS
+        # The usual view hides empties; the channel chips only narrow when asked.
+        # "i think the idea is i want channel filter -- not embryos or brightfield"
+        assert "defaults: ['nonempty']" in REVIEW_JS and "defaults: []," in REVIEW_JS
+        assert "label: 'SPIM'" in REVIEW_JS and "label: 'non-empty'" in REVIEW_JS
 
 
 class TestTheListIsQuick:
@@ -389,11 +397,16 @@ class TestTheListIsQuick:
         # Walked once, the list knows it from then on.
         assert c.get("/api/sessions").json()["sessions"][0]["bytes"] == sizes["s1"]
 
-    def test_the_active_session_is_always_walked_fresh(self, store):
+    def test_the_list_never_walks_and_the_detail_counts_the_live_session_afresh(self, store):
+        # The live session's folder is the biggest and it grows; a walk of it
+        # on every list call was the one slow read left in the list. The row
+        # takes the last size counted; opening the session counts it anew.
         _session_with_a_run(store)
         sessions_routes._SIZE_CACHE.clear()
-        s = _client(store, active="s1").get("/api/sessions").json()["sessions"][0]
-        assert s["active"] and s["bytes"] > 0
+        c = _client(store, active="s1")
+        s = c.get("/api/sessions").json()["sessions"][0]
+        assert s["active"] and s["bytes"] is None
+        assert c.get("/api/sessions/s1").json()["bytes"] > 0
 
     def test_the_tab_draws_the_list_then_asks_for_sizes_in_batches(self):
         load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:1200]
@@ -402,3 +415,78 @@ class TestTheListIsQuick:
         assert "fetch(`/api/sessions/sizes?ids=" in fill
         assert "s.bytes == null" in fill, "only the sizes the list did not carry are asked for"
         assert "this.repaintHoldings(filled)" in fill, "a batch repaints its rows, not the list"
+
+
+class TestASessionInformsSeveralProjects:
+    """The tab adds a session to a project too.
+
+    "it should be possible to add a session to project from the sessions tab
+    also." The tab's popover chose a session's one project and moved it
+    there; membership is many-to-many with a role per link, and the Projects
+    page adds a link beside the home. Now the tab does the same, shows every
+    link, takes one out, and can make another the home."""
+
+    def test_the_detail_carries_every_link_with_the_home_first(self, store):
+        store.create_session("s1")
+        store.link_session("s1", "p-dose", role="control", by="ryan", home=True)
+        store.link_session("s1", "p-timing", role="reference", by="ryan")
+        got = _client(store).get("/api/sessions/s1").json()
+        assert got["project_id"] == "p-dose"
+        assert [(x["id"], x["role"], x["by"]) for x in got["projects"]] == [
+            ("p-dose", "control", "ryan"),
+            ("p-timing", "reference", "ryan"),
+        ]
+
+    def test_the_detail_reads_the_old_scalar_as_one_link(self, store):
+        store.create_session("old", project_id="p-dose")
+        got = _client(store).get("/api/sessions/old").json()
+        assert [x["id"] for x in got["projects"]] == ["p-dose"]
+
+    def test_the_tab_adds_a_project_beside_the_home_and_takes_one_out(self):
+        # adding never moves: the first link stays the home
+        assert "{ campaign_id: campaignId, role: f.role || null }" in REVIEW_JS
+        assert "Its project · one" not in REVIEW_JS
+        # one link comes out, not all of them; and any link can become the home
+        assert "{ campaign_id: null, from: pid }" in REVIEW_JS
+        assert "{ campaign_id: pid, move: true }" in REVIEW_JS
+        for needle in (
+            "also in ${name(l.id)}",
+            "ReviewApp.makeHome(",
+            "ReviewApp.unlinkProject(",
+            "Add to a project…",
+        ):
+            assert needle in REVIEW_JS, needle
+        # the project filter keeps a session linked there in any role
+        assert "test: s => this.linksOf(s).some(l => l.id === pid)" in REVIEW_JS
+
+
+class TestThePageKeepsItsPlace:
+    """ "after i leave a stream comment in the session, the sessions page
+    reloads... it does not give a snap feeling to gently." A note changes no
+    row, so it reloads nothing; a filing repaints its row and the filed line;
+    rows already drawn are never replaced by "Loading"; the Stage calls and
+    What happened tabs are gone."""
+
+    def test_a_note_does_not_reload_the_list_and_a_filing_repaints_one_row(self):
+        assert "ClientEventBus.on('CONTEXT_UPDATED', bump)" not in REVIEW_JS
+        assert "'PLAN_UPDATED', 'SESSION_STARTED', 'SESSION_RESTORED'" in REVIEW_JS
+        assert 'if (!this.sessions.length) list.innerHTML = \'<div class="loading">' in REVIEW_JS
+        for needle in (
+            "repaintRow(",
+            "repaintFiled(",
+            "showing()",
+            "chipTable()",
+            "searchInput()",
+            "_loadRun",
+        ):
+            assert needle in REVIEW_JS, needle
+        for gone in (
+            'data-tab="detections"',
+            'data-tab="events"',
+            "renderDetectionsTab(",
+            "renderEventsTab(",
+            "alert(",
+        ):
+            assert gone not in REVIEW_JS, gone
+        panel = (WEB / "templates" / "_sessions_panel.html").read_text(encoding="utf-8")
+        assert 'oninput="ReviewApp.searchInput()"' in panel

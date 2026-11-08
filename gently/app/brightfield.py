@@ -33,6 +33,8 @@ from typing import Any
 import numpy as np
 import yaml
 
+from gently.core.file_store import _read_yaml
+
 logger = logging.getLogger(__name__)
 
 FOLDER = ("calibration", "brightfield")
@@ -285,8 +287,8 @@ def read_record(folder: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+        doc = _read_yaml(path)
+    except (OSError, yaml.YAMLError, ValueError):
         return None
     return doc if isinstance(doc, dict) else None
 
@@ -397,3 +399,28 @@ def _write(folder: Path, doc: dict) -> None:
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def overview_frames(store: Any, session_id: str) -> list[dict]:
+    """A session's brightfield overview frames, oldest first: which field,
+    which frame, and the clock it was taken at. One listing for the session
+    detail and for the tools that annotate those frames."""
+    try:
+        recs = store.list_snapshots(session_id, "bf") or []
+    except Exception:
+        recs = []
+    frames: list[dict] = []
+    for rec in recs:
+        fp = rec.get("file_path")
+        if not fp:
+            continue
+        meta = rec.get("metadata") or {}
+        frames.append(
+            {
+                "stem": Path(fp).stem,
+                "frame": meta.get("frame"),
+                "field": meta.get("field"),
+                "captured_at": meta.get("captured_at") or rec.get("captured_at"),
+            }
+        )
+    return frames

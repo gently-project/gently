@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -18,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from gently.core.file_store import _read_yaml as _read_yaml_memo
 
 from .model import Confidence, Learning, Observation
 
@@ -111,10 +114,17 @@ class Note:
     sessions: list[str] = field(default_factory=list)
     threads: list[str] = field(default_factory=list)
     projects: list[str] = field(default_factory=list)  # root campaign ids
+    mentions: list[str] = field(default_factory=list)  # people asked, by id (@ryan)
     basis: list[str] = field(default_factory=list)  # note ids this rests on
     links: list[dict] = field(default_factory=list)  # [{"rel": ..., "to": ...}]
     artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
     superseded_by: str | None = None
+    by: str | None = None  # the person's id when a person wrote it; the agent leaves it None
+    # The notebook is the working set the agent reads and the person curates;
+    # the stream and the inbox are the record. A note set aside (False) stays
+    # in the record and leaves the notebook: the Notebook tab, "ask the
+    # notebook", and the agent's own reading of its findings.
+    in_notebook: bool = True
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -125,6 +135,7 @@ class Note:
         self.sessions = as_tags(self.sessions)
         self.threads = as_tags(self.threads)
         self.projects = as_tags(self.projects)
+        self.mentions = as_tags(self.mentions)
 
 
 def note_to_dict(n: Note) -> dict[str, Any]:
@@ -133,6 +144,7 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "kind": n.kind.value,
         "body": n.body,
         "author": n.author.value,
+        "by": n.by,
         "title": n.title,
         "status": n.status.value,
         "confidence": n.confidence.value if n.confidence else None,
@@ -141,10 +153,12 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "sessions": list(n.sessions),
         "threads": list(n.threads),
         "projects": list(n.projects),
+        "mentions": list(n.mentions),
         "basis": list(n.basis),
         "links": list(n.links),
         "artifacts": list(n.artifacts),
         "superseded_by": n.superseded_by,
+        "in_notebook": bool(n.in_notebook),
         "created_at": n.created_at.isoformat(),
         "updated_at": n.updated_at.isoformat(),
     }
@@ -165,10 +179,13 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         sessions=as_tags(d.get("sessions")),
         threads=as_tags(d.get("threads")),
         projects=as_tags(d.get("projects")),
+        mentions=as_tags(d.get("mentions")),
         basis=list(d.get("basis") or []),
         links=list(d.get("links") or []),
         artifacts=list(d.get("artifacts") or []),
         superseded_by=d.get("superseded_by"),
+        by=d.get("by"),
+        in_notebook=d.get("in_notebook", True) is not False,  # files before the flag: in
         created_at=datetime.fromisoformat(d["created_at"]),
         updated_at=datetime.fromisoformat(d["updated_at"]),
     )
@@ -204,24 +221,53 @@ def learning_to_note(learning: Learning) -> Note:
     )
 
 
+# "@ryan", "@hari-shroff": an id after an @ that does not sit inside a word
+# or an address (x@ryan.org is not an ask).
+MENTION = re.compile(r"(?<![\w@])@([a-z0-9][a-z0-9-]*)", re.IGNORECASE)
+
+
+def mentions_in(text: str, people: Iterable[str]) -> list[str]:
+    """The people a line asks, in order of first mention: each @id in the
+    text that names someone the rig knows. An @word that is nobody stays words."""
+    known = {p.lower(): p for p in people}
+    out: list[str] = []
+    for m in MENTION.finditer(text or ""):
+        pid = known.get(m.group(1).rstrip("-").lower())
+        if pid and pid not in out:
+            out.append(pid)
+    return out
+
+
 class NotebookStore:
     """File-backed store for notebook Notes. One YAML per note under notes/;
     flat pool, rebuildable reverse-indexes (added in Task 3)."""
 
-    _FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads", "project": "projects"}
+    _FACETS = {
+        "strain": "strains",
+        "embryo": "embryos",
+        "thread": "threads",
+        "project": "projects",
+        "person": "mentions",
+        "session": "sessions",
+    }
 
     def __init__(self, notebook_dir: Path):
         self.root = Path(notebook_dir)
         self.notes_dir = self.root / "notes"
         self.index_dir = self.root / "index"
+        # A deleted note's file goes here, whole, so the delete can be undone.
+        self.removed_dir = self.root / "removed"
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
+        self.removed_dir.mkdir(parents=True, exist_ok=True)
         # reverse indexes: facet -> {value: [note_id, ...]}
         self._index: dict[str, dict[str, list[str]]] = {
             "strain": {},
             "embryo": {},
             "thread": {},
             "project": {},
+            "person": {},
+            "session": {},
         }
         self.rebuild_index()
 
@@ -235,7 +281,14 @@ class NotebookStore:
 
     def rebuild_index(self) -> None:
         """Rebuild reverse-indexes by scanning notes/."""
-        self._index = {"strain": {}, "embryo": {}, "thread": {}, "project": {}}
+        self._index = {
+            "strain": {},
+            "embryo": {},
+            "thread": {},
+            "project": {},
+            "person": {},
+            "session": {},
+        }
         for f in sorted(self.notes_dir.glob("*.yaml")):
             data = self._read_yaml(f)
             if data:
@@ -252,6 +305,14 @@ class NotebookStore:
 
     def ids_for_project(self, project: str) -> list[str]:
         return list(self._index["project"].get(project, []))
+
+    def ids_for_person(self, person: str) -> list[str]:
+        """Notes that ask this person: their id is in ``mentions``."""
+        return list(self._index["person"].get(person, []))
+
+    def ids_for_session(self, session: str) -> list[str]:
+        """Notes filed to a session: a session's stream, without a scan of every note."""
+        return list(self._index["session"].get(session, []))
 
     # ---- helpers (mirror FileContextStore conventions) ----
     @staticmethod
@@ -271,14 +332,18 @@ class NotebookStore:
         os.replace(str(tmp), str(path))
 
     def _read_yaml(self, path: Path) -> dict | None:
+        # The store's reader: libyaml, and a note that has not changed is not parsed again.
         try:
-            with open(path, encoding="utf-8") as fh:
-                return yaml.safe_load(fh)
-        except OSError:
+            doc = _read_yaml_memo(path)
+        except (OSError, ValueError):
             return None
+        return doc if isinstance(doc, dict) else None
 
     def _note_path(self, note_id: str) -> Path | None:
         return next(self.notes_dir.glob(f"{note_id}_*.yaml"), None)
+
+    def _removed_path(self, note_id: str) -> Path | None:
+        return next(self.removed_dir.glob(f"{note_id}_*.yaml"), None)
 
     # ---- read/write ----
     def write_note(self, note: Note) -> str:
@@ -290,6 +355,11 @@ class NotebookStore:
         old = self._note_path(note.id)
         if old is not None:
             old.unlink()
+        # A line written under this id is live again: an older removed copy
+        # must not come back over it on undo.
+        removed = self._removed_path(note.id)
+        if removed is not None:
+            removed.unlink()
         self._write_yaml(self.notes_dir / f"{note.id}_{slug}.yaml", note_to_dict(note))
         self._index_note(note)
         return note.id
@@ -301,6 +371,38 @@ class NotebookStore:
         data = self._read_yaml(path)
         return note_from_dict(data) if data else None
 
+    def delete_note(self, note_id: str) -> bool:
+        """Take a note out of the notebook: its file moves whole to removed/
+        and its index entries go, so ``restore_note`` can put it back. For a
+        line a tool rewrites and owns, or a line a person took off the page;
+        a note another note rests on is superseded, not deleted. False when
+        there was no such note."""
+        path = self._note_path(note_id)
+        if path is None:
+            return False
+        os.replace(str(path), str(self.removed_dir / path.name))
+        for buckets in self._index.values():
+            for ids in buckets.values():
+                if note_id in ids:
+                    ids.remove(note_id)
+        return True
+
+    def restore_note(self, note_id: str) -> Note | None:
+        """Undo a delete: the removed file comes back to notes/ and is
+        indexed again. A note that is live already is returned as it is.
+        None when there is nothing under this id to bring back."""
+        live = self.get_note(note_id)
+        if live is not None:
+            return live
+        path = self._removed_path(note_id)
+        if path is None:
+            return None
+        os.replace(str(path), str(self.notes_dir / path.name))
+        note = self.get_note(note_id)
+        if note is not None:
+            self._index_note(note)
+        return note
+
     def query_notes(
         self,
         *,
@@ -311,10 +413,16 @@ class NotebookStore:
         embryo: str | None = None,
         thread: str | None = None,
         project: str | None = None,
+        person: str | None = None,
+        session: str | None = None,
+        in_notebook: bool | None = None,
     ) -> list[Note]:
         """Structural query: narrow by scope via the indexes, then filter by
         kind/author/status. Returned newest-first. (No semantic ranking here —
-        that's a later increment.)"""
+        that's a later increment.)
+
+        ``in_notebook`` None is the record, every note; True is the working
+        set the agent reads; False is what was set aside."""
         # 1. candidate ids — intersect any scope facets given, else all notes
         scope_sets: list[set[str]] = []
         if strain is not None:
@@ -325,6 +433,10 @@ class NotebookStore:
             scope_sets.append(set(self.ids_for_thread(thread)))
         if project is not None:
             scope_sets.append(set(self.ids_for_project(project)))
+        if person is not None:
+            scope_sets.append(set(self.ids_for_person(person)))
+        if session is not None:
+            scope_sets.append(set(self.ids_for_session(session)))
         candidate_ids: set[str] | None = set.intersection(*scope_sets) if scope_sets else None
 
         # 2. load + filter
@@ -344,9 +456,23 @@ class NotebookStore:
                 continue
             if status is not None and n.status != status:
                 continue
+            if in_notebook is not None and n.in_notebook != in_notebook:
+                continue
             results.append(n)
         results.sort(key=lambda n: n.created_at, reverse=True)
         return results
+
+    def set_in_notebook(self, note_id: str, value: bool) -> Note | None:
+        """Set a note aside from the notebook (False), or put it back (True).
+        The file stays where it is, in the record; only the flag changes.
+        None when there is no such note."""
+        note = self.get_note(note_id)
+        if note is None:
+            return None
+        if note.in_notebook != value:
+            note.in_notebook = value
+            self.write_note(note)
+        return note
 
     # ---- links + supersession (append-only history) ----
     def link_notes(self, from_id: str, rel: str, to_id: str) -> None:

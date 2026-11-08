@@ -6,6 +6,12 @@ Each module exposes a ``create_router(server)`` function that returns
 a FastAPI ``APIRouter`` bound to the server instance.
 """
 
+from gently.tools.figure import create_router as create_figure_router
+from gently.tools.pool import create_router as create_pool_router
+from gently.tools.reading import create_router as create_reading_router
+from gently.tools.select import create_router as create_select_router
+from gently.tools.twitch_hatch import create_router as create_twitch_hatch_router
+
 from .agent_ws import create_router as create_agent_ws_router
 from .auth_routes import create_router as create_auth_router
 from .bf import create_router as create_bf_router
@@ -18,8 +24,10 @@ from .data import create_router as create_data_router
 from .device_layer import create_router as create_device_layer_router
 from .experiments import create_router as create_experiments_router
 from .images import create_router as create_images_router
+from .inbox import create_router as create_inbox_router
 from .logs import create_router as create_logs_router
 from .notebook import create_router as create_notebook_router
+from .notebook_pages import create_router as create_notebook_pages_router
 from .operation_plan import create_router as create_operation_plan_router
 from .pages import create_router as create_pages_router
 from .replay import create_router as create_replay_router
@@ -52,6 +60,8 @@ def register_all_routes(server):
         create_chat_router,
         create_context_router,
         create_notebook_router,
+        create_notebook_pages_router,
+        create_inbox_router,
         create_temperature_router,
         create_operation_plan_router,
         create_roles_router,
@@ -63,6 +73,11 @@ def register_all_routes(server):
         create_reveal_router,
         create_ui_prefs_router,
         create_search_router,
+        create_figure_router,
+        create_pool_router,
+        create_reading_router,
+        create_select_router,
+        create_twitch_hatch_router,
     ):
         router = factory(server)
         server.app.include_router(router)

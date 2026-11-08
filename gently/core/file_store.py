@@ -55,6 +55,7 @@ Usage::
 """
 
 import base64
+import copy
 import json
 import logging
 import os
@@ -107,13 +108,15 @@ def _validate_path_component(value: str, label: str) -> str:
 
 
 def _safe_child_path(parent: Path, component: str, label: str) -> Path:
-    """Return parent/component after validating it stays below parent."""
+    """Return parent/component after validating it stays below parent.
+
+    The component is one plain name (no separators, not a dot name), so the
+    only way out of ``parent`` is a symlink planted under that name. One
+    lstat catches it; the two resolve() walks this did before cost the
+    Sessions list a tenth of its time."""
     component = _validate_path_component(component, label)
-    base = parent.resolve()
-    child = (parent / component).resolve()
-    try:
-        child.relative_to(base)
-    except ValueError:
+    child = parent / component
+    if os.path.islink(child):
         raise ValueError(f"{label} escapes storage root: {component!r}") from None
     return child
 
@@ -204,6 +207,17 @@ def _write_yaml(path: Path, data: Any) -> None:
         raise
 
 
+# libyaml when it is installed: the same safe constructor, ten times the parse speed.
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+# path -> (mtime_ns, size, document). A file that has not changed since it
+# was last read is not opened or parsed again; the Sessions list read every
+# session.yaml twice per call and that was most of its time. Callers get a
+# copy, so what they do to the document stays theirs.
+# ponytail: unbounded; a rig holds tens of thousands of small yaml files at most.
+_YAML_MEMO: dict[str, tuple[int, int, Any]] = {}
+
+
 def _read_yaml(path: Path) -> Any:
     """Read a YAML file.  Returns None if missing or empty.
 
@@ -213,12 +227,18 @@ def _read_yaml(path: Path) -> Any:
     unsafe_load them, since a YAML file on disk is not a trust boundary
     (it may be synced, imported, or attacker-supplied).
     """
-    if not path.exists():
+    try:
+        st = os.stat(path)
+    except OSError:
         return None
+    key = str(path)
+    hit = _YAML_MEMO.get(key)
+    if hit is not None and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return copy.deepcopy(hit[2])
     with open(path, encoding="utf-8") as f:
         text = f.read()
     try:
-        return yaml.safe_load(text)
+        data = yaml.load(text, Loader=_LOADER)  # noqa: S506 - a safe loader, chosen above
     except yaml.constructor.ConstructorError as err:
         marker = str(err)
         if "python/object" not in marker and "numpy" not in marker:
@@ -227,6 +247,8 @@ def _read_yaml(path: Path) -> Any:
             f"Refusing to load unsafe YAML tags from {path}. "
             "Migrate this file to safe YAML before opening it in Gently."
         ) from err
+    _YAML_MEMO[key] = (st.st_mtime_ns, st.st_size, data)
+    return copy.deepcopy(data)
 
 
 def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
@@ -453,6 +475,9 @@ class FileStore:
     def _projection_filename(self, timepoint: int) -> str:
         return f"t{timepoint:04d}.jpg"
 
+    def _projection_u16_filename(self, timepoint: int) -> str:
+        return f"t{timepoint:04d}.tif"
+
     def _generate_projection(
         self,
         session_id: str,
@@ -461,11 +486,14 @@ class FileStore:
         volume: np.ndarray,
         side: str = "A",
     ) -> Path | None:
-        """Generate JPEG projection file from volume data."""
-        from .imaging import generate_jpeg_projection
+        """Write the projection twice: the JPEG the thumbnails show, and the
+        same picture in the camera's counts (a uint16 TIFF, gently.core.imaging)
+        for the viewer that draws its own contrast."""
+        from .imaging import generate_jpeg_projection, generate_u16_projection
 
         proj_dir = self._projection_dir(session_id, embryo_id, side)
         proj_path = proj_dir / self._projection_filename(timepoint)
+        generate_u16_projection(volume, proj_dir / self._projection_u16_filename(timepoint))
         return generate_jpeg_projection(volume, proj_path)
 
     # ==================================================================
@@ -529,15 +557,18 @@ class FileStore:
         self, *, project_id: str | None = None, unfiled: bool = False
     ) -> list[SessionInfo]:
         """Return all sessions ordered by last_active descending. With
-        ``project_id`` only that project's; with ``unfiled`` only those in none."""
+        ``project_id`` only those linked to it, in any role; with ``unfiled``
+        only those linked to none. Each carries its links as ``projects``."""
         sessions = []
         for sid in self._index:
             info = self.get_session(sid)
             if info is None:
                 continue
-            if project_id is not None and info.get("project_id") != project_id:
+            links = self.links_of(info)
+            info["projects"] = links
+            if project_id is not None and not any(x.get("id") == project_id for x in links):
                 continue
-            if unfiled and info.get("project_id"):
+            if unfiled and links:
                 continue
             sessions.append(info)
         sessions.sort(key=lambda s: s.get("last_active", ""), reverse=True)
@@ -590,9 +621,33 @@ class FileStore:
         _write_yaml(yaml_path, data)
         return data
 
-    def set_session_project(self, session_id: str, project_id: str | None) -> SessionInfo | None:
-        """File a session under a project (a root campaign id), or under none.
-        The one truth of membership; everything else reads it from here."""
+    # ------------------------------------------------------------------
+    # Membership: the one record of which projects a session informs
+    # ------------------------------------------------------------------
+    # ``projects:`` in session.yaml is a list of links, each {id, phase, role,
+    # by, at}. A session informs several questions and informs them in
+    # different roles, so the record is many-to-many with a role per link.
+    # ``project_id`` is kept beside it as the home, the first link, for the
+    # readers that take one id; it is rewritten from the list by the same
+    # writers and never written on its own. A session.yaml written before the
+    # list existed reads as one link to its project_id.
+
+    @staticmethod
+    def links_of(data: Mapping[str, Any] | None) -> list[dict]:
+        """The links a session.yaml holds, with the old scalar read as one."""
+        if not data:
+            return []
+        if "projects" in data:
+            return [dict(x) for x in (data.get("projects") or []) if isinstance(x, dict)]
+        pid = data.get("project_id")
+        if not pid:
+            return []
+        return [{"id": pid, "phase": None, "role": None, "by": None, "at": data.get("created_at")}]
+
+    def session_links(self, session_id: str) -> list[dict]:
+        return self.links_of(self.get_session(session_id))
+
+    def _write_links(self, session_id: str, links: list[dict]) -> SessionInfo | None:
         sd = self._session_dir(session_id)
         if sd is None or not sd.exists():
             return None
@@ -600,7 +655,112 @@ class FileStore:
         data = _read_yaml(yaml_path)
         if data is None:
             return None
-        data["project_id"] = project_id or None
+        data["projects"] = links
+        data["project_id"] = links[0]["id"] if links else None
+        _write_yaml(yaml_path, data)
+        return data
+
+    def link_session(
+        self,
+        session_id: str,
+        project_id: str,
+        *,
+        phase: str | None = None,
+        role: str | None = None,
+        by: str | None = None,
+        home: bool = False,
+    ) -> list[dict]:
+        """Link a session to a project, once per project: a second call with
+        the same project updates its phase or role when given and keeps the
+        rest. ``home`` moves the link to the front, which is what the single
+        ``project_id`` reads. Returns the links as written."""
+        links = self.session_links(session_id)
+        found = next((x for x in links if x.get("id") == project_id), None)
+        if found is None:
+            found = {
+                "id": project_id,
+                "phase": phase,
+                "role": role,
+                "by": by,
+                "at": _now(),
+            }
+            links.append(found)
+        else:
+            if phase is not None:
+                found["phase"] = phase
+            if role is not None:
+                found["role"] = role
+        if home:
+            links = [found] + [x for x in links if x is not found]
+        self._write_links(session_id, links)
+        return links
+
+    def unlink_session(self, session_id: str, project_id: str | None = None) -> list[dict]:
+        """Take a session out of one project, or out of all of them. Writes an
+        explicit empty list, which is how a deliberate unfiling differs from a
+        session that was never filed."""
+        links = self.session_links(session_id)
+        links = [] if project_id is None else [x for x in links if x.get("id") != project_id]
+        self._write_links(session_id, links)
+        return links
+
+    def add_session_operator(self, session_id: str, operator_id: str | None) -> list[str]:
+        """Who has worked this session: ids, in order of first appearance.
+        Stamped when a session is opened, resumed or started at the gate."""
+        if not operator_id:
+            return self.session_operators(session_id)
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return []
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return []
+        ops = [str(x) for x in (data.get("operators") or [])]
+        if operator_id not in ops:
+            ops.append(operator_id)
+            data["operators"] = ops
+            _write_yaml(yaml_path, data)
+        return ops
+
+    def session_operators(self, session_id: str) -> list[str]:
+        data: Mapping[str, Any] = self.get_session(session_id) or {}
+        ops = data.get("operators") or []
+        return [str(x) for x in ops] if isinstance(ops, list) else []
+
+    def set_session_project(self, session_id: str, project_id: str | None) -> SessionInfo | None:
+        """The old scalar door, kept for its callers: make ``project_id`` the
+        home, or clear every link when None."""
+        if project_id:
+            self.link_session(session_id, project_id, home=True)
+        else:
+            self.unlink_session(session_id)
+        return self.get_session(session_id)
+
+    def note_session_edit(self, session_id: str, by: str | None, what: str) -> None:
+        """A person changed the session's own record: name, description,
+        tags or tools. ``edited: {by, at, what}`` says who did it last."""
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return
+        data["edited"] = {"by": by, "at": _now(), "what": what}
+        _write_yaml(yaml_path, data)
+
+    def set_session_tags(self, session_id: str, tags: list[str]) -> SessionInfo | None:
+        """Tag a session: short words in its ``session.yaml`` that a selector
+        can pool by (``control``, ``25C``). Replaces the whole list."""
+        sd = self._session_dir(session_id)
+        if sd is None or not sd.exists():
+            return None
+        yaml_path = sd / "session.yaml"
+        data = _read_yaml(yaml_path)
+        if data is None:
+            return None
+        data["tags"] = sorted({str(t).strip() for t in tags if str(t).strip()})
         _write_yaml(yaml_path, data)
         return data
 
@@ -1283,24 +1443,64 @@ class FileStore:
             return proj_path
         return None
 
+    def get_projection_u16_path(
+        self, session_id: str, embryo_id: str, timepoint: int
+    ) -> Path | None:
+        """Absolute path to the counts projection (uint16 TIFF), or None: an
+        older session has only the JPEG."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        path = (
+            self._embryo_dir_for_session(sd, embryo_id)
+            / "projections"
+            / self._projection_u16_filename(timepoint)
+        )
+        return path if path.exists() else None
+
+    def projection_timepoints_and_latest(
+        self, session_id: str, embryo_id: str
+    ) -> tuple[list[int], float | None]:
+        """The timepoints with a projection, sorted, and the newest one's
+        mtime: one directory scan, no Path per file, one stat at the end."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return [], None
+        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
+        tps: list[int] = []
+        newest: os.DirEntry | None = None
+        best = -1
+        try:
+            with os.scandir(proj_dir) as it:
+                for entry in it:
+                    name = entry.name
+                    if not (name.startswith("t") and name.endswith(".jpg")):
+                        continue
+                    digits = name[1:-4]
+                    if not digits.isdigit():
+                        continue
+                    tp = int(digits)
+                    tps.append(tp)
+                    if tp > best:
+                        best, newest = tp, entry
+        except FileNotFoundError:
+            return [], None
+        tps.sort()
+        latest: float | None = None
+        if newest is not None:
+            try:
+                latest = newest.stat().st_mtime
+            except OSError:
+                latest = None
+        return tps, latest
+
     def list_projection_timepoints(self, session_id: str, embryo_id: str) -> list[int]:
-        """Cheaply list projection timepoints (glob only, no PIL/meta reads).
+        """Cheaply list projection timepoints (names only, no PIL/meta reads).
 
         Used to rehydrate the viz image store on resume without paying the
         per-file cost of list_projections().
         """
-        sd = self._session_dir(session_id)
-        if sd is None:
-            return []
-        proj_dir = self._embryo_dir_for_session(sd, embryo_id) / "projections"
-        if not proj_dir.exists():
-            return []
-        tps: list[int] = []
-        for jpg in proj_dir.glob("t*.jpg"):
-            m = re.match(r"t(\d+)\.jpg$", jpg.name)
-            if m:
-                tps.append(int(m.group(1)))
-        return sorted(tps)
+        return self.projection_timepoints_and_latest(session_id, embryo_id)[0]
 
     def get_projection_b64(self, session_id: str, embryo_id: str, timepoint: int) -> str | None:
         """Return base64-encoded JPEG projection, or None."""

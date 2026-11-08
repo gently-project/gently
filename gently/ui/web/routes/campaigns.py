@@ -85,7 +85,15 @@ def create_router(server) -> APIRouter:
         agent = getattr(bridge, "agent", None) if bridge is not None else None
         return getattr(agent, "session_id", None) if agent is not None else None
 
-    def _member_sessions(root_id: str) -> list[dict]:
+    def _member_sessions(root_id: str, sessions: list[dict] | None = None) -> list[dict]:
+        """A project's sessions: picked from ``sessions`` when the caller has
+        walked them already, else one walk for this project."""
+        if sessions is not None:
+            return [
+                s
+                for s in sessions
+                if any(x.get("id") == root_id for x in (s.get("projects") or []))
+            ]
         store = _gently_store()
         if store is None:
             return []
@@ -94,10 +102,10 @@ def create_router(server) -> APIRouter:
         except Exception:
             return []
 
-    def _project_summary(cs, root_id: str) -> dict:
+    def _project_summary(cs, root_id: str, sessions: list[dict] | None = None) -> dict:
         """What Home and the project list say about a project: how many sessions,
         whether one is live, when the last ran, what waits on a person."""
-        sessions = _member_sessions(root_id)
+        sessions = _member_sessions(root_id, sessions)
         active = _active_session_id()
         out = {
             "sessions": len(sessions),
@@ -127,15 +135,27 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/campaigns")
     async def list_campaigns():
-        """List all campaigns as a tree."""
+        """List all campaigns as a tree. One walk of the sessions serves every
+        project's count, in a worker thread: this used to walk them once per
+        project on the event loop, beside the Sessions list."""
         cs = _get_store()
-        roots = cs.get_root_campaigns()
-        trees = []
-        for root in roots:
-            tree = _build_campaign_tree(cs, root.id)
-            tree["project"] = _project_summary(cs, root.id)
-            trees.append(tree)
-        return {"campaigns": trees}
+
+        def build() -> list[dict]:
+            store = _gently_store()
+            try:
+                sessions = store.list_sessions() if store is not None else []
+            except Exception:
+                sessions = []
+            trees: list[dict] = []
+            for root in cs.get_root_campaigns():
+                tree = _build_campaign_tree(cs, root.id)
+                if tree is None:
+                    continue
+                tree["project"] = _project_summary(cs, root.id, sessions)
+                trees.append(tree)
+            return trees
+
+        return {"campaigns": await asyncio.to_thread(build)}
 
     # ------------------------------------------------------------------
     # Projects: a root campaign is a project. These are the writes a person
@@ -191,6 +211,9 @@ def create_router(server) -> APIRouter:
         if not (body.get("key") or body.get("title")):
             raise HTTPException(status_code=400, detail="key or title required")
         as_strain = bool(body.get("as_strain")) or body.get("files_as") == "strain"
+        from gently.ui.web.auth import current_username
+
+        body["added_by"] = current_username(request) or body.get("added_by") or "human"
         entry = cs.add_campaign_reference(_root(cs, campaign), body, as_strain=as_strain)
         return {"ok": True, "entry": entry, "as_strain": as_strain}
 
@@ -753,7 +776,7 @@ def create_router(server) -> APIRouter:
     async def link_session_to_item(campaign_id: str, item_id: str, request: Request):
         """Link a session to a plan item (appends) and record it against the campaign."""
         cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
+        _resolve(cs, campaign_id)
         item = cs.get_plan_item(item_id)
         if not item:
             raise HTTPException(status_code=404, detail="Plan item not found")
@@ -763,8 +786,12 @@ def create_router(server) -> APIRouter:
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id required")
 
-        cs.link_plan_item_session(item_id, session_id)
-        cs.link_session_campaign(session_id, campaign.id)
+        from gently.app.filing import file_session_under
+        from gently.ui.web.auth import current_username
+
+        file_session_under(
+            _gently_store(), cs, session_id, item.campaign_id, item_id, by=current_username(request)
+        )
 
         # Re-fetch item so session_ids reflects the just-added link; then filter
         # exactly as get_item_detail does — POST and GET return the same scope.

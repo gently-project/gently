@@ -177,6 +177,10 @@ class VisualizationServer(Service):
 
         # Organized image storage (unlimited)
         self.store = ImageStore()
+        # The counts behind the recent pushed images (gently.core.u16.CountsKeep)
+        from gently.core.u16 import CountsKeep
+
+        self._counts = CountsKeep()
 
         # Timelapse state tracker for client sync
         self.timelapse_tracker = TimelapseStateTracker()
@@ -214,6 +218,17 @@ class VisualizationServer(Service):
                 response.headers["Cache-Control"] = "no-cache"
             return response
 
+        # Every control request a person makes is one line in the live
+        # session's actions.jsonl: when, who, what. One place, every knob.
+        from gently.ui.web.actions import is_action, record_action
+
+        @self.app.middleware("http")
+        async def _record_actions(request, call_next):
+            response = await call_next(request)
+            if is_action(request.method, request.url.path):
+                record_action(self, request, response.status_code)
+            return response
+
         # Add CORS middleware
         self.app.add_middleware(
             CORSMiddleware,
@@ -239,6 +254,15 @@ class VisualizationServer(Service):
     def set_context_store(self, context_store) -> None:
         """Set the FileContextStore for campaign/plan data access."""
         self.context_store = context_store
+        # People named on sessions' links are written into config/operators.yaml
+        # once, here, so listing people never walks the sessions on a request.
+        if self.gently_store is not None:
+            try:
+                from gently.ui.web.operators import remember_people_on_links
+
+                remember_people_on_links(self.gently_store)
+            except Exception:
+                logging.getLogger(__name__).debug("people on links not remembered", exc_info=True)
         # Sessions filed before the project field existed get their home from
         # the plan links, once; nothing happens for sessions with no link.
         if self.gently_store is not None and context_store is not None:
@@ -252,6 +276,19 @@ class VisualizationServer(Service):
                     )
             except Exception:
                 logging.getLogger(__name__).debug("project backfill failed", exc_info=True)
+            # Marks made before the tool wrote a stream line get theirs, once.
+            try:
+                from gently.tools.twitch_hatch import backfill_notes
+
+                noted = backfill_notes(self.gently_store, context_store)
+                if noted:
+                    logging.getLogger(__name__).info(
+                        "Wrote the twitching-to-hatching line for %d session(s) marked "
+                        "before it existed",
+                        noted,
+                    )
+            except Exception:
+                logging.getLogger(__name__).debug("marks backfill failed", exc_info=True)
 
     def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> str | None:
         """Resolve volume file path from timelapse tracker or FileStore."""
@@ -321,6 +358,9 @@ class VisualizationServer(Service):
         if self.gently_store is None or not session_id:
             return 0
         self.store = ImageStore()  # drop the previous session's images
+        counts = getattr(self, "_counts", None)  # tests build this server from a bare namespace
+        if counts is not None:
+            counts.clear()
         added = 0
         try:
             embryos = self.gently_store.list_embryos(session_id) or []
@@ -587,6 +627,18 @@ class VisualizationServer(Service):
             Additional metadata (should include embryo_id for organization)
         """
         image_data = self._array_to_image_data(array, uid, data_type, metadata)
+        # Keep the numbers behind the picture, for the viewer that draws its
+        # own contrast (gently.core.u16); a colour rendering has none.
+        try:
+            from gently.core.imaging import pushed_counts
+
+            counts = pushed_counts(array)
+        except Exception as exc:
+            logger.debug("no counts kept for %s: %s", uid, exc)
+            counts = None
+        if counts is not None:
+            self._counts.put(uid, counts[0], counts[1])
+            image_data.has_counts = uid in self._counts
 
         # Add to organized storage
         self.store.add_image(image_data)
@@ -597,6 +649,10 @@ class VisualizationServer(Service):
         logger.debug(
             f"Pushed image {uid} ({data_type}) to {len(self.manager.active_connections)} clients"
         )
+
+    def counts_for(self, uid: str) -> tuple[np.ndarray, dict] | None:
+        """The counts kept for a pushed image, or None once they are gone."""
+        return self._counts.get(uid)
 
     async def start_marking_session(
         self,

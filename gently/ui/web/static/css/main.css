@@ -347,6 +347,78 @@ body {
     box-shadow: 0 0 0 2px var(--bg-dark);
 }
 
+/* You, by name, beside your avatar: who is on this view. Not a control. */
+.presence-you {
+    display: inline-flex; align-items: center; gap: 7px;
+    font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text);
+    background: none; border: 1px solid transparent; border-radius: 999px;
+    padding: 2px 10px 2px 2px; cursor: default;
+}
+.presence-you-name { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presence-container { position: relative; }
+.presence-pop {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; min-width: 280px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25); padding: 8px; display: grid; gap: 4px;
+}
+.presence-pop-title { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); padding: 2px 6px 6px; }
+.presence-pop-list { display: grid; gap: 2px; }
+.presence-pop-item {
+    display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; color: var(--text);
+    background: none; border: 0; border-radius: 7px; padding: 6px 8px; cursor: pointer; text-decoration: none;
+}
+.presence-pop-item:hover { background: var(--bg-hover); }
+
+/* For you: the asks that name you. Your name is the door; the unopened count
+   is a badge on it, gone when there is nothing unopened. */
+.presence-you.is-inbox { cursor: pointer; }
+.presence-you.is-inbox:hover { border-color: var(--border); background: var(--bg-hover); }
+.presence-you.is-inbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inbox-pill {
+    font: inherit; font-size: 10.5px; font-weight: 700; line-height: 17px; min-width: 17px; height: 17px; padding: 0 5px;
+    border-radius: 999px; background: var(--accent); color: #fff; text-align: center; margin-left: 2px;
+}
+.inbox-pill.is-empty { display: none; }
+.inbox-pop { min-width: 340px; max-width: 440px; max-height: 70vh; overflow: auto; }
+/* One list in time order. Unopened: a dot before the author and a heavier
+   line. Opened: the dot is gone and the line is plain, in its place. Answered
+   says so in a small tag. */
+.inbox-item { display: grid; gap: 4px; padding: 8px 10px 8px 8px; }
+.inbox-item .rd-head { gap: 7px; }
+.inbox-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: 0 0 7px; }
+.inbox-item.is-seen .inbox-dot { background: transparent; }
+.inbox-item.is-new .inbox-line { font-weight: 600; color: var(--text); }
+.inbox-item.is-seen .inbox-line { font-weight: 400; color: var(--text-muted); }
+.inbox-item.is-seen .rd-who { opacity: .8; }
+.inbox-count { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--text-muted); margin-left: 6px; }
+.inbox-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin: 0 2px 4px; }
+.inbox-tab { font: inherit; font-size: 12.5px; font-weight: 500; color: var(--text-muted); background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: 6px 10px 7px; cursor: pointer; }
+.inbox-tab:hover { color: var(--text); }
+.inbox-tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.inbox-tab-n { font-weight: 700; font-size: 11px; color: #fff; background: var(--accent); border-radius: 999px; padding: 0 6px; margin-left: 4px; }
+.inbox-tab:not(.on) .inbox-tab-n { background: var(--bg-hover); color: var(--text-muted); }
+.inbox-list { display: grid; gap: 2px; }
+.inbox-line { font-size: 13px; line-height: 1.4; white-space: normal; padding-left: 42px; }
+.inbox-item.is-mine .inbox-line { padding-left: 0; }
+.inbox-by-you { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+.inbox-item.is-mine { border-left-color: transparent; }
+.inbox-state { font-size: 11px; color: var(--text-muted); }
+.inbox-state.is-answered { color: var(--accent-green, var(--text-muted)); }
+.inbox-none { font-size: 12px; color: var(--text-muted); padding: 2px 8px 6px; }
+
+/* @ while typing: the rig's people, under the box */
+.mention-pop {
+    position: absolute; top: calc(100% - 2px); left: 14px; z-index: 70; display: grid; gap: 2px; padding: 6px;
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+.mention-opt { font: inherit; text-align: left; background: none; border: 0; border-radius: 7px; padding: 4px 8px; cursor: pointer; }
+.mention-opt.on, .mention-opt:hover { background: var(--bg-hover); }
+.presence-pop-item.is-current { font-weight: 600; color: var(--accent); }
+.presence-pop-box {
+    font: inherit; font-size: 13px; padding: 6px 8px; margin-top: 4px; width: 100%; box-sizing: border-box;
+    color: var(--text); background: var(--bg-dark); border: 1px solid var(--border); border-radius: 7px;
+}
+
 .presence-overflow {
     width: 28px;
     height: 28px;
@@ -1617,6 +1689,12 @@ a.tab-link.active {
 .cal-spim-thumb.has-frame {
     opacity: 1;
 }
+/* The thumb as counts: the viewer in the thumb's box. */
+.cal-spim-pix { display: inline-block; vertical-align: middle; overflow: hidden; }
+.cal-spim-pix[hidden] { display: none; }
+.cal-spim-pix .u16-stage { display: block; width: 100%; height: 100%; }
+.cal-spim-pix .u16-c { width: 100%; height: 100%; max-width: none; object-fit: contain; border: 0; border-radius: 0; }
+.cal-spim-pix .u16-read { left: 2px; bottom: 2px; font-size: 8px; padding: 0 3px; }
 
 /* When a live frame is active, let the SPIM cell breathe a bit so the
    thumb and meta have room. */
@@ -2319,6 +2397,17 @@ a.tab-link.active {
 .lightbox-image-wrapper img:active {
     cursor: grabbing;
 }
+
+/* The frame as its numbers: the uint16 viewer in the image's place, sized
+   as the <img> is, its bar at the foot of the picture. */
+.lightbox-pix { max-width: 100%; max-height: 100%; display: block; transition: transform 0.15s ease; cursor: grab; }
+.lightbox-pix[hidden] { display: none; }
+.lightbox-pix .u16-stage { display: block; line-height: 0; }
+.lightbox-pix .u16-c { max-width: 100%; max-height: calc(100vh - 200px); width: auto; height: auto; border: 0; border-radius: 4px; }
+.lightbox-pix-bar { position: absolute; left: 16px; right: 16px; bottom: 46px; display: flex; justify-content: center; pointer-events: none; }  /* above the position counter */
+.lightbox-pix-bar[hidden] { display: none; }
+.lightbox-pix-bar .u16-bar { pointer-events: auto; background: rgba(0, 0, 0, 0.6); padding: 6px 12px; border-radius: 8px; color: #e7eef4; }
+.lightbox-pix-bar .u16-l output, .lightbox-pix-bar .u16-auto { color: #e7eef4; background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.25); }
 
 /* Floating position counter on image */
 .lightbox-position {
@@ -3218,6 +3307,11 @@ kbd {
     object-fit: contain;
     border-radius: 4px;
 }
+/* The three-view card as counts: the viewer sized as the picture was, its bar under it. */
+.projection-card-image .pv-pix { max-width: 100%; }
+.projection-card-image .pv-pix .u16-c { max-width: 100%; max-height: 350px; width: auto; height: auto; border: 0; }
+.projection-card-image .pv-pix .u16-bar { color: #c9d1d9; }
+.projection-card-image .pv-pix .u16-l output, .projection-card-image .pv-pix .u16-auto { color: #e7eef4; background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.25); }
 
 .projection-card-desc {
     padding: 0.75rem 1rem;
@@ -4518,6 +4612,18 @@ kbd {
 .tile-dot.error { background: var(--accent-red); border-radius: 1px; transform: rotate(45deg); }
 .tile-thumb { position: relative; display: block; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: var(--img-bg); cursor: ew-resize; }
 .tile-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* A thumbnail as counts: the viewer fills the tile the way the <img> does,
+   with its readout small in the corner. */
+.tile-thumb .u16, .embryo-thumb .u16, .home-image .u16 { display: block; width: 100%; height: 100%; }
+.tile-thumb .u16-stage, .embryo-thumb .u16-stage, .home-image .u16-stage { display: block; width: 100%; height: 100%; }
+.tile-thumb .u16-c, .embryo-thumb .u16-c, .home-image .u16-c { width: 100%; height: 100%; max-width: none; object-fit: cover; border: 0; border-radius: 0; }
+.tile-thumb .u16-read, .embryo-thumb .u16-read, .home-image .u16-read { left: 3px; bottom: 3px; font-size: 9px; padding: 1px 4px; }
+/* A pushed image as counts in the Gallery: the viewer where the <img> was. */
+.gallery-img.u16, .gallery-tab-thumb.u16, .cal-detail-img.u16, .recent-strip-item .u16 { display: block; }
+.gallery-img.u16 .u16-stage, .gallery-tab-thumb.u16 .u16-stage, .cal-detail-img.u16 .u16-stage, .recent-strip-item .u16 .u16-stage { display: block; width: 100%; height: 100%; }
+.gallery-img.u16 .u16-c, .gallery-tab-thumb.u16 .u16-c, .recent-strip-item .u16 .u16-c { width: 100%; height: 100%; max-width: none; object-fit: cover; border: 0; border-radius: 0; }
+.cal-detail-img.u16 .u16-c { width: 100%; height: auto; max-width: none; object-fit: contain; border: 0; }
+.gallery-img.u16 .u16-read, .gallery-tab-thumb.u16 .u16-read, .recent-strip-item .u16 .u16-read { left: 3px; bottom: 3px; font-size: 9px; padding: 1px 4px; }
 .tile-thumb-cap { position: absolute; right: 3px; bottom: 3px; font: 9px 'JetBrains Mono', ui-monospace, monospace; color: #e7eef4; background: rgba(0,0,0,.55); padding: 1px 4px; border-radius: 3px; }
 .tile-thumb-empty { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 0.62rem; color: var(--text-muted); text-align: center; line-height: 1.2; }
 .embryo-tile .stage-bar { display: flex; height: 6px; border-radius: 4px; overflow: hidden; gap: 1px; background: var(--bg-card); }
@@ -11817,6 +11923,22 @@ a.settings-btn { display: inline-block; text-decoration: none; }
 .ov-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
 .ov-img-b { pointer-events: none; }
 .ov-img[hidden] { display: none; }
+/* The frame as its numbers: the uint16 viewer's canvas in the stage box, the
+   <img> under it for the frames that have no counts, Compare, and the hover
+   preview; its bar sits in the side column. */
+.ov-pix { position: absolute; inset: 0; display: none; }
+.ov-pix.u16 { display: none; }
+.ov-stage.has-pixels .ov-pix, .ov-stage.has-pixels .ov-pix.u16 { display: block; }
+.ov-stage.has-pixels .ov-img:not(.ov-img-b) { display: none; }
+.ov-pix .u16-stage { display: block; width: 100%; height: 100%; }
+.ov-pix .u16-c { width: 100%; height: 100%; max-width: none; object-fit: contain; border: 0; border-radius: 0; }
+.ov-display[hidden] { display: none; }
+.ov-display .u16-bar { gap: 8px 12px; }
+.ov-display .u16-l input[type="range"] { width: 90px; }
+.ov-z { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+.ov-z[hidden] { display: none; }
+.ov-z input[type="range"] { flex: 1 1 auto; min-width: 80px; accent-color: var(--accent); }
+.ov-z output { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 10ch; }
 .ov-divider { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid var(--accent); pointer-events: none; }
 .ov-divider span { position: absolute; top: 10px; left: -14px; width: 28px; height: 20px; border-radius: 10px; background: var(--accent); color: var(--bg-dark); font: 600 10px/20px system-ui, sans-serif; text-align: center; }
 .ov-divider span::before { content: '⇔'; }
@@ -11866,3 +11988,51 @@ button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset
 .home-tag-unfiled { color: var(--text-muted); border: 1px dashed var(--text-muted); }
 .home-bar { display: inline-block; width: 56px; height: 5px; border-radius: 3px; background: var(--bg-hover); overflow: hidden; vertical-align: middle; margin-right: 6px; }
 .home-bar i { display: block; height: 100%; background: var(--accent); }
+
+/* ---- who: a person on a record, in their colour ---- */
+.who-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.who-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--who, #8b949e); display: inline-block; }
+.who-when { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+/* A line someone wrote: who on top, in their colour, the words under it.
+   The author is the avatar and the name; a person named inside the words is
+   an @name in that person's colour and nothing more, so the two never read
+   as the same thing. One rule set for the stream, the session and the inbox. */
+.rd-head { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.rd-avatar {
+    width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font: 700 10px/1 'Inter Tight', system-ui, sans-serif; color: #fff; background: var(--who, #8b949e);
+}
+.rd-avatar.is-agent { background: transparent; color: var(--accent-purple); border: 1.5px solid var(--accent-purple); }
+.rd-avatar.is-nobody { background: var(--bg-hover); color: var(--text-muted); }
+.rd-who { font-size: 12.5px; font-weight: 650; color: var(--who, var(--text)); white-space: nowrap; }
+.rd-who.is-agent { color: var(--accent-purple); }
+.rd-who.is-nobody { color: var(--text-muted); font-weight: 500; }
+.rd-when { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.rd-place { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+.rd-mention { font-weight: 650; color: var(--who, var(--accent)); }
+.rd-text { font-size: 13.5px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.rd-text b:not(.rd-mention) { font-weight: 600; }
+
+/* U16View: pixels as they are. The canvas scales to its box; the bar holds
+   the contrast; the readout follows the cursor. */
+.u16 { display: grid; gap: 6px; min-width: 0; }
+.u16-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.u16-c { display: block; max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border); background: var(--img-bg, #000); image-rendering: auto; }
+.u16-read { position: absolute; left: 8px; bottom: 8px; font: 11.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e7eef4; background: rgba(0,0,0,.6); padding: 2px 7px; border-radius: 5px; pointer-events: none; }
+.u16-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-muted); }
+.u16-bar.is-hidden { display: none; }
+.u16-l { display: inline-flex; align-items: center; gap: 6px; }
+.u16-l input[type="range"] { width: 120px; accent-color: var(--accent); }
+.u16-l output { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; min-width: 4.5ch; text-align: right; color: var(--text); }
+.u16-auto { font: inherit; font-size: 11.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; }
+.u16-auto:hover { border-color: var(--accent); color: var(--accent); }
+.u16-info { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-left: auto; }
+.u16-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.72); display: grid; grid-template-rows: auto 1fr; padding: 18px 24px; }
+.u16-overlay-head { display: flex; align-items: center; justify-content: space-between; color: #e7eef4; font-size: 13px; padding: 0 2px 8px; }
+.u16-overlay-close { font: inherit; font-size: 20px; line-height: 1; color: #e7eef4; background: none; border: 0; cursor: pointer; padding: 2px 8px; }
+.u16-overlay-body { min-height: 0; overflow: auto; }
+.u16-overlay-body .u16-c { max-height: calc(100vh - 120px); width: auto; }
+.u16-overlay-body .u16-bar { color: #c9d1d9; }
+.u16-overlay-body .u16-l output, .u16-overlay-body .u16-auto { color: #e7eef4; background: rgba(255,255,255,.06); }

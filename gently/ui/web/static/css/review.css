@@ -86,44 +86,46 @@
     padding: 12px;
 }
 
+/* A row is quiet until it is the one: hover lifts it a shade, the open
+   session carries a bar in the accent and its name in the accent, and the
+   text keeps its colours throughout. The row's buttons show when they can
+   be used, on hover or on the open row, and keep their space otherwise. */
 .session-item {
-    padding: 14px 14px 12px;
+    content-visibility: auto; contain-intrinsic-size: auto 120px;   /* rows off screen are not laid out */
+    position: relative;
+    padding: 12px 14px 10px 16px;
     background: transparent;
-    border-radius: 10px;
+    border-radius: 8px;
     cursor: pointer;
-    margin-bottom: 10px;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
+    margin-bottom: 6px;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
     border: 1px solid var(--border);
 }
-
-.session-item:hover {
-    background: var(--accent);
-    color: white;
+.session-item::before {
+    content: ''; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px;
+    border-radius: 0 3px 3px 0; background: transparent; transition: background-color 0.12s ease;
 }
-
-.session-item:hover .session-meta,
-.session-item:hover .session-desc {
-    color: rgba(255, 255, 255, 0.8);
-}
-
-.session-item.active {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent-hover);
-}
-
-.session-item.active .session-meta,
-.session-item.active .session-desc {
-    color: rgba(255, 255, 255, 0.8);
-}
+.session-item:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.session-item.active { background: var(--bg-card); border-color: var(--border-strong); }
+.session-item.active::before { background: var(--accent); }
+.session-item.active .session-name { color: var(--accent); }
+/* The row's two actions sit in its top-right corner and take no height; they
+   show on hover, on the open row, and when focused from the keyboard. */
+.session-row-actions { position: absolute; right: 10px; top: 10px; display: flex; gap: 5px; opacity: 0; transition: opacity 0.12s ease; }
+.session-item:hover .session-row-actions, .session-item.active .session-row-actions, .session-item:focus-within .session-row-actions { opacity: 1; }
+.session-row-actions > * { margin: 0 !important; font-size: 11.5px !important; line-height: 1.4 !important; padding: 1px 8px !important; }
+/* The name line leaves the corner free, so the actions never sit on the words. */
+.session-name { padding-right: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .session-name {
+    font-size: 13.5px;
     font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
+    letter-spacing: -0.005em;
 }
 
 .session-meta {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text-muted);
     display: flex;
     flex-wrap: wrap;
@@ -194,25 +196,31 @@
 
 /* Session header */
 .session-header {
-    margin-bottom: 24px;
+    margin-bottom: 18px;
 }
 
 .session-header h2 {
-    margin: 0 0 8px 0;
-    font-size: 24px;
+    margin: 0 0 6px 0;
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
 .session-description {
     color: var(--text-muted);
-    margin: 0 0 12px 0;
+    margin: 2px 0 10px 0;
+    font-size: 13.5px;
 }
 
+/* One quiet line of facts, separated by dots rather than gaps. */
 .session-stats {
     display: flex;
-    gap: 16px;
-    font-size: 13px;
+    flex-wrap: wrap;
+    gap: 4px 0;
+    font-size: 12.5px;
     color: var(--text-muted);
 }
+.session-stats > span + span::before { content: '·'; margin: 0 8px; color: var(--border-strong); }
 
 /* Tabs */
 .session-tabs {
@@ -236,7 +244,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    transition: all 0.15s ease;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
 .session-tabs .tab:hover {
@@ -290,11 +298,11 @@
 .session-plan {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 12px 16px;
     margin: 12px 0 16px;
 }
-.session-plan-empty { color: var(--text-muted); font-size: 13px; }
+.session-plan-empty { color: var(--text-muted); font-size: 12.5px; background: none; border: 0; padding: 2px 0; margin: 6px 0 2px; }
 .session-plan-title {
     font-size: 11px;
     font-weight: 600;
@@ -367,22 +375,6 @@
 }
 .embryo-header h3 small { font-weight: 400; color: var(--text-muted); font-size: 12px; margin-left: 4px; }
 
-.stage-calls { display: flex; flex-wrap: wrap; gap: 6px; }
-.stage-call {
-    display: inline-flex;
-    gap: 6px;
-    align-items: baseline;
-    font-size: 12px;
-    padding: 3px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text);
-    text-decoration: none;
-}
-.stage-call:hover { border-color: var(--accent); }
-.stage-call-t { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); }
-.stage-call-conf { color: var(--text-muted); }
 
 .message.tool { opacity: 0.85; }
 .message.tool .message-role { color: var(--text-muted); }
@@ -397,11 +389,7 @@
 }
 .msg-tool code { font-size: 11px; opacity: 0.9; }
 
-.empty-tab {
-    text-align: center;
-    padding: 48px;
-    color: var(--text-muted);
-}
+.empty-tab { text-align: center; padding: 36px 16px; color: var(--text-muted); font-size: 13px; }
 
 /* Embryo grid */
 .embryo-grid {
@@ -413,7 +401,7 @@
 .embryo-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 16px;
 }
 
@@ -447,30 +435,18 @@
     gap: 6px;
 }
 
-.embryo-details .detail {
-    font-size: 13px;
-    color: var(--text-muted);
-}
-
-.embryo-details .detail span {
-    color: var(--text);
-    font-weight: 500;
-}
+/* The stage is the fact; the rest is one quiet line under it. */
+.embryo-stage { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: -0.005em; }
+.embryo-stage.is-none { font-weight: 500; color: var(--text-muted); font-style: italic; }
+.embryo-conf { font-size: 12px; font-weight: 500; color: var(--text-muted); margin-left: 6px; }
+.embryo-meta { font-size: 12px; color: var(--text-muted); }
+.embryo-pos { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.embryo-role { margin-left: auto; }
+.embryo-header { gap: 8px; }
+.embryo-header h3 { font-size: 15px; font-weight: 600; }
 
 /* Detections */
-.detections-list {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
 
-.detection-group h4 {
-    margin: 0 0 12px 0;
-    font-size: 14px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
 
 .detection-item {
     background: var(--bg-card);
@@ -534,7 +510,7 @@
 .message {
     background: var(--bg-card);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: 10px;
     padding: 16px;
 }
 
@@ -612,7 +588,8 @@
     color: var(--accent-purple, #a78bfa);
     border-color: var(--accent-purple, #a78bfa);
 }
-.session-item.active-session { border-left: 2px solid var(--accent-green); }
+.session-item.active-session::before { background: var(--accent-green); }
+.session-item.active-session.active::before { background: linear-gradient(var(--accent) 50%, var(--accent-green) 50%); }
 
 /* Finding a session */
 .session-search {
@@ -638,6 +615,13 @@
     border: 1px solid var(--border); background: var(--bg-card); color: var(--text-muted); cursor: pointer;
 }
 .session-edit-btn:hover { color: var(--text); border-color: var(--accent); }
+/* Beside the title and on the filed line, an action is a quiet link, not a chip
+   among chips; the one real button up here is Make live. */
+.session-title .session-edit-btn, .session-filed .session-edit-btn {
+    border: 0; background: none; color: var(--accent); padding: 0 2px; font-size: 12.5px;
+}
+.session-title .session-edit-btn:hover, .session-filed .session-edit-btn:hover { text-decoration: underline; color: var(--accent); }
+.session-export-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-right: 2px; }
 .session-name-form { display: grid; gap: 8px; margin: 4px 0 8px; max-width: 640px; }
 .session-name-form input, .session-name-form textarea {
     font: inherit; width: 100%; box-sizing: border-box; padding: 6px 10px;
@@ -657,7 +641,7 @@
 .stage-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; gap: 1px; margin: 8px 0 2px; background: var(--bg-hover); }
 .stage-bar span { flex: 1 1 0; min-width: 2px; }
 .stage-bar-key { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.embryo-thumb.is-scrubbing img { cursor: ew-resize; }
+.embryo-thumb.is-scrubbing img, .embryo-thumb.is-scrubbing .u16-c { cursor: ew-resize; }
 
 /* Light dose against the budget */
 .dose { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
@@ -675,10 +659,6 @@
 .session-temp svg { width: 100%; height: 72px; display: block; }
 .session-temp-head { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; display: flex; gap: 12px; }
 .session-temp-head span { font-weight: 400; letter-spacing: 0; text-transform: none; }
-.event-list { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; }
-.event-list time { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; }
-.event-list .is-warn::before { content: '! '; color: var(--accent-amber); font-weight: 700; }
-.event-list .is-error::before { content: '✕ '; color: var(--accent-red); font-weight: 700; }
 
 /* A fresh session from here */
 .sidebar-header { gap: 8px; }
@@ -691,8 +671,9 @@
 .session-new-btn:hover { background: var(--accent); color: var(--bg-dark); }
 
 /* Export */
-.session-export { margin-top: 10px; }
-.session-movies { margin-top: 6px; }
+/* Export and movies share one line; filled after the first paint, they keep their height. */
+.session-export, .session-movies { display: inline-flex; vertical-align: middle; align-items: center; margin-top: 8px; min-height: 30px; }
+.session-movies { margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--border); }
 .session-movie-option { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--text-muted); }
 /* The form's input rule is for text boxes; a radio or checkbox is not one. */
 .session-movie-option input { width: auto; flex: 0 0 auto; margin: 0; padding: 0; font-size: inherit; }
@@ -744,7 +725,6 @@
 .chip-proj { color: var(--text); border-color: var(--border-strong); }
 .chip-proj::before { content: '▣'; font-size: 10px; color: var(--accent); }
 .chip-unfiled { border-style: dashed; }
-.session-item.active .chip, .session-item:hover .chip { color: inherit; border-color: currentColor; }
 .session-item.active .chip-proj::before, .session-item:hover .chip-proj::before { color: inherit; }
 .session-project { margin-top: 5px; font-size: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .session-plan-served { font-size: 11.5px; color: var(--text-muted); }
@@ -758,7 +738,11 @@
 .session-filed a { color: var(--accent); text-decoration: none; }
 .session-filed .session-edit-btn { margin-left: 2px; }
 
-/* the file-under popover: one project, optionally one more plan item */
+/* the session's stream: the project's card, on the session */
+.session-stream { min-height: 150px; }
+.session-stream .pj-card { margin: 12px 0 4px; }
+
+/* the add-to-a-project popover: a project, in a role, optionally serving a plan item */
 .filing-pop {
     border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-card);
     padding: 10px 12px; display: grid; gap: 8px; font-size: 12.5px; color: var(--text);
@@ -780,7 +764,39 @@
 .filing-pop .filing-btns button.go { border-color: var(--accent); color: var(--accent); }
 .filing-pop .filing-btns button.danger { border-color: var(--accent-red); color: var(--accent-red); }
 .filing-pop .filing-err { color: var(--accent-red); font-size: 12px; }
+.filing-pop .filing-note { font-size: 12px; color: var(--text-muted); }
+.filing-pop .filing-note b { color: var(--text); font-weight: 500; }
+.session-filed-by { display: inline-flex; align-items: center; gap: 4px; }
+.chip-proj small { font-size: 10px; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
+.session-item.active .chip-proj small, .session-item:hover .chip-proj small { color: inherit; }
 
 /* a stage carries its WormBase life-stage id */
 .stage-ontology { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--text-muted); }
 .stage-ontology a { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); text-decoration: none; }
+
+/* ---- tools: imported panes --------------------------------------------- */
+.session-tools-bar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.session-tools-bar select { font: inherit; font-size: 12px; padding: 2px 6px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+.session-tool { margin-bottom: 20px; }
+.session-tool-drop { float: right; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.th-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.th-fields { display: flex; gap: 4px; }
+.session-edit-btn.is-on { color: var(--text); border-color: var(--accent); }
+.th-slider { flex: 1; max-width: 440px; accent-color: var(--accent); }
+.th-step { font: inherit; font-size: 16px; line-height: 1; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0 0 2px; }
+.th-step:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.th-step:disabled { opacity: .35; cursor: default; }
+.th-empty { color: var(--text-muted); font-style: italic; font-weight: 400; }
+.th-when { font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
+.th-stage { position: relative; display: inline-block; max-width: 100%; cursor: crosshair; }
+.th-img { display: block; max-width: 100%; width: 720px; }
+.th-img .u16-c { max-height: 70vh; width: 100%; height: auto; object-fit: contain; }
+.th-stage .th-pin { z-index: 2; }
+.th-pin { position: absolute; transform: translate(-50%, -50%); width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; pointer-events: none; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
+.th-pin.is-open { background: #f59e0b; }
+.th-table { margin-top: 10px; border-collapse: collapse; font-size: 12px; }
+.th-table th, .th-table td { padding: 4px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.th-table th { font-weight: 600; color: var(--text-muted); }
+.th-table a { color: var(--accent); text-decoration: none; }
+.th-foot { margin-top: 8px; font-size: 12px; }
+.th-foot a { color: var(--text-muted); }

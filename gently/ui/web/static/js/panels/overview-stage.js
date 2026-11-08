@@ -33,6 +33,12 @@
  *   onFrame(i, {playing, byUser})  after the stage moves, so a detail pane
  *              can follow.
  *
+ * A frame that carries `u16` (the counts route, gently.core.u16) is drawn by
+ * a U16View in the same box: the contrast is the viewer's, set once and held
+ * from frame to frame, with the value under the cursor read out and the
+ * black/white/gamma bar in the side column. The JPEG stays for the hover
+ * preview, Compare, and a frame without counts.
+ *
  * Scrubbing shows the ?max=640 PNG; on settle the full frame is swapped in.
  * ?corrected=1 asks the server to divide the session's dark and flat out
  * (gently.app.brightfield); the toggle is live only when the frame has them.
@@ -69,6 +75,8 @@ function createOverviewStage() {
     const cache = new Map();    // url -> HTMLImageElement (decoded), LRU by insertion
     const CACHE_MAX = 160;
     let lastKey = '';           // what the file buttons and references line were last built for
+    let pix = null;             // the U16View, once a frame with counts has shown
+    let zSel = -1;              // the plane shown of a volume; -1 is its projection
     let api = null;
 
     const $ = id => host && host.querySelector('#' + id);
@@ -78,6 +86,61 @@ function createOverviewStage() {
     const frames = () => opts.frames() || [];
     const tools = () => Object.assign({}, TOOLS, opts.tools || {});
     const supportsMax = f => !!(f && f.url && f.scalable !== false);
+    const hasPixels = f => !!(f && f.u16 && !compare && typeof U16View !== 'undefined');
+
+    function u16For(f, scale) {
+        const q = [];
+        if (scale > 1) q.push(`scale=${scale}`);
+        if (corrected && f.correctable) q.push('corrected=1');
+        return f.u16 + (q.length ? `${f.u16.includes('?') ? '&' : '?'}${q.join('&')}` : '');
+    }
+    function pixView() {
+        if (pix) return pix;
+        const stage = $('ov-stage');
+        const div = document.createElement('div');
+        div.className = 'ov-pix';
+        stage.insertBefore(div, $('ov-img'));
+        pix = U16View.create(div, { bar: true });
+        const d = $('ov-display');
+        if (d) { d.appendChild(pix.bar); d.hidden = false; }
+        return pix;
+    }
+    // The counts into the view; a later load wins over a slower earlier one, and
+    // the range a person set holds across frames of one series. A frame with a
+    // volume behind it (`slice(z)`, and the projection says how many planes)
+    // can show one plane instead: the Z control under the bar, kept across
+    // frames so the same plane is followed through time.
+    function showPixels(f, scale) {
+        const view = pixView();
+        const keep = view.data ? [view.lo, view.hi, view.gamma] : null;
+        const plane = zSel >= 0 && typeof f.slice === 'function';
+        const url = plane ? f.slice(zSel) + (scale > 1 ? `?scale=${scale}` : '') : u16For(f, scale);
+        return view.load(url).then(meta => {
+            if (!meta) return null;
+            if (keep) view.setRange(keep[0], keep[1], keep[2]);
+            const stage = $('ov-stage');
+            stage.classList.add('has-pixels');
+            stage.style.aspectRatio = `${meta.width} / ${meta.height}`;
+            paintZ(f, meta);
+            return meta;
+        }).catch(() => {
+            // A plane this frame does not have: back to its projection.
+            if (plane) { zSel = -1; return showPixels(f, scale); }
+            const stage = $('ov-stage'); if (stage) stage.classList.remove('has-pixels'); return null;
+        });
+    }
+    function paintZ(f, meta) {
+        const box = $('ov-z'), input = $('ov-z-in'), out = $('ov-z-out');
+        if (!box) return;
+        const planes = Number(meta.planes) || 0;
+        const can = planes > 1 && typeof f.slice === 'function';
+        box.hidden = !can;
+        if (!can) return;
+        input.max = planes - 1;
+        if (zSel >= planes) zSel = planes - 1;
+        input.value = zSel;
+        out.textContent = zSel < 0 ? 'projection' : `plane ${zSel} of ${planes}`;
+    }
 
     function urlFor(f, max) {
         if (!f || !f.url) return f && f.thumb ? f.thumb : '';
@@ -118,6 +181,7 @@ function createOverviewStage() {
         const canCorrect = t.corrected && !!f.correctable;
         if (!host.querySelector('.ov')) {
             lastKey = '';
+            pix = null;
             host.innerHTML = `
                 <div class="ov" tabindex="0" aria-label="${esc(opts.label)}: drag the bar or use arrow keys to scrub, space to play">
                     <div class="ov-stage" id="ov-stage">
@@ -128,6 +192,8 @@ function createOverviewStage() {
                     </div>
                     <div class="ov-side">
                         <div class="ov-meta" id="ov-meta"></div>
+                        <div class="ov-display" id="ov-display" hidden></div>
+                        <div class="ov-z" id="ov-z" hidden title="A plane of the volume, or its projection; the plane is kept while stepping through time"><span class="ov-keys">Z</span><input type="range" id="ov-z-in" min="-1" max="0" step="1" value="-1"><output id="ov-z-out">projection</output></div>
                         <div class="ov-controls ov-fields" id="ov-fields" hidden></div>
                         <div class="ov-controls">
                             <button type="button" class="op-btn" id="ov-play" title="Space"></button>
@@ -245,6 +311,16 @@ function createOverviewStage() {
         // The scrub size now; the full frame once the pointer settles.
         const seq = ++loadSeq;
         const img = $('ov-img');
+        if (hasPixels(f)) {
+            // ÷4 while moving, the counts whole once the pointer settles; playing
+            // stays at ÷4, as the JPEG path stays at its scrub size.
+            showPixels(f, 4);
+            clearTimeout(settleTimer);
+            if (playing) return;
+            settleTimer = setTimeout(() => { if (seq === loadSeq) showPixels(f, 1); }, SETTLE_MS);
+            return;
+        }
+        $('ov-stage').classList.remove('has-pixels');
         const quick = urlFor(f, SCRUB_MAX);
         load(quick).then(im => { if (seq === loadSeq && im) img.src = im.src; });
         clearTimeout(settleTimer);
@@ -383,6 +459,7 @@ function createOverviewStage() {
             if (b && opts.onField) { stop(); opts.onField(Number(b.dataset.ovField)); }
         });
         $('ov-newest').addEventListener('click', newest);
+        $('ov-z-in').addEventListener('input', ev => { zSel = Number(ev.target.value); const f = frames()[cur]; if (f) showPixels(f, 1); });
         const fold = $('ov-fold');
         if (fold) fold.addEventListener('click', () => { stop(); if (typeof opts.onFold === 'function') opts.onFold(); });
         $('ov-fps').addEventListener('change', ev => { fps = Number(ev.target.value) || 10; if (playing) { stop(); play(); } });
@@ -426,7 +503,7 @@ function createOverviewStage() {
     /** A different series on the same stage: start at its newest, following. */
     function reset() {
         stop();
-        cur = -1; follow = true; compare = false; hover = -1; lastKey = '';
+        cur = -1; follow = true; compare = false; hover = -1; lastKey = ''; pix = null; zSel = -1;
         if (host) host.innerHTML = '';
     }
 

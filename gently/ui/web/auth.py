@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 from enum import Enum
+from typing import Any
 
 from fastapi import HTTPException, Request
 
@@ -62,16 +63,36 @@ def unnamed(host: str | None) -> str:
     return AT_THE_RIG if is_local(host) else GUEST
 
 
-def current_username(request: Request) -> str | None:
-    """Return the authenticated username from the session cookie, or None.
+OPERATOR_COOKIE = "gently_operator"
 
-    None when no account store is configured or the cookie is missing/invalid.
+
+def chat_label(username: str | None, websocket: Any) -> str:
+    """What a chat message is signed with: the account, else the person the
+    landing page's cookie names (by display name), else where the browser is."""
+    if username:
+        return username
+    pid = (websocket.cookies.get(OPERATOR_COOKIE) or "").strip()[:40]
+    if pid:
+        from gently.ui.web.operators import names_of
+
+        return names_of().get(pid, pid)
+    return unnamed(websocket.client.host if websocket.client else None)
+
+
+def current_username(request: Request) -> str | None:
+    """Return who this request is: the account from the session cookie when
+    accounts are configured, else the name the person gave at the landing
+    page (the operator cookie), else None.
+
+    A single-operator rig has no accounts; the name is still what filing,
+    notes and annotations record as ``by``.
     """
     from gently.ui.web.accounts import get_account_store
 
     store = get_account_store()
-    if store is None:
-        return None
+    if store is None or not store.has_users():
+        name = (request.cookies.get(OPERATOR_COOKIE) or "").strip()
+        return name[:40] or None
     token = request.cookies.get(SESSION_COOKIE)
     return store.verify_session(token) if token else None
 

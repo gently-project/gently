@@ -69,7 +69,7 @@ const state = {
     _sessionPickerOpen: false,  // whether the session link picker is visible
     _availableSessions: null,   // null = not yet loaded, [] = loaded (for link picker)
     // The project layer: a root campaign is a project; its page has sections.
-    section: 'ledger',          // 'ledger' | 'plan' | 'sessions' | 'findings' | 'notes'
+    section: 'overview',        // 'overview' | 'plan' | 'sessions' | 'findings' | 'notes'
     ledger: null,               // /api/campaigns/{id}/ledger
     projSessions: null,         // /api/sessions?project_id=
     findings: null,             // finding notes of the project
@@ -77,6 +77,7 @@ const state = {
     sectionError: '',
     openForm: null,             // the one inline form or menu open, e.g. 'item', 'answer:<id>'
     newProjectOpen: false,
+    editHead: false,       // the header's question and short name are inputs
     search: null,               // the add popover: {q, groups, sel, rows, ctrls, timer}
     searchMsg: '',
     planMsg: '',
@@ -192,6 +193,10 @@ function boot() {
     });
     document.addEventListener('keydown', e => {
         if (e.target && e.target.id === 'pj-search-input') onSearchKey(e);
+        else if (state.editHead && e.target.closest?.('#pj-head [data-field]')) {
+            if (e.key === 'Enter') { e.preventDefault(); projectAction('head-save', e.target, e); }
+            else if (e.key === 'Escape') projectAction('head-cancel', e.target, e);
+        }
     });
     document.addEventListener('change', e => {
         const el = e.target.closest ? e.target.closest('select[data-action]') : null;
@@ -300,7 +305,7 @@ async function openCampaign(campaignId) {
     state.viewingSnapshotId = null;
     state.planView = 'doc';
     state.typeFilter = '';
-    state.section = 'ledger';
+    state.section = 'overview';
     state.ledger = state.projSessions = state.findings = state.notes = null;
     state.sectionError = '';
     state.openForm = null;
@@ -424,6 +429,8 @@ function renderCanvas() {
     $canvasContent.classList.add('pj-with-header');
     if (state.section !== 'plan') {
         $canvasContent.innerHTML = renderProjectHeader() + renderSection();
+        ProjectTools.mount();
+        Stream.mount();
         return;
     }
     switch (state.planView) {
@@ -2080,7 +2087,7 @@ async function api(method, url, body) {
 
 // An error is shown beside the control that caused it, never in an alert.
 function showErr(el, msg) {
-    const host = el?.closest?.('.pj-form, .pj-entry, .pj-chip, .pj-head, .pj-card, .pj-newform, .pj-planbar') || el?.parentElement;
+    const host = el?.closest?.('.pj-form, .pj-headform, .pj-entry, .pj-chip, .pj-head, .pj-card, .pj-newform, .pj-planbar') || el?.parentElement;
     if (!host) return;
     let box = host.querySelector(':scope > .pj-err');
     if (!box) {
@@ -2089,6 +2096,17 @@ function showErr(el, msg) {
         host.appendChild(box);
     }
     box.textContent = msg;
+}
+
+function projectNameOf(id) {
+    const t = (state.allCampaigns || []).find(t => (t.campaign || {}).id === id);
+    return t ? (t.campaign.shorthand || t.campaign.description || id) : String(id).slice(0, 8);
+}
+
+function roleOf(s) {
+    const link = (s.projects || []).find(x => x.id === state.activeCampaignId);
+    const r = link && link.role;
+    return r ? `<span class="pj-chip">${esc(r)}</span>` : '<span class="pj-muted">—</span>';
 }
 
 function fields(form) {
@@ -2176,14 +2194,8 @@ function allItems() {
     return out;
 }
 // "1", "2.3": the numbers the Doc view gives items.
-function itemNumbers() {
-    const m = {};
-    const t = treeOf();
-    (t.items || []).forEach((it, i) => { m[it.id] = String(i + 1); });
-    (t.children || []).forEach((ch, p) => (ch.items || []).forEach((it, i) => { m[it.id] = `${p + 1}.${i + 1}`; }));
-    return m;
-}
-
+// The navigator's list and the header's counts: every root tree, re-read after
+// anything that changes what a project holds.
 async function refreshSummaries() {
     try {
         const data = await api('GET', '/api/campaigns');
@@ -2215,16 +2227,19 @@ function renderProjectHeader() {
     const strains = c.strains || [];
     const refs = c.references || [];
     const tabs = [
-        ['ledger', 'Ledger', null],
+        ['overview', 'Overview', null],
         ['plan', 'Plan', st.total || null],
         ['sessions', 'Sessions', summary.sessions || null],
         ['findings', 'Findings', null],
         ['notes', 'Notes', null],
     ];
     const stat = (n, word) => `<span><b>${n}</b> ${word}</span>`;
+    const attr = v => esc(v).replace(/"/g, '&quot;');  // esc() leaves quotes alone; a value attribute cannot
     return `<div class="pj-head" id="pj-head">
         <div class="pj-row1">
-            <h2>${esc(c.shorthand || c.description || 'Project')}</h2>
+            ${state.editHead
+                ? `<input class="pj-head-in" data-field="shorthand" value="${attr(c.shorthand)}" placeholder="short name (optional)" title="The short name, as the navigator and the breadcrumb show it">`
+                : `<h2>${esc(c.shorthand || c.description || 'Project')}</h2><button class="pj-add" data-action="head-edit" title="Change the question or the short name">edit</button>`}
             <span class="pj-state"><span class="pj-dot ${dot}"></span>${summary.live ? 'live now' : esc(c.status || 'active')}</span>
             <span class="pj-muted">since ${esc(formatDate(c.created_at))}</span>
             <span class="pj-stats">
@@ -2234,7 +2249,9 @@ function renderProjectHeader() {
                 ${summary.proposed_findings ? stat(summary.proposed_findings, 'finding' + (summary.proposed_findings === 1 ? '' : 's') + ' to confirm') : ''}
             </span>
         </div>
-        <div class="pj-q">${esc(c.description || '')}${c.target ? `<small>${esc(c.target)}</small>` : ''}</div>
+        ${state.editHead
+            ? `<div class="pj-headform"><input data-field="description" value="${attr(c.description)}" placeholder="What does the project ask? One line."><div class="pj-act"><button data-action="head-save">Save</button><button data-action="head-cancel">Cancel</button></div></div>`
+            : `<div class="pj-q">${esc(c.description || '')}${c.target ? `<small>${esc(c.target)}</small>` : ''}</div>`}
         <div class="pj-facets">
             <span class="pj-k">Strains</span>
             <div class="pj-vals">${strains.map(s => refChip(s, true)).join('')}<button class="pj-add" data-action="search-open" data-as="strain">+ add</button></div>
@@ -2265,7 +2282,7 @@ function renderSection() {
         case 'sessions': return renderProjSessions();
         case 'findings': return renderFindingsSection();
         case 'notes': return renderNotesSection();
-        default: return renderLedger();
+        default: return renderOverview();
     }
 }
 
@@ -2275,7 +2292,11 @@ async function loadSection() {
     const P = enc(id);
     state.sectionError = '';
     try {
-        if (state.section === 'ledger') state.ledger = await api('GET', `/api/campaigns/${P}/ledger`);
+        if (state.section === 'overview') {
+            if (!state.catalogue) state.catalogue = (await api('GET', '/api/tools').catch(() => ({}))).tools || [];
+            state.ptools = (await api('GET', `/api/campaigns/${P}/tools`)).tools || [];
+            state.stream = (await api('GET', `/api/campaigns/${P}/stream`)).notes || [];
+        }
         else if (state.section === 'sessions') state.projSessions = (await api('GET', `/api/sessions?project_id=${P}`)).sessions || [];
         else if (state.section === 'findings') state.findings = (await api('GET', `/api/notebook/notes?kind=finding&project=${P}`)).notes || [];
         else if (state.section === 'notes') state.notes = (await api('GET', `/api/notebook/notes?project=${P}`)).notes || [];
@@ -2296,37 +2317,234 @@ function loadingBox(what) {
     return `<div class="pj-card"><div class="pj-loading">${state.sectionError ? esc(state.sectionError) : `Reading ${what}…`}</div></div>`;
 }
 
+// ── overview: the stream, and the project's tools on top ──────────────
+// The stream is the notebook filed to this project or its sessions: lines in
+// the operator's own words, dated, no kind at write time. Above it sit the
+// project-scoped tools the project imported (figures, reading), each mounted
+// on the project the way a session tool mounts on a session.
+
+function renderOverview() {
+    const lines = state.stream, on = state.ptools;
+    if (!lines || !on) return loadingBox('the project');
+    const cat = (state.catalogue || []).filter(t => t.scope === 'project');
+    const tools = new Set((state.catalogue || []).map(t => t.title));  // a tool's line wears its name; a person's headline leads the text
+    const avail = cat.filter(t => !on.includes(t.name));
+    const title = n => ((cat.find(t => t.name === n) || {}).title || n);
+    const stream = lines.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return `${on.map(n => `<div class="pj-card pj-tool" data-ptool="${esc(n)}">
+        <div class="pj-card-head"><h3>${esc(title(n))}</h3><span class="pj-muted" data-ptool-head></span><span class="pj-tool-actions" data-ptool-actions></span><button class="pj-add pj-tool-drop" data-ptool-drop="${esc(n)}" title="Take this tool off the project; its files stay">remove</button></div>
+        <div class="pj-tool-body" data-ptool-body><div class="pj-loading">Loading…</div></div>
+    </div>`).join('')}
+    <div class="pj-card" id="stream">
+        <div class="pj-card-head"><h3>Stream</h3><span class="pj-muted">what you noticed, in your words; @ a person to ask them; the reading sorts out what it was</span>
+            ${avail.length ? `<span class="pj-tool-actions"><select id="ptool-pick">${avail.map(t => `<option value="${esc(t.name)}" title="${esc(t.summary)}">${esc(t.title)}</option>`).join('')}</select><button class="pj-add" data-ptool-import="1">+ tool</button></span>` : ''}
+        </div>
+        <div class="rd-add"><input id="stream-line" placeholder="One line, in your words. Enter files it." autocomplete="off"></div>
+        <div class="pj-stack rd-stream">${stream.length ? stream.map(n => streamLineHtml(n, tools)).join('') : '<div class="pj-none">Nothing written yet.</div>'}</div>
+    </div>`;
+}
+
+const ProjectTools = {
+    mount() {
+        const pid = state.activeCampaignId;
+        document.querySelectorAll('.pj-tool[data-ptool]').forEach(card => {
+            const tool = (window.GentlyTools || {})[card.dataset.ptool];
+            const body = card.querySelector('[data-ptool-body]');
+            card.querySelector('[data-ptool-drop]').onclick = () => this.set((state.ptools || []).filter(n => n !== card.dataset.ptool));
+            if (!tool) { body.innerHTML = '<div class="pj-none">This tool has no pane on this page.</div>'; return; }
+            tool.mount(body, pid, { head: card.querySelector('[data-ptool-head]'), actions: card.querySelector('[data-ptool-actions]') });
+        });
+        const imp = document.querySelector('[data-ptool-import]');
+        if (imp) imp.onclick = () => this.set([...(state.ptools || []), document.getElementById('ptool-pick').value]);
+    },
+    async set(tools) {
+        try {
+            state.ptools = (await api('PUT', `/api/campaigns/${enc(state.activeCampaignId)}/tools`, { tools })).tools;
+        } catch (err) { showErr(err.message); return; }
+        renderCanvas();
+    },
+};
+
+const Stream = {
+    mount() {
+        const box = document.getElementById('stream-line');
+        if (!box) return;
+        Mentions.attach(box);
+        box.onkeydown = e => { if (e.key === 'Enter' && box.value.trim()) this.add(box.value.trim()); };
+    },
+    async add(text) {
+        try {
+            await api('POST', '/api/notebook/notes', { body: text, projects: [state.activeCampaignId] });
+        } catch (err) { showErr(err.message); return; }
+        await loadSection();
+    },
+};
+
+// ── the reading, as a project tool ─────────────────────────────────────
+
+function readingHtml(text) {
+    // Four words open four paragraphs; anything else is a paragraph as written.
+    return text.split(/\n\s*\n/).map(p => {
+        const m = p.match(/^\s*(KNOWN|DEVIATES|OPEN|NEXT)\.?\s*([\s\S]*)$/);
+        return m ? `<p><b class="rd-k">${m[1]}</b> ${esc(m[2]).replace(/\n/g, '<br>')}</p>` : `<p>${esc(p).replace(/\n/g, '<br>')}</p>`;
+    }).join('');
+}
+
+const ReadingTool = {
+    el: null, pid: null, slots: {},
+    async mount(el, pid, slots) {
+        this.el = el; this.pid = pid; this.slots = slots || {};
+        let r;
+        try { r = await api('GET', `/api/campaigns/${enc(pid)}/reading`); } catch (err) { r = { error: err.message }; }
+        this.render(r);
+    },
+    render(r) {
+        const since = r.sessions_since || 0, n = ((r.meta && r.meta.sessions) || []).length;
+        const when = r.meta && r.meta.written_at ? formatDate(r.meta.written_at) : '';
+        if (this.slots.head) this.slots.head.innerHTML = r.text
+            ? `written ${esc(when)} over ${n} session${n === 1 ? '' : 's'}${r.meta.asked_by ? ` · asked by ${Who.chip(r.meta.asked_by)}` : ''}${since ? ` · <b class="rd-stale">${since} session${since === 1 ? '' : 's'} since</b>` : ''}`
+            : (r.error ? esc(r.error) : 'nothing read yet');
+        if (this.slots.actions) {
+            this.slots.actions.innerHTML = `<button class="pj-add" data-rd="read" title="Write the reading again over everything filed now">${r.text ? 'Read again' : 'Read'}</button>`;
+            this.slots.actions.querySelector('[data-rd]').onclick = () => this.read();
+        }
+        this.el.innerHTML = `<div class="rd-body">${r.text ? readingHtml(r.text) : '<div class="pj-none">Ask for a reading once a session or two is filed and the stream has a line in it.</div>'}</div>`;
+    },
+    async read() {
+        const btn = this.slots.actions && this.slots.actions.querySelector('[data-rd]');
+        if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
+        let r;
+        try { r = await api('POST', `/api/campaigns/${enc(this.pid)}/reading`, {}); } catch (err) { r = { error: err.message }; }
+        this.render(r);
+    },
+};
+
+// ── figures, as a project tool: recipes drawn in the browser ───────────
+// A recipe is which tool, which phase or tag within this project, and what
+// goes on x. The browser asks the pool for the rows each time the card is
+// shown, so the figure is as current as the sessions; editing a chip is a
+// PUT and a redraw. The agent's PNGs list underneath, unchanged.
+
+const FiguresTool = {
+    recipes: [], pngs: [], el: null, pid: null, slots: {},
+
+    async mount(el, pid, slots) {
+        this.el = el; this.pid = pid; this.slots = slots || {};
+        const P = enc(pid);
+        this.recipes = (await api('GET', `/api/campaigns/${P}/recipes`).catch(() => ({}))).recipes || [];
+        this.pngs = (await api('GET', `/api/campaigns/${P}/figures`).catch(() => ({}))).figures || [];
+        this.paint();
+    },
+
+    render() {
+        const recipes = this.recipes || [];
+        const projLabel = (treeOf().campaign || {}).shorthand || this.pid || '';
+        const chip = (r, key, ph) => `<label class="lf-chip${r[key] ? ' on' : ''}"><span>${key}</span><input data-lf="${key}" data-name="${esc(r.name)}" value="${esc(r[key] || '')}" placeholder="${ph}" size="${Math.max(4, (r[key] || '').length + 1)}"></label>`;
+        return `<div id="live-figures">
+            ${recipes.length ? '' : '<div class="pj-none">No figure yet. "+ figure" draws twitch-to-hatch over this project.</div>'}
+            ${recipes.map(r => `<div class="lf-card" data-recipe="${esc(r.name)}">
+                <div class="lf-bar">
+                    <input class="lf-title" data-lf="title" data-name="${esc(r.name)}" value="${esc(r.title || r.name)}">
+                    ${r.edited && r.edited.by ? Who.chip(r.edited.by, { when: r.edited.at }) : (r.by ? Who.chip(r.by) : '')}
+                    <span class="lf-chip fixed"><span>project</span><b>${esc(projLabel)}</b></span>
+                    ${chip(r, 'phase', 'any')}${chip(r, 'tag', 'any')}
+                    <select data-lf="x" data-name="${esc(r.name)}"><option value="session_name"${!['condition', 'role'].includes(r.x) ? ' selected' : ''}>a column per session</option><option value="role"${r.x === 'role' ? ' selected' : ''}>a column per role</option><option value="condition"${r.x === 'condition' ? ' selected' : ''}>one column</option></select>
+                    <button class="pj-add lf-del" data-lf-del="${esc(r.name)}" title="Remove this figure">×</button>
+                </div>
+                <div class="lf-plot" data-plot="${esc(r.name)}"><div class="pj-loading">Pooling…</div></div>
+            </div>`).join('')}
+            ${(this.pngs || []).length ? `<div class="pj-figures">${this.pngs.map(p => `<a class="pj-figure" href="${p.url}" target="_blank" rel="noopener"><img src="${p.url}" alt="${esc(p.name)}"><span>${esc(p.name)}</span></a>`).join('')}</div>` : ''}
+        </div>`;
+    },
+
+    paint() {
+        if (this.slots.head) this.slots.head.textContent = 'drawn here from the pooled sessions, every time; edit the chips to re-pool';
+        if (this.slots.actions) {
+            this.slots.actions.innerHTML = '<button class="pj-add" data-lf-new="1">+ figure</button>';
+            this.slots.actions.querySelector('[data-lf-new]').onclick = () => this.edit('twitch-to-hatch', 'title', 'Twitch to hatch');
+        }
+        this.el.innerHTML = this.render();
+        this.wire();
+    },
+
+    wire() {
+        const host = this.el.querySelector('#live-figures');
+        if (!host) return;
+        host.onchange = e => {
+            const t = e.target;
+            if (t.dataset.lf) this.edit(t.dataset.name, t.dataset.lf, t.value);
+        };
+        host.onclick = e => {
+            const b = e.target.closest('[data-lf-del]');
+            if (b) this.remove(b.dataset.lfDel);
+        };
+        (this.recipes || []).forEach(r => this.draw(r));
+    },
+
+    async edit(name, key, value) {
+        const P = enc(this.pid);
+        const cur = (this.recipes || []).find(r => r.name === name) || { name, tool: 'twitch_hatch' };
+        const next = { ...cur, [key]: value || null };
+        try {
+            const saved = await api('PUT', `/api/campaigns/${P}/recipes/${enc(name)}`, next);
+            this.recipes = [...(this.recipes || []).filter(r => r.name !== saved.name), saved].sort((a, b) => a.name.localeCompare(b.name));
+        } catch (err) { showErr(err.message); return; }
+        this.paint();
+    },
+
+    async remove(name) {
+        const P = enc(this.pid);
+        try { await api('DELETE', `/api/campaigns/${P}/recipes/${enc(name)}`); } catch (err) { showErr(err.message); return; }
+        this.recipes = (this.recipes || []).filter(r => r.name !== name);
+        this.paint();
+    },
+
+    async draw(r) {
+        const q = new URLSearchParams({ project: this.pid });
+        if (r.phase) q.set('phase', r.phase);
+        if (r.tag) q.set('tag', r.tag);
+        let d;
+        try { d = await api('GET', `/api/tools/${enc(r.tool || 'twitch_hatch')}/pool?${q}`); }
+        catch (err) { d = { error: err.message }; }
+        const el = this.el.querySelector(`[data-plot="${CSS.escape(r.name)}"]`);
+        if (!el) return;
+        el.innerHTML = d.error ? `<div class="pj-none">${esc(d.error)}</div>` : this.svg(r, d);
+    },
+
+    // minutes on y, a dot per embryo, a column per session or one column, a
+    // median tick per column, the pooled median across, Sulston as reference
+    svg(r, d) {
+        const rows = (d.rows || []).filter(x => x[r.y || 'minutes'] != null);
+        if (!rows.length) return '<div class="pj-none">No rows yet under this selection. Mark embryos in a session\'s Tools tab.</div>';
+        const yk = r.y || 'minutes', xk = ['condition', 'role'].includes(r.x) ? r.x : 'session_name';
+        const cols = [...new Set(rows.map(x => String(x[xk])))];
+        const median = a => { const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+        const all = rows.map(x => x[yk]), pooled = median(all), ref = d.sulston_min;
+        const W = Math.max(440, 110 + cols.length * 150), H = 310, L = 54, Rm = 96, T = 16, B = 56;
+        const lo = Math.min(...all, ref ?? Infinity) - 20, hi = Math.max(...all, ref ?? -Infinity) + 20;
+        const y = v => T + (hi - v) / (hi - lo) * (H - T - B);
+        const x = i => L + (i + 0.5) * (W - L - Rm) / cols.length;
+        const step = (hi - lo) > 300 ? 100 : (hi - lo) > 120 ? 50 : 20;
+        const ticks = []; for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
+        const dots = rows.map((row, i) => `<circle class="lf-dot" cx="${(x(cols.indexOf(String(row[xk]))) + ((i % 5) - 2) * 7).toFixed(1)}" cy="${y(row[yk]).toFixed(1)}" r="4"><title>${esc(row.session_name)} · embryo ${row.n} · ${row[yk]} min${row.temp_c != null ? ` · ${row.temp_c} °C` : ''}</title></circle>`).join('');
+        const meds = cols.map((c, i) => { const m = median(rows.filter(row => String(row[xk]) === c).map(row => row[yk])); return `<line class="lf-med" x1="${x(i) - 22}" x2="${x(i) + 22}" y1="${y(m)}" y2="${y(m)}"/>`; }).join('');
+        return `<svg class="lf-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(r.title || r.name)}">
+            ${ticks.map(v => `<line class="lf-grid" x1="${L}" x2="${W - Rm}" y1="${y(v)}" y2="${y(v)}"/><text class="lf-tick" x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('')}
+            ${ref != null ? `<line class="lf-ref" x1="${L}" x2="${W - Rm}" y1="${y(ref)}" y2="${y(ref)}"/><text class="lf-lab" x="${W - Rm + 6}" y="${y(ref) + 4}">Sulston ${ref}</text>` : ''}
+            <line class="lf-pooled" x1="${L}" x2="${W - Rm}" y1="${y(pooled)}" y2="${y(pooled)}"/><text class="lf-lab" x="${W - Rm + 6}" y="${y(pooled) + 4}">median ${pooled}</text>
+            ${meds}${dots}
+            ${cols.map((c, i) => `<text class="lf-tick" x="${x(i)}" y="${H - B + 16}" text-anchor="end" transform="rotate(-15 ${x(i)} ${H - B + 16})">${esc(c.length > 22 ? c.slice(0, 21) + '…' : c)}</text>`).join('')}
+            <text class="lf-tick" x="${L - 8}" y="${T - 4}" text-anchor="end">min</text>
+        </svg><div class="lf-foot">${rows.length} embryo${rows.length === 1 ? '' : 's'} · ${cols.length} column${cols.length === 1 ? '' : 's'} · median <b>${pooled} min</b> · ${esc(d.label)}</div>`;
+    },
+};
+
 // ── the ledger ───────────────────────────────────────────
 
 function dotFor(status) {
     return { completed: 'done', in_progress: 'live', skipped: 'skip', blocked: 'err', proposed: 'plan' }[status] || 'plan';
 }
 
-function itemEntry(it, suggest, blocked) {
-    const nums = state._nums || {};
-    const spec = specSummary(it.imaging_spec);
-    const runs = (it.session_ids || []).length;
-    const menuOpen = state.openForm === `menu:${it.id}`;
-    const byId = Object.fromEntries(allItems().map(x => [x.id, x]));
-    const waits = blocked ? (it.depends_on || []).map(d => `<button class="pj-link" data-action="item-undepend" data-id="${esc(it.id)}" data-dep="${esc(d)}" title="Remove this dependency">${esc((byId[d] && byId[d].title) || d.slice(0, 8))} ×</button>`) : [];
-    const open = state.selectedItemId === it.id;
-    return `<div class="pj-entry pj-clickable${suggest ? ' suggest' : ''}${blocked ? ' dim' : ''}${menuOpen ? ' menu-open' : ''}${open ? ' is-open' : ''}" data-item-id="${esc(it.id)}" data-action="select-item" data-id="${esc(it.id)}" title="${open ? 'Close the details' : 'Open the details'}">
-        ${blocked ? `<div class="pj-m"><span class="pj-chip">waits on</span> ${waits.join(', ') || 'another item'}</div>` : ''}
-        <div class="pj-tools"><button data-action="select-item" data-id="${esc(it.id)}" title="Open in the inspector">✎</button><button data-action="item-menu" data-id="${esc(it.id)}" title="More">…</button></div>
-        ${menuOpen ? itemMenu(it) : ''}
-        ${suggest ? '<div class="pj-t"><span class="pj-chip ai">suggested by the agent</span></div>' : ''}
-        <div class="pj-t">${suggest ? '' : `<span class="pj-dot ${dotFor(it.status)}"></span>`}<span class="pj-id">${esc(nums[it.id] || '')}</span><b>${esc(it.title)}</b></div>
-        ${it.description && it.description !== it.title ? `<div class="pj-m pj-sentence">${esc(it.description.slice(0, 200))}</div>` : ''}
-        ${spec ? `<div class="pj-m">${esc(spec)}${specProvenanceNote(it.imaging_spec)}</div>` : ''}
-        ${draftBlock(it)}
-        ${state.transcribeMsg && state.transcribeMsg.id === it.id ? `<div class="pj-m pj-transcribed">${esc(state.transcribeMsg.text)}</div>` : ''}
-        <div class="pj-m"><span class="pj-chip ${it.origin === 'manual' ? '' : 'ai'}">${it.origin === 'manual' ? 'manual' : 'agent'}</span>${runs ? ` ${runs} run${runs !== 1 ? 's' : ''}` : ' not run yet'}${canSetUp(it) ? ` · <button class="pj-link" data-action="item-setup" data-id="${esc(it.id)}" title="Open Devices › Operate with this acquisition filled in; Start files the run under this item">Set up on Devices</button>` : ''}</div>
-        ${suggest ? `<div class="pj-act"><button data-action="item-accept" data-id="${esc(it.id)}">Accept</button><button data-action="select-item" data-id="${esc(it.id)}">Edit</button><button data-action="item-remove" data-id="${esc(it.id)}">Dismiss</button></div>` : ''}
-    </div>`;
-}
-
-// Gently's draft of the spec, as the card tells it: drafting, drafted (accept,
-// edit, ask again), unavailable (no model), accepted.
 function draftBlock(it) {
     const d = it.imaging_spec && it.imaging_spec.draft;
     const tactics = (it.imaging_spec && it.imaging_spec.tactics) || [];
@@ -2366,55 +2584,17 @@ function itemMenu(it) {
     </div>`;
 }
 
-function expEntry(e) {
-    const st = e.status;
-    const cls = st === 'confirmed' ? 'done' : st === 'surprised' ? 'err' : st === 'expired' ? 'skip' : 'live';
-    const mark = st === 'confirmed' ? '<span class="ok">✓ met</span>'
-        : st === 'surprised' ? '<span class="miss">✕ missed</span>'
-        : st === 'expired' ? '<span class="pj-muted">expired</span>' : 'pending';
-    return `<div class="pj-entry">
-        <div class="pj-t"><span class="pj-dot ${cls}"></span><b>${esc(e.target)} ${esc(e.prediction)}</b></div>
-        <div class="pj-v">by ${esc(fmtWhen(e.expected_time))}${e.uncertainty ? ` ${esc(e.uncertainty)}` : ''} · ${mark}</div>
-        ${e.basis ? `<div class="pj-m">basis: ${esc(e.basis)}</div>` : ''}
-        ${st === 'pending' ? `<div class="pj-act"><button data-action="exp-resolve" data-id="${esc(e.id)}" data-status="confirmed">✓ met</button><button data-action="exp-resolve" data-id="${esc(e.id)}" data-status="surprised">✕ missed</button></div>` : ''}
-    </div>`;
-}
-
-function outcomeEntry(it) {
-    const nums = state._nums || {};
-    const editing = state.openForm === `outcome:${it.id}`;
-    const runs = (it.session_ids || []).length;
-    return `<div class="pj-entry">
-        <div class="pj-t"><span class="pj-dot ${it.status === 'skipped' ? 'skip' : 'done'}"></span><span class="pj-id">${esc(nums[it.id] || '')}</span><b>${esc(it.title)}</b></div>
-        ${editing
-        ? `<div class="pj-form"><textarea data-field="outcome" rows="2">${esc(it.outcome || '')}</textarea><div class="pj-act"><button data-action="outcome-save" data-id="${esc(it.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>`
-        : `<div class="pj-v pj-editable" data-action="form-open" data-form="outcome:${esc(it.id)}" title="Edit the outcome">${esc(it.outcome || (it.status === 'skipped' ? 'skipped' : 'done, no outcome written yet'))}</div>`}
-        <div class="pj-m">${esc(it.status)} · ${runs} run${runs !== 1 ? 's' : ''}</div>
-    </div>`;
-}
-
 function findingCard(n) {
     const dim = n.status === 'superseded';
     const sup = state.openForm === `supersede:${n.id}`;
     const cites = arr => (arr || []).map(b => `<span class="pj-cite">${esc(String(b).slice(0, 12))}</span>`).join(' ');
     return `<div class="pj-entry find${dim ? ' dim' : ''}">
-        <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${esc(n.author)} · ${esc(formatDate(n.created_at))}</span></div>
+        <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
         <div class="pj-body">${esc(n.body)}</div>
         ${(n.basis || []).length ? `<div class="pj-m">basis ${cites(n.basis)}</div>` : ''}
         ${(n.sessions || []).length ? `<div class="pj-m">sessions ${cites(n.sessions)}</div>` : ''}
         ${dim ? '' : `<div class="pj-act">${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="confirmed">Confirm</button>` : ''}<button data-action="form-open" data-form="supersede:${esc(n.id)}">Supersede</button>${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="superseded">Dismiss</button>` : ''}</div>`}
         ${sup ? `<div class="pj-form"><textarea data-field="body" rows="3" placeholder="The finding that replaces it"></textarea><div class="pj-act"><button data-action="note-supersede" data-id="${esc(n.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
-    </div>`;
-}
-
-function questionEntry(q) {
-    const open = q.status === 'open' || q.status === 'investigating';
-    const answering = state.openForm === `answer:${q.id}`;
-    return `<div class="pj-entry${open ? '' : ' dim'}">
-        <div class="pj-t"><span class="pj-dot ${open ? 'plan' : 'done'}"></span><b>${esc(q.content)}</b></div>
-        <div class="pj-m">${open ? 'open' : 'answered'}${q.resolution ? ` · ${esc(q.resolution)}` : ''}${q.session_id ? ` · from session ${esc(String(q.session_id).slice(0, 8))}` : ''}</div>
-        ${open && !answering ? `<div class="pj-act"><button data-action="form-open" data-form="answer:${esc(q.id)}">Answer</button><button data-action="q-resolve" data-id="${esc(q.id)}" data-resolution="closed">Close</button></div>` : ''}
-        ${answering ? `<div class="pj-form"><input data-field="resolution" placeholder="The answer"><div class="pj-act"><button data-action="q-resolve" data-id="${esc(q.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
     </div>`;
 }
 
@@ -2436,29 +2616,91 @@ function addForm(form) {
     return `<div class="pj-form" data-form="${form}">${body}<div class="pj-act"><button data-action="form-submit" data-form="${form}">Add</button><button data-action="form-close">Cancel</button></div></div>`;
 }
 
-function renderLedger() {
-    const L = state.ledger;
-    if (!L) return loadingBox('the ledger');
-    state._nums = itemNumbers();
-    const col = (title, hint, body, add) =>
-        `<div class="pj-col"><h4>${title} <small>${hint}</small></h4>${body || '<div class="pj-none">nothing yet</div>'}${add}</div>`;
-    const next = (L.in_progress || []).map(i => itemEntry(i, false)).join('')
-        + (L.next || []).map(i => itemEntry(i, false)).join('')
-        + (L.proposed || []).map(i => itemEntry(i, true)).join('')
-        + (L.blocked || []).map(i => itemEntry(i, false, true)).join('');
-    const predicted = (L.predicted || []).slice().reverse().map(expEntry).join('');
-    const measured = (L.measured?.outcomes || []).map(outcomeEntry).join('') + (L.measured?.findings || []).map(findingCard).join('');
-    const open = (L.open || []).map(questionEntry).join('') + (L.answered || []).slice(-3).map(questionEntry).join('');
-    return `<div class="pj-card">
-        <div class="pj-card-head"><h3>Ledger</h3><span class="pj-muted">what is next, what was predicted, what was measured, what is open</span></div>
-        <div class="pj-ledger">
-            ${col('Next', 'unblocked plan items, then what waits', next, addRow('item', 'item', 'by hand; the agent’s own arrive as suggestions'))}
-            ${col('Predicted', 'expectations', predicted, addRow('expectation', 'expectation', 'yours or the agent’s; ✓ ✕ to resolve'))}
-            ${col('Measured', 'outcomes and findings', measured, addRow('finding', 'finding', 'a claim; the agent’s wait for your confirm'))}
-            ${col('Open', 'questions', open, addRow('question', 'question', 'answer or close in place'))}
-        </div>
-    </div>`;
-}
+// the project tools register beside the session tools, by name
+// ── the data, as a project tool: every measurement, pooled per tool ────
+// One row per embryo across the project's sessions, with the session and its
+// role on each row; the same rows as CSV. Every session tool that can be
+// pooled answers here. Twitch-to-hatch has its columns named; any other
+// tool's columns are its row keys.
+const DataTool = {
+    el: null, pid: null, slots: {}, pools: [],
+    COLUMNS: {
+        twitch_hatch: [['n', 'Embryo'], ['field', 'Field'], ['twitch_frame', 'Twitch frame'], ['hatch_frame', 'Hatch frame'],
+            ['minutes', 'Minutes'], ['temp_c', '°C'], ['vs_sulston_min', 'vs Sulston'], ['by', 'Marked by']],
+    },
+    // What names the row, or what the named columns already say.
+    HIDE: new Set(['session_id', 'session_name', 'role', 'condition', 'x', 'y', 'at', 'twitch_at', 'hatch_at']),
+
+    async mount(el, pid, slots) {
+        this.el = el; this.pid = pid; this.slots = slots || {};
+        const pools = [];
+        for (const t of (state.catalogue || []).filter(t => t.scope === 'session')) {
+            let d;
+            try { d = await api('GET', `/api/tools/${enc(t.name)}/pool?project=${enc(pid)}`); }
+            catch (_) { continue; }   // a tool with nothing to pool answers 404
+            pools.push({ tool: t.name, title: t.title, ...d });
+        }
+        this.pools = pools;
+        this.paint();
+    },
+
+    columns(p) {
+        if (this.COLUMNS[p.tool]) return this.COLUMNS[p.tool];
+        const keys = [];
+        (p.rows || []).forEach(r => Object.keys(r).forEach(k => { if (!this.HIDE.has(k) && !keys.includes(k)) keys.push(k); }));
+        return keys.map(k => [k, k.replace(/_/g, ' ')]);
+    },
+
+    cell(r, key) {
+        const v = r[key];
+        if (v == null || v === '') return '<span class="z">—</span>';
+        if (key === 'by') return Who.chip(v, { when: r.at });
+        if (typeof v === 'number') return `<span class="num">${Number.isInteger(v) ? v : v.toFixed(1)}</span>`;
+        return esc(String(v));
+    },
+
+    foot(p) {
+        const done = (p.rows || []).map(r => r.minutes).filter(m => typeof m === 'number').sort((a, b) => a - b);
+        if (p.tool !== 'twitch_hatch' || !done.length) return '';
+        const med = done.length % 2 ? done[(done.length - 1) / 2] : (done[done.length / 2 - 1] + done[done.length / 2]) / 2;
+        const ref = Object.entries(p.reference || {}).map(([k, v]) => `${k} ${v} min`).join(', ');
+        return `<div class="dt-foot">Median ${med} min over ${done.length} embryo${done.length === 1 ? '' : 's'} with a hatching time${ref ? ` · ${ref}` : ''}.</div>`;
+    },
+
+    render() {
+        const pools = this.pools.filter(p => (p.rows || []).length);
+        if (!pools.length) return '<div class="pj-none">No measurement is filed under this project yet. A session tool\'s rows land here once a session in the project has some.</div>';
+        return pools.map(p => {
+            const cols = this.columns(p);
+            return `<div class="dt-tool">
+                <div class="dt-head">${esc(p.title)} <span class="pj-muted">${p.rows.length} row${p.rows.length === 1 ? '' : 's'}</span></div>
+                <div class="dt-wrap"><table class="pj-obs"><thead><tr><th>Session</th><th>Role</th>${cols.map(([, label]) => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>
+                ${p.rows.map(r => `<tr data-sgo="${esc(r.session_id)}" title="Open the session">
+                    <td class="name">${esc(r.session_name || r.session_id)}</td>
+                    <td>${r.role && r.role !== 'unassigned' ? `<span class="pj-chip">${esc(r.role)}</span>` : '<span class="pj-muted">—</span>'}</td>
+                    ${cols.map(([key]) => `<td>${this.cell(r, key)}</td>`).join('')}
+                </tr>`).join('')}
+                </tbody></table></div>
+                ${this.foot(p)}
+            </div>`;
+        }).join('');
+    },
+
+    paint() {
+        const pools = this.pools.filter(p => (p.rows || []).length);
+        const rows = pools.reduce((n, p) => n + p.rows.length, 0);
+        const sess = new Set(); pools.forEach(p => p.rows.forEach(r => sess.add(r.session_id)));
+        if (this.slots.head) this.slots.head.textContent = rows
+            ? `${rows} row${rows === 1 ? '' : 's'} from ${sess.size} session${sess.size === 1 ? '' : 's'}, one per embryo, pooled here every time`
+            : 'nothing measured yet';
+        if (this.slots.actions) this.slots.actions.innerHTML = pools.map(p =>
+            `<a class="pj-add" href="/api/tools/${enc(p.tool)}/pool?project=${enc(this.pid)}&format=csv" download title="The same rows as CSV">CSV${pools.length > 1 ? ` · ${esc(p.title)}` : ''}</a>`).join(' ');
+        this.el.innerHTML = this.render();
+        this.el.onclick = e => { const tr = e.target.closest('[data-sgo]'); if (tr) goToSession(tr.dataset.sgo); };
+    },
+};
+
+window.GentlyTools = Object.assign(window.GentlyTools || {}, { figures: FiguresTool, reading: ReadingTool, data: DataTool });
 
 // ── the plan bar: today's canvas, plus the ways to add to it ──
 
@@ -2500,11 +2742,12 @@ function renderProjSessions() {
     const adding = state.openForm === 'add-session';
     const addForm = adding ? `<div class="pj-form" data-form="add-session">
             ${state.unfiled === null ? '<span class="pj-muted">Finding sessions…</span>'
-            : `<select data-field="session_id"><option value="">a session…</option>${state.unfiled.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.suggested_name || s.session_id)} · ${esc(formatDate(s.created_at))}</option>`).join('')}</select>`}
-            <div class="pj-act"><button data-action="session-add-submit">File it here</button><button data-action="form-close">Cancel</button></div></div>` : '';
+            : `<select data-field="session_id"><option value="">a session…</option>${state.unfiled.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.suggested_name || s.session_id)} · ${esc(formatDate(s.created_at))}${s.project_id ? ' · in ' + esc(projectNameOf(s.project_id)) : ''}</option>`).join('')}</select>
+            <select data-field="role"><option value="">— no role —</option>${['control', 'test', 'reference', 'pilot'].map(r => `<option value="${r}">${r}</option>`).join('')}</select>`}
+            <div class="pj-act"><button data-action="session-add-submit">Link it here</button><button data-action="form-close">Cancel</button></div></div>` : '';
     const body = rows.length === 0
         ? '<div class="pj-none">No session is filed under this project yet.</div>'
-        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Holds</th><th>Ended</th><th>Signals</th><th>Agent</th><th></th></tr></thead><tbody>
+        : `<table class="pj-obs"><thead><tr><th>When</th><th>Session</th><th>Role</th><th>Holds</th><th>Ended</th><th>Agent</th><th></th></tr></thead><tbody>
         ${rows.map(s => {
             const [cls, label] = endedOf(s);
             const run = runOf(s) || {};
@@ -2519,9 +2762,6 @@ function renderProjSessions() {
                 s.timepoints ? `${s.timepoints} tp` : '',
                 s.bf_frames ? `${s.bf_frames} brightfield` : '',
             ].filter(Boolean).join(' · ') || '—';
-            const signals = (s.errors || s.warnings)
-                ? [s.errors ? `<span class="e">${s.errors} error${s.errors !== 1 ? 's' : ''}</span>` : '', s.warnings ? `<span class="w">${s.warnings} warning${s.warnings !== 1 ? 's' : ''}</span>` : ''].filter(Boolean).join(' · ')
-                : '<span class="z">—</span>';
             const agent = s.turns != null
                 ? `<b>${s.turns}</b> turn${s.turns !== 1 ? 's' : ''}${s.corrections ? ` · <span class="corr">${s.corrections} correction${s.corrections !== 1 ? 's' : ''}</span>` : ' · 0 corrections'}`
                 : '<span class="z">—</span>';
@@ -2529,9 +2769,9 @@ function renderProjSessions() {
             return `<tr class="${s.active ? 'live' : ''}" data-action="session-go" data-session-id="${esc(s.session_id)}" title="Open in the Sessions tab">
                 <td class="num">${esc(fmtWhen(s.created_at))}</td>
                 <td><div class="name">${esc(s.name || s.suggested_name || s.session_id)}</div><div class="sub">${plans}${plans && sentence ? ' · ' : ''}${esc(sentence)}</div></td>
+                <td>${roleOf(s)}</td>
                 <td>${holds}</td>
                 <td><span class="ended"><span class="pj-dot ${cls}"></span>${label}</span></td>
-                <td class="sig">${signals}</td>
                 <td class="ag">${agent}</td>
                 <td>${chips}</td>
             </tr>`;
@@ -2544,9 +2784,11 @@ function renderProjSessions() {
     </div>`;
 }
 
+// The Sessions tab, on this session. ReviewApp is a top-level const there: a
+// global binding, never a window property, so it is reached by name.
 function goToSession(sid) {
     if (typeof switchTab === 'function') switchTab('sessions');
-    setTimeout(() => { if (window.ReviewApp && typeof window.ReviewApp.loadSession === 'function') window.ReviewApp.loadSession(sid); }, 80);
+    setTimeout(() => { if (typeof ReviewApp !== 'undefined') ReviewApp.loadSession(sid); }, 80);
 }
 
 // ── findings and notes ───────────────────────────────────
@@ -2569,7 +2811,7 @@ function renderNotesSection() {
     return `<div class="pj-card">
         <div class="pj-card-head"><h3>Notes</h3><span class="pj-muted">everything in the notebook filed to this project</span></div>
         <div class="pj-stack">${list.length ? list.map(n => `<div class="pj-entry">
-            <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">${esc(n.kind)}${n.status && n.status !== 'confirmed' ? ` · ${esc(n.status)}` : ''}</span><span class="pj-muted">${esc(n.author)} · ${esc(formatDate(n.created_at))}</span></div>
+            <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">${esc(n.kind)}${n.status && n.status !== 'confirmed' ? ` · ${esc(n.status)}` : ''}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
             ${n.title ? `<div class="pj-t"><b>${esc(n.title)}</b></div>` : ''}
             <div class="pj-body">${esc(n.body)}</div>
             ${(n.sessions || []).length ? `<div class="pj-m">sessions ${n.sessions.map(s => `<span class="pj-cite">${esc(String(s).slice(0, 8))}</span>`).join(' ')}</div>` : ''}
@@ -2839,6 +3081,24 @@ async function projectAction(action, el, e) {
                 state.newProjectOpen = !state.newProjectOpen;
                 renderNewProjectForm();
                 return;
+            case 'head-edit':
+                state.editHead = true;
+                renderCanvas();
+                document.querySelector('#pj-head [data-field="description"]')?.focus();
+                return;
+            case 'head-cancel':
+                state.editHead = false;
+                renderCanvas();
+                return;
+            case 'head-save': {
+                const d = fields(document.getElementById('pj-head'));
+                if (!d.description) { showErr(el, 'Say what the project asks, in one line.'); return; }
+                // An empty short name clears it: the route keeps every field it is sent and drops only the ones left out.
+                await api('PATCH', `/api/campaigns/${P}`, { description: d.description, shorthand: d.shorthand });
+                state.editHead = false;
+                await refreshActiveCampaign();
+                return;
+            }
             case 'new-project-cancel':
                 state.newProjectOpen = false;
                 renderNewProjectForm();
@@ -2951,16 +3211,19 @@ async function projectAction(action, el, e) {
                 state.openForm = 'add-session';
                 state.unfiled = null;
                 renderCanvas();
-                let list = (await api('GET', '/api/sessions?unfiled=1')).sessions || [];
-                if (!list.length) list = (await api('GET', '/api/sessions')).sessions || [];
-                state.unfiled = list.filter(s => s.project_id !== cid);
+                // Every session not yet linked here, unfiled ones first; a
+                // session informs several projects, so its home is no bar.
+                const list = (await api('GET', '/api/sessions')).sessions || [];
+                state.unfiled = list
+                    .filter(s => !(s.projects || []).some(l => l.id === cid))
+                    .sort((a, b) => (a.project_id ? 1 : 0) - (b.project_id ? 1 : 0));
                 renderCanvas();
                 return;
             }
             case 'session-add-submit': {
                 const d = fields(el.closest('.pj-form'));
                 if (!d.session_id) return;
-                await api('POST', `/api/sessions/${enc(d.session_id)}/project`, { campaign_id: cid });
+                await api('POST', `/api/sessions/${enc(d.session_id)}/project`, { campaign_id: cid, role: d.role || null });
                 state.openForm = null;
                 await reloadProject();
                 return;

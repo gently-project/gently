@@ -93,11 +93,17 @@ const HomeApp = (() => {
         return link ? link.textContent.trim() : '';
     }
 
+    /** The same picture in counts, for the viewer (gently.core.u16). */
+    function u16Of(s) {
+        return `/api/sessions/${encodeURIComponent(s.session_id)}/embryos/${encodeURIComponent(s.embryo_id)}/volumes/${encodeURIComponent(s.timepoint)}/projection.u16?`;
+    }
+
     /** Open the strip's images in the Lightbox, starting at the one clicked. */
     function openRecent(index) {
         if (typeof Lightbox === 'undefined' || !_recent.length) return;
         Lightbox.open(_recent.map(s => ({
             url: s.url,
+            u16: u16Of(s).replace(/\?$/, ''),
             data_type: 'projection',
             metadata: {
                 embryo_id: s.embryo_id,
@@ -144,6 +150,21 @@ const HomeApp = (() => {
         } catch (_) { /* the chip falls back to the id */ }
     }
 
+    const _operatorNames = {};
+    async function ensureOperatorNames() {
+        if (Object.keys(_operatorNames).length) return;
+        try {
+            const d = await (await fetch('/api/auth/users')).json();
+            (d.users || []).forEach(u => { _operatorNames[u.id] = u.name; });
+        } catch (_) { /* ids show as themselves */ }
+    }
+
+    function whoChip(s) {
+        const ops = s.operators || [];
+        if (!ops.length) return '';
+        return ops.map(o => (typeof Who !== 'undefined' ? Who.chip(o) : escapeHtml(_operatorNames[o] || o))).join(' ');
+    }
+
     function projectChip(s) {
         if (!s.project_id) return '<span class="home-tag home-tag-unfiled" title="In no project yet">unfiled</span>';
         const name = _projectNames[s.project_id] || String(s.project_id).slice(0, 8);
@@ -154,9 +175,14 @@ const HomeApp = (() => {
         const el = document.getElementById('home-recent-sessions');
         if (!el) return;
         try {
-            const [data] = await Promise.all([(await fetch('/api/sessions')).json(), ensureProjectNames()]);
-            const sessions = (data.sessions || []).slice(0, SESSIONS_N);
-            if (!sessions.length) { empty(el, 'No sessions yet.'); return; }
+            const [data] = await Promise.all([(await fetch('/api/sessions')).json(), ensureProjectNames(), ensureOperatorNames()]);
+            // Only sessions that hold embryo data. A session opened and closed
+            // with nothing in it is still in the Sessions tab, not here; the
+            // live one stays, whatever it holds, because it is the one in use.
+            const sessions = (data.sessions || [])
+                .filter(s => s.active || (s.embryo_count || 0) > 0)
+                .slice(0, SESSIONS_N);
+            if (!sessions.length) { empty(el, 'No sessions with embryos yet.'); return; }
             el.innerHTML = sessions.map(s => {
                 const live = s.active ? '<span class="home-tag home-tag-live">live</span>' : '';
                 const diag = s.advanced_diagnostics
@@ -166,7 +192,7 @@ const HomeApp = (() => {
                     `<button class="home-resume" data-resume="${escapeHtml(s.session_id)}">Resume</button>`;
                 return `<div class="home-item">
                     <div class="home-item-main">
-                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}</div>
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}${whoChip(s)}</div>
                         <span class="home-item-meta">${escapeHtml(relTime(s.last_active))} · ${s.embryo_count || 0} embryos</span>
                     </div>${resume}
                 </div>`;
@@ -194,7 +220,7 @@ const HomeApp = (() => {
             const items = trees.slice(0, CAMPAIGNS_N);
             let unfiled = 0;
             try {
-                const u = await (await fetch('/api/sessions?unfiled=1')).json();
+                const u = await (await fetch('/api/sessions?unfiled=1&detail=0')).json();
                 unfiled = (u.sessions || []).length;
             } catch (_) { unfiled = 0; }
             if (!items.length && !unfiled) { empty(el, 'No projects yet.'); return; }
@@ -287,7 +313,7 @@ const HomeApp = (() => {
                 const title = `${s.session_id}/${s.embryo_id}${tp}`
                     + (n ? ` · ${n} timepoint${n === 1 ? '' : 's'}` : '');
                 return `<button type="button" class="home-image" data-home-image="${i}" title="${escapeHtml(title)}">
-                    <img loading="lazy" src="${s.url}" alt="${escapeHtml(label)}">
+                    <span class="home-pix" data-u16="${u16Of(s)}&max=256" data-jpg="${s.url}" data-alt="${escapeHtml(label)}"></span>
                     <span class="home-image-cap">${cap}</span>
                 </button>`;
             };
@@ -304,6 +330,12 @@ const HomeApp = (() => {
                     </div>
                     <div class="home-image-strip">${g.items.map(x => tile(x.image, x.index)).join('')}</div>
                 </div>`).join('');
+            // Each tile is the counts, drawn by the viewer at the size a tile has
+            // (gently.core.u16); the JPEG takes its place if they cannot be had.
+            el.querySelectorAll('.home-pix').forEach(h => {
+                if (typeof U16View !== 'undefined') U16View.tile(h, h.dataset.u16, h.dataset.jpg, h.dataset.alt);
+                else h.replaceWith(Object.assign(document.createElement('img'), { src: h.dataset.jpg, alt: h.dataset.alt, loading: 'lazy' }));
+            });
             if (!el._openWired) {
                 el._openWired = true;
                 el.addEventListener('click', e => {
