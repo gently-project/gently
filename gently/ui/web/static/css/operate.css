@@ -163,7 +163,7 @@
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(0, 1fr) 260px;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     gap: var(--op-3);
     align-content: start;
     /* Never triggers in the two-column layout (both children carry min-height:0);
@@ -174,15 +174,10 @@
 
 .op-main {
     grid-column: 1;
-    /* Row 2 EXPLICITLY. The lock banner is `hidden` most of the time, and a
-       hidden element generates no box, so auto-placement used to drop this and
-       the rail into row 1 — the `auto` row — leaving the `1fr` row empty. The
-       whole pane then sized to its content: the camera rendered 163 px tall in
-       a 464 px pane, with 324 px of dead space beside a 163 px image.
-       Worse, it changed with interlock state, because when the banner IS shown
-       it fills row 1 and pushes these into row 2. The frame was one size with
-       the sample at the objective and another without. */
-    grid-row: 2;
+    /* Row 1 EXPLICITLY, as is the rail's. Auto-placement once put these in
+       the wrong row around a hidden banner and the camera rendered 163 px
+       tall in a 464 px pane; the banner is gone, the explicit rows stay. */
+    grid-row: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
@@ -191,7 +186,7 @@
 }
 .op-inst {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -211,49 +206,6 @@
 @supports not (scrollbar-gutter: stable) {
     .op-inst { padding-right: calc(var(--op-1) + 6px); }
 }
-
-/* ── the XY interlock banner ────────────────────────────────────────────────
-   The one piece of chrome that appears in more than one pane. It is rendered
-   from a single function into a per-pane host — deliberately NOT a shared
-   header abstraction. */
-.op-lock {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--op-3);
-    padding: var(--op-2) var(--op-3);
-    border: 1px solid var(--op-warn);
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--op-warn) 12%, transparent);
-}
-.op-lock[hidden] { display: none; }
-/* #139: below the floor is a state, not a smaller number. Different colour,
-   heavier border, and the banner pulses once a second so it cannot sit
-   unnoticed for half an hour the way "-2 µm to floor" did. */
-.op-lock.is-below {
-    border-color: var(--op-bad);
-    border-width: 2px;
-    background: color-mix(in srgb, var(--op-bad) 22%, transparent);
-    animation: op-below 1s ease-in-out infinite;
-}
-.op-lock.is-below .op-lock-txt, .op-lock.is-below .op-lock-txt i { color: var(--op-bad); }
-@keyframes op-below { 50% { background: color-mix(in srgb, var(--op-bad) 40%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .op-lock.is-below { animation: none; } }
-.op-lock-txt {
-    font-size: 0.68rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 600;
-    color: var(--op-warn);
-}
-/* text-transform on the parent would uppercase the unit too, and Unicode maps
-   µ (U+00B5 MICRO SIGN) to Μ (U+039C GREEK CAPITAL MU) — glyph-identical to M.
-   The banner then reads "1970 MM TO FLOOR" for 1970 µm: 1000x, on the one
-   warning that stands between the objective and the coverslip. Units stay as
-   authored. Guarded by tests/test_units_not_uppercased.py. */
-.op-lock-txt i { font-style: normal; text-transform: none; color: var(--op-ink-dim); }
 
 /* ── viewport ───────────────────────────────────────────────────────────── */
 /* The viewport is a centering box; the frame chrome (border, background,
@@ -309,9 +261,6 @@
 }
 /* Marking is always available on the bottom pane — it is not a mode you enter. */
 #op-cam-bottom .op-mark-canvas { cursor: crosshair; }
-/* While the sample is at the objective the affordance withdraws itself, so the
-   rule is learned from the surface rather than from a toast after the click. */
-#op-cam-bottom.is-locked .op-mark-canvas { cursor: not-allowed; }
 .op-cam-ph {
     position: absolute;
     inset: 0;
@@ -718,15 +667,14 @@
 
 /* ── narrow ─────────────────────────────────────────────────────────────── */
 @container operate (max-width: 900px) {
-    .op-pane { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
-    /* Both are grid-row:2 explicitly (see .op-main above, which needs it so a
-       hidden lock banner cannot pull the camera into row 1). Resetting only the
+    .op-pane { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+    /* Both carry an explicit row (see .op-main above). Resetting only the
        column stacked them INTO THE SAME CELL: .op-cam is position:relative and
        its placeholder is inset:0, so the camera painted over the instrument
        rail and swallowed its clicks — "Start camera" was unclickable by mouse
        at any width below the breakpoint. The rail gets its own row. */
-    .op-main { grid-column: 1; grid-row: 2; }
-    .op-inst { grid-column: 1; grid-row: 3; }
+    .op-main { grid-column: 1; grid-row: 1; }
+    .op-inst { grid-column: 1; grid-row: 2; }
     /* min-height:0 is right in the two-column layout, where .op-main must be
        allowed to shrink so the camera can take the leftover height. Stacked it
        is wrong: the row squashed to 403px around a 708px square camera, which
@@ -993,6 +941,8 @@
    frame came as counts, 0–255 levels when it came as a JPEG. */
 .iv-panel {
     display: flex;
+    flex-direction: row;   /* .lp stacks; the strip is one line */
+    flex-wrap: nowrap;
     align-items: center;
     gap: var(--op-2);
     padding-bottom: 5px;   /* room for the handle grips, which hang below */

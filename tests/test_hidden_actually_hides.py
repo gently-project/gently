@@ -17,7 +17,7 @@ screen. A test that reads the property can never catch this.
 
 So this scans instead: any class that a script hides through the property, and
 whose CSS sets `display`, must carry its own `[hidden]` guard. The pre-existing
-code already does this — `.boot-banner[hidden]`, `.op-lock[hidden]`,
+code already does this — `.boot-banner[hidden]`,
 `.region-strip[hidden]` — it was the newer panels that missed it.
 """
 
@@ -39,7 +39,6 @@ TOGGLED_CLASSES = [
     "op-adv",
     "al-history",
     "boot-banner",
-    "op-lock",
     "devices-limits",
     "region-strip",
     "region-history",

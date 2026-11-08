@@ -54,7 +54,6 @@ CONTROLS = {
     "op-target-scope": "$('op-target-scope')",
     "op-gv-in": "$('op-gv-in')",
     "op-pz-in": "$('op-pz-in')",
-    "[data-backoff]": "[data-backoff]",
     "[data-mode]": "[data-mode]",
     "[data-lib]": "[data-lib]",
 }
@@ -89,18 +88,21 @@ def test_every_control_is_wired_in_wire() -> None:
 
 
 def test_the_safety_control_is_wired() -> None:
-    """`[data-backoff]` retracts the objective from the sample.
+    """`op-halt` stops all stage motion.
 
-    Called out separately because it was among the eight, and because a dead
-    button on an interlock banner is the worst case: it is pressed exactly when
-    something is already wrong.
+    Called out separately because a dead safety button is the worst case: it
+    is pressed exactly when something is already wrong. It used to be the
+    interlock banner's Back off; that banner and the XY lock behind it were
+    removed on 2026-11-08 at the operator's request, and HALT is the one left.
     """
     src = OPERATE.read_text(encoding="utf-8")
-    hook = re.search(r"\[data-backoff\][^;]*addEventListener\('click',\s*(\w+)", src, re.S)
-    assert hook, "[data-backoff] is not bound to a click handler"
+    hook = re.search(
+        r"\$\('op-halt'\)[^;]*;\s*if \(halt\) halt\.addEventListener\('click',\s*(\w+)", src
+    )
+    assert hook, "op-halt is not bound to a click handler"
     handler = hook.group(1)
     assert f"function {handler}" in src or f"async function {handler}" in src, (
-        f"[data-backoff] is bound to {handler!r}, which is not defined"
+        f"op-halt is bound to {handler!r}, which is not defined"
     )
 
 

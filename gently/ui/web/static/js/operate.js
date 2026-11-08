@@ -13,12 +13,13 @@
  * `disabled`, `hidden` or early-return ever starts keying off `_pane`, the step
  * model has grown back and this rewrite has been undone.
  *
- * Gating comes from live hardware state only: the XY interlock (moveStageTo /
- * OperateMath.isEngaged) and the F-drive floor (OperateMath.stepAllowed).
- * Selection is a cursor — it parameterises requests and never disables anything.
+ * Gating comes from live hardware state only: the F-drive floor
+ * (OperateMath.stepAllowed). Selection is a cursor — it parameterises requests
+ * and never disables anything. (An XY interlock against the F-drive used to
+ * stand here too; see moveStageTo for why it went.)
  *
- * Pure geometry, banding and the interlock predicate live in operate-math.js so
- * they can be unit-tested (tests/js/operate-math.test.mjs).
+ * Pure geometry and banding live in operate-math.js so they can be
+ * unit-tested (tests/js/operate-math.test.mjs).
  */
 const OperateManager = (function () {
     const M = (typeof OperateMath !== 'undefined') ? OperateMath : null;
@@ -72,23 +73,6 @@ const OperateManager = (function () {
     // timelapse, started the SPIM camera streaming under the run.
     let _bottomOn = false;
     let _spimOn = false;
-
-    // ── the interlock latch ─────────────────────────────────────────────────
-    // Retract is a RELATIVE move, so there is no absolute "safe height" to
-    // derive this from — asking the hardware cannot answer it. Persist it, so
-    // the ordinary reaction to something looking stuck (F5) doesn't come back
-    // claiming the head is up and re-enable an absolute XY move with the
-    // objective down. Telemetry can still clear it (see OperateMath.isEngaged).
-    const HEAD_KEY = 'gently.operate.headLowered';
-    function loadHeadLowered() {
-        try { return sessionStorage.getItem(HEAD_KEY) === '1'; } catch (_) { return false; }
-    }
-    let _headLowered = loadHeadLowered();
-    function setHeadLowered(v) {
-        _headLowered = !!v;
-        try { sessionStorage.setItem(HEAD_KEY, _headLowered ? '1' : '0'); } catch (_) {}
-        renderLock();
-    }
 
     // ── marking ─────────────────────────────────────────────────────────────
     // Markers are held in STAGE coordinates and re-projected onto whatever frame
@@ -254,19 +238,18 @@ const OperateManager = (function () {
     }
 
     // ══ THE XY CHOKEPOINT ═══════════════════════════════════════════════════
-    // The ONLY caller of /api/devices/stage/move in this file. The server does
-    // NOT interlock XY against the F-drive — routes/data.py validates that x and
-    // y are floats and nothing else — so this predicate is the whole guard.
-    // Do not add a second fetch of this endpoint; grep the URL string before
-    // touching XY motion.
+    // The ONLY caller of /api/devices/stage/move in this file. Nothing
+    // interlocks XY against the F-drive: the server validates that x and y are
+    // floats and nothing else, and the page's own lock — XY refused, a banner
+    // and a Back off button in every pane whenever the head was within
+    // 1000 µm of its floor — was taken out on 2026-11-08 at the operator's
+    // request: the rig images at ~85 µm to floor, so it refused every
+    // drive-to-embryo during a run. The chokepoint stays: one caller, and
+    // grep the URL string before touching XY motion.
     // `said` is what to toast on success. It was named `why`, which shadowed
     // the why() helper the catch calls — so every failed move threw a second
     // time, inside its own handler, and the operator saw no toast at all.
     async function moveStageTo(x, y, said) {
-        if (isEngaged()) {
-            toastFail('Sample is at the objective — back it off before moving XY');
-            return false;
-        }
         try {
             await postJSON('/api/devices/stage/move', { x, y });
             if (said) toast(said);
@@ -276,10 +259,6 @@ const OperateManager = (function () {
             return false;
         }
     }
-    function isEngaged() {
-        return M ? M.isEngaged(_headLowered, fd.floor()) : _headLowered;
-    }
-
     // ══ Z INSTRUMENT ════════════════════════════════════════════════════════
     // One factory, two instances. The axes differ enormously in scale — the
     // bottom objective has a ~200 µm throw, the F-drive runs 30→25000 µm onto a
@@ -414,7 +393,6 @@ const OperateManager = (function () {
             if (foot) foot.textContent = statusText || '';
             renderTicks();
             renderNudges();
-            renderLock();
         }
 
         async function nudge(delta) {
@@ -478,37 +456,8 @@ const OperateManager = (function () {
         nudge: '/api/devices/spim/fdrive/nudge',
         bands: true, scale: 'log', ticks: [100, 1000, 10000],
         steps: [50, 10, 5],
-        onDown: () => setHeadLowered(true),
     });
 
-    // ══ THE INTERLOCK, MADE VISIBLE ═════════════════════════════════════════
-    // Enforcement alone is not enough: with click-to-center always available,
-    // the operator must be able to see WHY a click will not do anything. The
-    // affordance withdraws itself (locked cursor) and the banner says so.
-    function renderLock() {
-        const eng = isEngaged();
-        const d = fd.floor();
-        ['bottom', 'spim'].forEach(p => {
-            const el = $(`op-lock-${p}`);
-            if (el) el.hidden = !eng;
-            const dd = $(`op-lock-${p}-d`);
-            if (dd) dd.textContent = d == null ? '—' : Math.round(d);
-            // #139: "-2 µm to floor" sat in the same soft orange as 1970 for
-            // half an hour. Below the floor is a different state, not a number.
-            const below = d != null && d < 0;
-            if (el) el.classList.toggle('is-below', below);
-            const unit = el && el.querySelector('.op-lock-txt i');
-            if (unit) unit.textContent = below ? 'µm BELOW floor' : 'µm to floor';
-        });
-        const cam = $('op-cam-bottom');
-        if (cam) cam.classList.toggle('is-locked', eng);
-        drawMarkers();
-    }
-    // Always reachable, unlike the old design where clearing the latch lived on
-    // a step you might never arrive at — lower the head, never reach it, and XY
-    // stayed locked forever with no escape short of clearing sessionStorage.
-    // #109. One request, no client-side gate, no busy check: the whole point
-    // is that it works while a nudge is in flight. Both axes re-read after.
     /**
      * The SPIM head fully up, to the F-drive's top limit. A long move — the
      * button says so while it travels, and HALT stays live beside it.
@@ -520,7 +469,6 @@ const OperateManager = (function () {
             const r = await postJSON('/api/devices/spim/fdrive/raise', {});
             const at = r && r.position != null ? Math.round(r.position) : null;
             toast(at != null ? `SPIM head raised to ${at} µm` : 'SPIM head raised');
-            setHeadLowered(false);
         } catch (e) {
             toastFail(`Raise failed (${why(e)})`);
         } finally {
@@ -554,19 +502,6 @@ const OperateManager = (function () {
             fd.refresh(); bz.refresh();
         }
     }
-    async function backOff() {
-        try {
-            fd.absorb(await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }));
-            // A retract that FAILS must not report the head as up: that is the
-            // state the XY chokepoint trusts before commanding an absolute move.
-            setHeadLowered(false);
-            toast('Backed off 100 µm');
-        } catch (e) {
-            if (e && e.data && e.data.position != null) fd.absorb(e.data);
-            toastFail(`Back-off failed (${why(e)}) — head still down`);
-        }
-    }
-
     // ══ VIEWPORT ════════════════════════════════════════════════════════════
     function frameOf(p) {
         if (!p || !Array.isArray(p.shape)) return null;
@@ -841,12 +776,10 @@ const OperateManager = (function () {
         embryoPoints(r).forEach(({ emb, cx, cy }) => {
             const sel = emb.id === _selected;
             ctx.save();
-            ctx.strokeStyle = isEngaged() ? '#7d8899' : (sel ? '#93c5fd' : '#60a5fa');
+            ctx.strokeStyle = sel ? '#93c5fd' : '#60a5fa';
             ctx.fillStyle = ctx.strokeStyle;
             ctx.lineWidth = sel ? 2.5 : 1.2;
-            if (isEngaged()) ctx.setLineDash([4, 3]);
             ctx.beginPath(); ctx.arc(cx, cy, EMB_R, 0, Math.PI * 2); ctx.stroke();
-            ctx.setLineDash([]);
             if (sel) {
                 // Selected: dashed outer halo so the state reads as shape, not only shade.
                 ctx.setLineDash([3, 3]); ctx.lineWidth = 1.2;
@@ -858,8 +791,7 @@ const OperateManager = (function () {
             ctx.fillText(labelFor(emb), cx + EMB_R + 3, cy + 4);
             ctx.restore();
         });
-        const locked = isEngaged();
-        const colour = locked ? '#7d8899' : '#4ade80';
+        const colour = '#4ade80';
         _markers.forEach((m, i) => {
             const p = markerToCanvas(m, r);
             if (!p) return;
@@ -3471,7 +3403,6 @@ const OperateManager = (function () {
         PANES[name].onEnter();
         PANES[name].render();
         publishRoster();
-        renderLock();
     }
 
     function renderSubnavMeta() {
@@ -3749,8 +3680,6 @@ const OperateManager = (function () {
         adoptLsParams();
         document.querySelectorAll('#op-spim-side [data-side]').forEach(b =>
             b.addEventListener('click', () => setSpimSide(b.dataset.side)));
-        document.querySelectorAll('[data-backoff]').forEach(b =>
-            b.addEventListener('click', backOff));
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
         const keptStrip = $('op-cal-kept-strip');
@@ -3925,7 +3854,6 @@ const OperateManager = (function () {
         // The rig's choice of which rail cards are open.
         await loadRailCards();
         await Promise.all([bz.refresh(), fd.refresh()]);
-        renderLock();
         renderSubnavMeta();
     }
     // ---- a plan item, set up here ----------------------------------------

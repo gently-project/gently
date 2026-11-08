@@ -177,47 +177,6 @@ test('gaugeFraction: log makes the approach region visible where linear cannot',
     assert.ok(M.gaugeFraction(100, 30, 25000, 'log') < log);
 });
 
-test('isEngaged: with no telemetry the latch alone decides (fail safe)', () => {
-    assert.equal(M.isEngaged(true, null), true);
-    assert.equal(M.isEngaged(false, null), false);
-});
-
-test('isEngaged: measured close locks regardless of the latch', () => {
-    assert.equal(M.isEngaged(false, 500), true);
-    assert.equal(M.isEngaged(true, 500), true);
-    assert.equal(M.isEngaged(false, 0), true);
-});
-
-test('isEngaged: measured clear clears a stale latch', () => {
-    // Someone raised the head at the controller box. The old rule could only ever
-    // ADD lock from telemetry, so XY stayed locked forever with no UI escape.
-    assert.equal(M.isEngaged(true, 5000), false);
-    assert.equal(M.isEngaged(false, 5000), false);
-});
-
-test('isEngaged: inside the hysteresis band the latch breaks the tie', () => {
-    assert.equal(M.isEngaged(true, 1500), true);
-    assert.equal(M.isEngaged(false, 1500), false);
-});
-
-test('isEngaged: non-finite telemetry is treated as no telemetry, not as clear', () => {
-    assert.equal(M.isEngaged(true, NaN), true);
-    assert.equal(M.isEngaged(true, undefined), true);
-});
-
-test('isEngaged: the lock is monotone in proximity for a given latch', () => {
-    // Closer must never be safer.
-    for (const latch of [true, false]) {
-        let prev = M.isEngaged(latch, 20000);
-        for (const floor of [5000, 2500, 2000, 1500, 1000, 500, 0]) {
-            const now = M.isEngaged(latch, floor);
-            assert.ok(!(prev === true && now === false),
-                `latch=${latch}: lock released while closing in at ${floor} µm`);
-            prev = now;
-        }
-    }
-});
-
 // ── atPosition: may this frame be presented as the selected embryo's? ────────
 // The bug it exists for: selecting a different embryo rewrote the caption and
 // left the previous embryo's pixels on screen, three times in a row at

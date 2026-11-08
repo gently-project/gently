@@ -158,5 +158,4 @@ def test_the_button_is_wired_in_wire_and_says_it_is_travelling():
     fn = OPERATE[OPERATE.index("async function raiseHead()") :][:900]
     assert "postJSON('/api/devices/spim/fdrive/raise', {})" in fn
     assert "b.textContent = 'Raising…'" in fn
-    assert "setHeadLowered(false)" in fn, "a raised head is not a lowered one"
     assert "fd.refresh()" in fn
