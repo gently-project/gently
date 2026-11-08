@@ -1465,7 +1465,10 @@ class DeviceLayerServer(Service):
                 tick = time.monotonic()
                 img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
                 if img is not None:
-                    self._last_ls_frame = img
+                    # Multi's A-red-over-B-green frame is a rendering, drawn from
+                    # its JPEG; the counts route serves one camera's frame or none.
+                    # ponytail: a two-colour U16View would put Multi on counts too.
+                    self._last_ls_frame = img if img.ndim == 2 else None
                 payload = (
                     self._encode_frame_for_stream(
                         img, self._ls_target_max_dim, self._ls_jpeg_quality

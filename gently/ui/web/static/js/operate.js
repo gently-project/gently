@@ -3551,7 +3551,9 @@ const OperateManager = (function () {
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
-        showFrame('spim', p);
+        // Multi is two cameras composed in colour, a rendering: it comes as its
+        // JPEG. A or B is one camera's frame, drawn from its counts.
+        showFrame('spim', p, p.side !== 'Multi');
     }
     function onEmbryosUpdate(p) {
         const hadAny = _embryos.length > 0;

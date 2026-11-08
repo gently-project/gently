@@ -197,3 +197,40 @@ def test_multi_channels_are_matched_to_cameras_by_name_not_order(monkeypatch):
     bgr = dl._grab_lightsheet_frame_sync()
     assert bgr[0, 0, 2] == 255 and bgr[0, 0, 1] == 0  # HamCam1 → red
     assert bgr[3, 3, 1] == 255 and bgr[3, 3, 2] == 0  # HamCam2 → green
+
+
+@pytest.mark.asyncio
+async def test_the_counts_route_serves_one_camera_s_frame_or_none(monkeypatch):
+    """A or B leaves its frame for /frame.u16; Multi's colour composite does not."""
+    import asyncio
+
+    import numpy as np
+
+    dl = _make_dl(with_camera_b=True, with_scanner_b=True, with_piezo_b=True)
+    dl._state_pause_counter = 0
+    dl._ls_target_max_dim = 64
+    dl._ls_jpeg_quality = 50
+    dl._last_ls_frame = None
+    monkeypatch.setattr(dl, "_encode_frame_for_stream", lambda img, d, q: {"jpeg_b64": "x"})
+    monkeypatch.setattr(dl, "_stop_lightsheet_sequence_sync", lambda: None)
+    monkeypatch.setattr(dl, "_log_focus_trace", lambda *a, **k: None)
+
+    async def one_frame(grab):
+        dl._ls_subscribers = [asyncio.Queue(maxsize=4)]
+        monkeypatch.setattr(dl, "_grab_lightsheet_frame_sync", grab)
+        task = asyncio.create_task(dl._lightsheet_streamer())
+        await asyncio.wait_for(dl._ls_subscribers[0].get(), timeout=2.0)
+        dl._ls_subscribers.clear()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    dl._ls_params["side"] = "B"
+    await one_frame(lambda: np.full((8, 8), 7, np.uint16))
+    assert dl._last_ls_frame is not None and dl._last_ls_frame.ndim == 2
+
+    dl._ls_params["side"] = "Multi"
+    await one_frame(lambda: np.zeros((8, 8, 3), np.uint8))
+    assert dl._last_ls_frame is None
