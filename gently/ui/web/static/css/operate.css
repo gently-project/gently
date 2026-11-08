@@ -985,19 +985,62 @@
     cursor: help;
 }
 
-/* The display range lives on one line: label, histogram, the two verbs. The
-   histogram keeps the full width it had — it is the part that must stay
-   readable — and gives back the two rows of chrome that surrounded it. */
-.iv-row {
+/* One DOM, two shapes. The bottom camera keeps the strip: label, black,
+   histogram, white, the two verbs on one line under the frame. The SPIM head
+   stacks it (.iv-stacked) at the frame's own width: a head row, a 48 px
+   histogram, and black and white at the two ends beneath, where the axis
+   ends are. Black and white are typed as well as dragged: counts when the
+   frame came as counts, 0–255 levels when it came as a JPEG. */
+.iv-panel {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--op-2);
     padding-bottom: 5px;   /* room for the handle grips, which hang below */
 }
-.iv-row .lp-title { flex: none; }
-.iv-row .iv-src { flex: none; margin-right: 2px; }
-.iv-row .iv-hist { flex: 1 1 auto; min-width: 120px; }
-.iv-row .iv-acts { flex: none; display: flex; gap: 4px; }
+.iv-panel .lp-title { flex: none; }
+.iv-meta { flex: none; display: inline-flex; gap: 4px; margin-right: 2px; }
+.iv-panel .iv-hist { flex: 1 1 auto; min-width: 120px; }
+.iv-panel .iv-acts { flex: none; display: flex; gap: 4px; }
+.iv-num {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+.iv-num input {
+    width: 60px;
+    padding: 1px 4px;
+    font-family: var(--op-mono);
+    font-size: 0.72rem;
+    text-align: right;
+    color: var(--op-ink);
+    background: var(--op-panel);
+    border: 1px solid var(--op-rule);
+    border-radius: 3px;
+    -moz-appearance: textfield;
+}
+.iv-num input::-webkit-outer-spin-button, .iv-num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.iv-num input:focus { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
+
+.iv-stacked {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "title meta acts" "hist hist hist" "lo . hi";
+    gap: 4px var(--op-2);
+    align-items: center;
+    padding-bottom: 0;
+}
+.iv-stacked .lp-title { grid-area: title; }
+.iv-stacked .iv-meta { grid-area: meta; }
+.iv-stacked .iv-acts { grid-area: acts; }
+.iv-stacked .iv-hist { grid-area: hist; height: 48px; min-width: 0; margin-bottom: 4px; }
+.iv-stacked .iv-num-lo { grid-area: lo; }
+.iv-stacked .iv-num-hi { grid-area: hi; justify-self: end; }
+
 
 .iv-hist {
     position: relative;
@@ -1884,30 +1927,53 @@
 /* ── SPIM head: the image hugs its own width, the panels take the rest ──────
    The frame is height-driven (see .op-cam-fit), so at a desk-sized window it
    was a 450 px square centred in an 1100 px column while four panels queued
-   in a 260 px rail that scrolled. Here the image and the rail share one row:
-   the image box takes the width its aspect gives it at the row's height and
-   sits at the left; the rail takes the rest, its panels flowing into as many
-   240 px columns as fit, so at a desk-sized window nothing scrolls. The
-   caption and the display strip stay beneath, full width. The aspect ratio
-   has to be on the box itself for the row to size it (setCamAr in operate.js
-   puts --cam-ar on the box, which the fit inherits). Scoped to this pane; the
-   bottom camera keeps its rail and its fold-away cards. */
-#op-pane-spim { grid-template-columns: minmax(0, 1fr); }
+   in a 260 px rail that scrolled. Here the frame's column and the rail share
+   one row. The column holds the image box, its caption and the display panel
+   at the width the frame's aspect gives it at the row's height, and sits at
+   the left; the rail takes the rest, its panels flowing into as many 240 px
+   columns as fit, so at a desk-sized window nothing scrolls.
+
+   The row is a size container: its height is the room there is, known before
+   its children lay out, so the image box can be given that height less what
+   sits under it (in cqh) and take its width from its aspect — which is what
+   lets the caption and the display panel sit at the frame's own width with
+   no script measuring anything. The aspect ratio has to be on the box itself
+   for that (setCamAr in operate.js puts --cam-ar on the box, which the fit
+   inherits). Scoped to this pane; the bottom camera keeps its rail and its
+   fold-away cards. */
+#op-pane-spim {
+    grid-template-columns: minmax(0, 1fr);
+    --op-display-h: 112px;   /* the display panel's height, fixed so the frame's is exact */
+}
 #op-pane-spim .op-view-row {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
     align-items: stretch;
     gap: var(--op-3);
+    container-type: size;
+    container-name: stage;
 }
-#op-pane-spim .op-cam {
+#op-pane-spim .op-stage-col {
+    /* Under the frame: the caption line, the display panel, two gaps. */
+    --op-under: calc(16px + var(--op-display-h) + 2 * var(--op-2));
     flex: 0 1 auto;
-    height: 100%;
-    aspect-ratio: var(--cam-ar, 1 / 1);
+    min-width: 0;
     /* The rail keeps at least its old width; a tall, narrow window shrinks
        the image instead, which then letterboxes inside its box. */
     max-width: calc(100% - 260px - var(--op-3));
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
 }
+#op-pane-spim .op-cam {
+    flex: 0 0 auto;
+    height: calc(100cqh - var(--op-under));
+    aspect-ratio: var(--cam-ar, 1 / 1);
+    max-width: 100%;
+}
+#op-pane-spim .op-bar { flex: 0 0 auto; min-height: 16px; }
+#op-pane-spim .op-block-display { flex: 0 0 auto; height: var(--op-display-h); box-sizing: border-box; }
 #op-pane-spim .op-inst {
     grid-column: auto;
     grid-row: auto;
@@ -1923,7 +1989,9 @@
     align-items: start;
 }
 @container operate (max-width: 900px) {
-    #op-pane-spim .op-view-row { flex-direction: column; }
-    #op-pane-spim .op-cam { flex: 0 0 auto; width: 100%; height: auto; max-width: none; }
+    #op-pane-spim .op-view-row { flex-direction: column; container-type: normal; }
+    #op-pane-spim .op-stage-col { max-width: none; }
+    #op-pane-spim .op-cam { width: 100%; height: auto; }
+    #op-pane-spim .op-block-display { height: auto; }
     #op-pane-spim .op-inst { display: flex; flex-direction: column; min-width: 0; }
 }
