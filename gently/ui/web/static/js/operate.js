@@ -3215,7 +3215,7 @@ const OperateManager = (function () {
     // magnification.
     function attachImageViews() {
         if (typeof ImageView === 'undefined') return;
-        ImageView.attach('op-cam-bottom', { controlsHost: 'op-display-bottom' });
+        ImageView.attach('op-cam-bottom', { controlsHost: 'op-display-bottom', display: 'stacked' });
         ImageView.attach('op-cam-spim', { controlsHost: 'op-display-spim', display: 'stacked' });
     }
 

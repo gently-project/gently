@@ -463,38 +463,40 @@
                   <div class="op-panearea">
 
                 <!-- ══ BOTTOM CAM ══ see the dish, focus the bottom objective, find embryos -->
-                <section class="op-pane" id="op-pane-bottom" data-pane="bottom">
+                <section class="op-pane op-pane-row" id="op-pane-bottom" data-pane="bottom">
                   <div class="op-main">
-                    <div class="op-cam" id="op-cam-bottom">
-                      <div class="op-cam-fit">
-                        <img class="op-cam-img" id="op-img-bottom" alt="Bottom camera view">
-                        <canvas class="op-mark-canvas" id="op-mark-canvas"></canvas>
-                        <div class="op-cam-ph" id="op-ph-bottom">Camera off</div>
-                        <div class="op-cam-busy" id="op-busy-bottom" hidden>
-                          <span class="op-cam-spin" aria-hidden="true"></span>
-                          <span class="op-cam-busy-txt">Detecting…</span>
+                    <!-- One row: the frame's column at the width the frame's aspect
+                         gives it at this height, the rail beside it with the rest,
+                         its cards in as many columns as fit (operate.css,
+                         ".op-pane-row"). The marking block sits under the row. -->
+                    <div class="op-view-row">
+                      <div class="op-stage-col">
+                        <div class="op-cam" id="op-cam-bottom">
+                          <div class="op-cam-fit">
+                            <img class="op-cam-img" id="op-img-bottom" alt="Bottom camera view">
+                            <canvas class="op-mark-canvas" id="op-mark-canvas"></canvas>
+                            <div class="op-cam-ph" id="op-ph-bottom">Camera off</div>
+                            <div class="op-cam-busy" id="op-busy-bottom" hidden>
+                              <span class="op-cam-spin" aria-hidden="true"></span>
+                              <span class="op-cam-busy-txt">Detecting…</span>
+                            </div>
+                          </div>
                         </div>
+                        <!-- Marking actions sit under the image they act on, not in the
+                             instrument column, which is for the hardware axes. -->
+                        <div class="op-bar">
+                          <span class="op-cap" id="op-mark-hint">Click to mark · click a marker to remove · click a registered embryo to centre on it</span>
+                          {# A correction nobody can see is how people chase ghosts:
+                             once an offset is set, "centre" no longer means the
+                             frame's centre pixel, and this says so. #}
+                          <span class="op-cap op-align-line" id="op-align-line" hidden></span>
+                        </div>
+                        <!-- Display range, attached under the frame it applies to.
+                             Nothing sits on the pixels. -->
+                        <div class="op-block op-block-display" id="op-display-bottom"></div>
                       </div>
-                    </div>
-                    <!-- Marking actions sit under the image they act on, not in the
-                         instrument column, which is for the hardware axes. -->
-                    <div class="op-bar">
-                      <span class="op-cap" id="op-mark-hint">Click to mark · click a marker to remove · click a registered embryo to centre on it</span>
-                      {# A correction nobody can see is how people chase ghosts:
-                         once an offset is set, "centre" no longer means the
-                         frame's centre pixel, and this says so. #}
-                      <span class="op-cap op-align-line" id="op-align-line" hidden></span>
-                    </div>
-                    <!-- Display range, attached under the frame it applies to.
-                         Nothing sits on the pixels. -->
-                    <div class="op-block op-block-display" id="op-display-bottom"></div>
-                    <!-- Marking sits under the frame it acts on, not off in the
-                         instrument rail. Shared panel; the module owns its
-                         markup (docs/architecture/PANELS.md). -->
-                    <div class="op-block op-block-marking" id="op-marking-host"></div>
-                  </div>
 
-                  <aside class="op-inst">
+                      <aside class="op-inst">
                     {# Every card on this rail folds: a head row with a
                        Show/Hide, and what it holds beneath. One rule,
                        in operate.js (wireDisclosures): `data-disclose` names
@@ -641,12 +643,17 @@
                         <div class="al-history" id="op-align-history" hidden></div>
                       </div>
                     </div>
-
                   </aside>
+                    </div>
+                    <!-- Marking sits under the frame it acts on, not off in the
+                         instrument rail. Shared panel; the module owns its
+                         markup (docs/architecture/PANELS.md). -->
+                    <div class="op-block op-block-marking" id="op-marking-host"></div>
+                  </div>
                 </section>
 
                 <!-- ══ SPIM HEAD ══ bring the objectives to height over the embryo -->
-                <section class="op-pane" id="op-pane-spim" data-pane="spim" hidden>
+                <section class="op-pane op-pane-row" id="op-pane-spim" data-pane="spim" hidden>
                   <div class="op-main">
                     <!-- One row: the image box at the width its aspect gives it at
                          this height, the rail beside it with the rest, its panels

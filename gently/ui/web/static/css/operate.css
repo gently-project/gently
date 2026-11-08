@@ -1874,28 +1874,35 @@
 .op-setup-clear { margin-left: auto; font: inherit; font-size: 12px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); padding: 2px 8px; cursor: pointer; }
 .op-setup-clear:hover { color: var(--text); border-color: var(--accent); }
 
-/* ── SPIM head: the image hugs its own width, the panels take the rest ──────
+/* ── Row panes: the frame hugs its own width, the rail takes the rest ──────
    The frame is height-driven (see .op-cam-fit), so at a desk-sized window it
-   was a 450 px square centred in an 1100 px column while four panels queued
-   in a 260 px rail that scrolled. Here the frame's column and the rail share
-   one row. The column holds the image box, its caption and the display panel
-   at the width the frame's aspect gives it at the row's height, and sits at
-   the left; the rail takes the rest, its panels flowing into as many 240 px
-   columns as fit, so at a desk-sized window nothing scrolls.
+   was a 450 px square centred in an 1100 px column while the rail's panels
+   queued in a 260 px strip that scrolled. On a row pane (.op-pane-row: the
+   Bottom cam and the SPIM head) the frame's column and the rail share one
+   row. The column holds the image box, its caption line and the display
+   panel at the width the frame's aspect gives it at the row's height, and
+   sits at the left; the rail takes the rest, its panels flowing into as many
+   240 px columns as fit, so at a desk-sized window nothing scrolls. What the
+   pane has beneath the frame besides (the Bottom cam's marking block) sits
+   under the row at full width.
 
    The row is a size container: its height is the room there is, known before
    its children lay out, so the image box can be given that height less what
    sits under it (in cqh) and take its width from its aspect — which is what
    lets the caption and the display panel sit at the frame's own width with
-   no script measuring anything. The aspect ratio has to be on the box itself
-   for that (setCamAr in operate.js puts --cam-ar on the box, which the fit
-   inherits). Scoped to this pane; the bottom camera keeps its rail and its
-   fold-away cards. */
-#op-pane-spim {
+   no script measuring anything. For that, what sits under the frame has a
+   fixed height per pane (--op-bar-h, --op-display-h), and the aspect ratio
+   is on the box itself (setCamAr in operate.js puts --cam-ar on the box,
+   which the fit inherits). */
+.op-pane-row {
     grid-template-columns: minmax(0, 1fr);
-    --op-display-h: 112px;   /* the display panel's height, fixed so the frame's is exact */
+    --op-bar-h: 16px;        /* the caption line under the frame */
+    --op-display-h: 112px;   /* the stacked display panel */
 }
-#op-pane-spim .op-view-row {
+/* The Bottom cam's caption is a sentence that wraps at the frame's width,
+   and an alignment line can join it. Two lines of room. */
+#op-pane-bottom { --op-bar-h: 32px; }
+.op-pane-row .op-view-row {
     flex: 1 1 auto;
     min-height: 0;
     display: flex;
@@ -1904,9 +1911,9 @@
     container-type: size;
     container-name: stage;
 }
-#op-pane-spim .op-stage-col {
+.op-pane-row .op-stage-col {
     /* Under the frame: the caption line, the display panel, two gaps. */
-    --op-under: calc(16px + var(--op-display-h) + 2 * var(--op-2));
+    --op-under: calc(var(--op-bar-h) + var(--op-display-h) + 2 * var(--op-2));
     flex: 0 1 auto;
     min-width: 0;
     /* The rail keeps at least its old width; a tall, narrow window shrinks
@@ -1916,15 +1923,23 @@
     flex-direction: column;
     gap: var(--op-2);
 }
-#op-pane-spim .op-cam {
+.op-pane-row .op-cam {
     flex: 0 0 auto;
     height: calc(100cqh - var(--op-under));
     aspect-ratio: var(--cam-ar, 1 / 1);
     max-width: 100%;
 }
-#op-pane-spim .op-bar { flex: 0 0 auto; min-height: 16px; }
-#op-pane-spim .op-block-display { flex: 0 0 auto; height: var(--op-display-h); box-sizing: border-box; }
-#op-pane-spim .op-inst {
+.op-pane-row .op-bar {
+    flex: 0 0 auto;
+    height: var(--op-bar-h);
+    overflow: hidden;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    row-gap: 0;
+}
+.op-pane-row .op-block-display { flex: 0 0 auto; height: var(--op-display-h); box-sizing: border-box; }
+.op-pane-row .op-block-marking { flex: 0 0 auto; }
+.op-pane-row .op-inst {
     grid-column: auto;
     grid-row: auto;
     flex: 1 1 260px;
@@ -1939,9 +1954,10 @@
     align-items: start;
 }
 @container operate (max-width: 900px) {
-    #op-pane-spim .op-view-row { flex-direction: column; container-type: normal; }
-    #op-pane-spim .op-stage-col { max-width: none; }
-    #op-pane-spim .op-cam { width: 100%; height: auto; }
-    #op-pane-spim .op-block-display { height: auto; }
-    #op-pane-spim .op-inst { display: flex; flex-direction: column; min-width: 0; }
+    .op-pane-row .op-view-row { flex-direction: column; container-type: normal; }
+    .op-pane-row .op-stage-col { max-width: none; }
+    .op-pane-row .op-cam { width: 100%; height: auto; }
+    .op-pane-row .op-bar { height: auto; }
+    .op-pane-row .op-block-display { height: auto; }
+    .op-pane-row .op-inst { display: flex; flex-direction: column; min-width: 0; }
 }
