@@ -2621,6 +2621,21 @@ def create_router(server) -> APIRouter:
             logger.exception("bottom_z nudge failed")
             raise HTTPException(status_code=502, detail=f"bottom_z nudge failed: {exc}") from exc
 
+    @router.get("/api/devices/state")
+    async def device_state(refresh: bool = False):
+        """Positions and properties of every device, as the device layer holds
+        them. The properties are not polled: ``?refresh=1`` has every one read
+        now (a couple of seconds on the Tiger) and the device layer broadcasts
+        the result, so the Details table on every screen follows. Read-only."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_device_state(refresh=refresh)
+        except Exception as exc:
+            logger.debug("device state read failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"device state failed: {exc}") from exc
+
     @router.get("/api/devices/spim/fdrive")
     async def get_fdrive():
         """SPIM-head F-drive position + limits + distance-to-floor (read-only)."""

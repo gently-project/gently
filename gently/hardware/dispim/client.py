@@ -938,8 +938,10 @@ class DiSPIMMicroscope(Microscope):
         Parameters
         ----------
         refresh : bool
-            If True, force the device layer to re-read MMCore right now.
-            Otherwise return the most recent poller snapshot (typically <500 ms old).
+            If True, the device layer reads every position and every property
+            now and broadcasts the result. Otherwise the snapshot as it
+            stands: positions from the pollers, properties from the last time
+            they were read (they are not polled).
         """
         path = "/api/devices/state"
         if refresh:

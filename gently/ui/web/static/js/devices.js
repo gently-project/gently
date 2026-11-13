@@ -2423,6 +2423,8 @@ const DevicesManager = (function () {
         if (viewName === 'optical3d' && typeof Occupancy3DManager !== 'undefined') {
             Occupancy3DManager.init();
         }
+        // The properties are read while the table is on screen, and not otherwise.
+        watchProperties(viewName === 'details');
         // Initialize temperature graph for the active view. The TemperatureGraph
         // is a singleton; reinit on view switch ensures only one graph target
         // is live at a time. ClientEventBus.off/on in TemperatureGraph.init
@@ -2481,13 +2483,73 @@ const DevicesManager = (function () {
         _previousTs = _lastTs;
 
         renderPositions(payload.positions);
-        if (payload.properties) {
+        // A poll tick carries positions only. The properties arrive when they
+        // have been read: at the device layer's start, and on request (below).
+        if (payload.properties && Object.keys(payload.properties).length) {
             // The controller's own limits are drawn separately; the working
             // region comes from the shared store, not from these properties.
             renderPropertiesTable(payload.properties);
             _lastPropertyMap = payload.properties;
+            _propsReadAt = Date.now();
+            renderPropsAge();
         }
         scheduleStaleCheck();
+    }
+
+    // =====================================================================
+    // Properties — read when someone is looking
+    // =====================================================================
+    // The device layer does not sweep every property on a timer any more: a
+    // sweep holds the controller's serial port for about two seconds, behind
+    // which every button on this page waited, and a tick that carried the
+    // result had each browser redraw this table six times a second. So the
+    // table is read on opening Details, on "Read again", and every
+    // PROPS_EVERY_MS while Details stays on screen. The device layer
+    // broadcasts what it read, which is what draws the table — here and on
+    // any other screen showing it.
+    const PROPS_EVERY_MS = 15000;
+    let _propsReadAt = 0;
+    let _propsBusy = false;
+    let _propsTimer = null;
+
+    function detailsOnScreen() {
+        const el = document.getElementById('devices-view-details');
+        return !!(el && el.offsetParent !== null);
+    }
+
+    function renderPropsAge() {
+        const el = document.getElementById('devices-props-age');
+        if (!el) return;
+        if (_propsBusy) { el.textContent = 'reading…'; return; }
+        if (!_propsReadAt) { el.textContent = 'not read yet'; return; }
+        const s = Math.round((Date.now() - _propsReadAt) / 1000);
+        el.textContent = s < 2 ? 'read just now' : `read ${s} s ago`;
+    }
+
+    /** The snapshot as the device layer holds it; `fresh` has every property read now. */
+    async function readProperties(fresh) {
+        if (_propsBusy) return;
+        _propsBusy = true;
+        renderPropsAge();
+        try {
+            const r = await fetch(`/api/devices/state${fresh ? '?refresh=1' : ''}`);
+            if (!r.ok) return;                     // no microscope: the table keeps what it has
+            const d = await r.json();
+            // On the bus rather than straight into handlePayload: the 3D view
+            // takes the stage's firmware box from the same properties.
+            if (d && typeof ClientEventBus !== 'undefined') ClientEventBus.emit('DEVICE_STATE_UPDATE', d);
+        } catch (_) { /* the next read, or the next broadcast, fills it */ }
+        finally { _propsBusy = false; renderPropsAge(); }
+    }
+
+    function watchProperties(on) {
+        if (_propsTimer) { clearInterval(_propsTimer); _propsTimer = null; }
+        if (!on) return;
+        readProperties(true);
+        _propsTimer = setInterval(() => {
+            renderPropsAge();
+            if (detailsOnScreen() && Date.now() - _propsReadAt >= PROPS_EVERY_MS) readProperties(true);
+        }, 1000);
     }
 
     // Single availability signal (from the launcher's device-layer watcher).
@@ -2813,6 +2875,11 @@ const DevicesManager = (function () {
         loadCoverslip();
         loadEmbryosSnapshot();
         switchView(_currentView);
+        // Once, as the device layer holds them: the 3D view's stage box and a
+        // table that is not empty on first opening. No controller traffic.
+        readProperties(false);
+        const readBtn = document.getElementById('devices-props-read');
+        if (readBtn) readBtn.addEventListener('click', () => readProperties(true));
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('TAB_CHANGED', onTabChanged);
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);

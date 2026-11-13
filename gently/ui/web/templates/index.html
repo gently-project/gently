@@ -1304,6 +1304,11 @@
                 <div class="devices-properties">
                     <div class="devices-properties-header">
                         <h3 class="devices-properties-title">Properties</h3>
+                        {# Read while this table is on screen, not on a timer behind
+                           every other page: a full read holds the controller's port
+                           for about two seconds (devices.js, readProperties). #}
+                        <span class="devices-props-age" id="devices-props-age">not read yet</span>
+                        <button type="button" class="devices-props-read" id="devices-props-read" title="Read every property from the hardware now">Read again</button>
                         <input type="text" class="devices-filter" id="devices-filter" placeholder="Filter devices or properties…">
                     </div>
                     <div class="devices-properties-table-wrap">
