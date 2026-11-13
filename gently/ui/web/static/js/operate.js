@@ -816,10 +816,12 @@ const OperateManager = (function () {
             const { cx, cy } = p;
             ctx.save();
             ctx.strokeStyle = colour;
-            ctx.lineWidth = locked ? 1.2 : 2;
-            if (locked) ctx.setLineDash([4, 3]);
+            // One look for a pending mark. There were two: greyed and dashed
+            // while the XY lock was engaged. The lock went on 2026-11-08 and
+            // its variable with it, but these lines went on reading it, so
+            // drawing the first mark threw and no mark could be placed.
+            ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.stroke();
-            ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
             ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6);
