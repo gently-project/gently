@@ -115,7 +115,6 @@ class Campaign:
     progress: str | None = None  # Current state: "23/50"
     parent_id: str | None = None  # Parent campaign (for hierarchy)
     status: Status = Status.ACTIVE
-    is_shared: bool = False
     # A root campaign is a project. Each entry is the one reference shape:
     # {source, key, title, url, subtitle, added_by, added_at}.
     strains: list[dict] = field(default_factory=list)
@@ -288,8 +287,6 @@ class PlanItem:
     status: PlanItemStatus = PlanItemStatus.PLANNED
     depends_on: list[str] = field(default_factory=list)  # PlanItem IDs
     outcome: str | None = None  # What happened (filled after completion)
-    claimed_by: str | None = None  # instance_id of claiming node
-    claimed_by_hostname: str | None = None  # human-readable hostname
     references: list[dict[str, str]] = field(default_factory=list)  # Source citations
 
     # Specifications (type-dependent)

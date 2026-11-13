@@ -271,7 +271,7 @@ That's the loop: **talk → plan → inspect.** With hardware connected (drop `-
 | [Documentation Home](docs/index.md) | Everyone | Browse the generated-docs structure for Gently |
 | [Full Stack Microscopy](docs/full-stack-microscopy.md) | Everyone | How intent, samples, hardware, perception, data, and operators fit together |
 | [Try Without Hardware](docs/guides/try-offline.md) | Everyone | Run the agent in 10 minutes — conversation, plan mode, perception |
-| [What Gently Can Do](docs/guides/capabilities.md) | Everyone | Perception, detection, plan mode, memory, mesh, safety |
+| [What Gently Can Do](docs/guides/capabilities.md) | Everyone | Perception, detection, plan mode, memory, safety |
 | [Build a Plugin](docs/guides/build-a-plugin.md) | Developers | Create organism and hardware plugins for other modalities |
 | [Hardware Setup](docs/guides/hardware-setup.md) | Labs | Connect a diSPIM, start the device layer, first acquisition |
 | [Sample & Hardware Model](docs/architecture/sample-hardware-domains.md) | Developers | Generalize samples, hardware operations, and device-profile boundaries |
@@ -313,7 +313,6 @@ gently/
 │   └── orchestration/     #   Timelapse, plan synthesis, ML subagent
 │
 ├── ui/web/                # FastAPI viz server + web assets
-├── mesh/                  # Distributed multi-instrument coordination
 ├── ml/                    # ML training infrastructure
 └── analysis/              # Focus analysis utilities
 ```

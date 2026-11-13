@@ -89,7 +89,7 @@ class EventType(Enum):
     # (stopped/starting/initializing/ready/external/crashed/failed) and, derived
     # from it + the client, whether the microscope is now usable. One producer
     # (the device-layer watcher), many subscribers (agent attach/detach, the
-    # header status, mesh capabilities) — replaces each surface re-deriving
+    # header status) — replaces each surface re-deriving
     # availability from the accident of whether a client object exists (RFC #78).
     DEVICE_LAYER_AVAILABILITY = auto()  # {state, available, connected}
     TEMPERATURE_UPDATE = auto()  # Temperature reading from device layer
@@ -167,22 +167,6 @@ class EventType(Enum):
     USER_INPUT = auto()
     USER_COMMAND = auto()
 
-    # Mesh events
-    MESH_PEER_DISCOVERED = auto()
-    MESH_PEER_LOST = auto()
-    MESH_PEER_UPDATED = auto()
-    MESH_PAIRING_REQUESTED = auto()
-    MESH_PAIRING_COMPLETED = auto()
-
-    # Mesh security events (Phase 3)
-    MESH_AUTH_FAILURE = auto()
-    MESH_CERT_PIN_FAILURE = auto()
-    MESH_SCOPE_DENIED = auto()
-
-    # Mesh topology events
-    MESH_PEER_OFFLINE = auto()  # peer marked offline in verse map (kept in map)
-    MESH_PEER_RETURNED = auto()  # previously offline peer came back online
-
     # ML pipeline events
     ML_PIPELINE_CREATED = auto()
     ML_TRAINING_STARTED = auto()
@@ -191,12 +175,6 @@ class EventType(Enum):
     ML_TRAINING_FAILED = auto()
     ML_EVALUATION_COMPLETED = auto()
     ML_SUBAGENT_STATUS = auto()  # subagent thinking/planning updates
-
-    # Bulk transfer events
-    TRANSFER_STARTED = auto()
-    TRANSFER_PROGRESS = auto()
-    TRANSFER_COMPLETED = auto()
-    TRANSFER_FAILED = auto()
 
 
 # High-volume telemetry events that skip the bounded history deque. These

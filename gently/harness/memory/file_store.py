@@ -379,8 +379,6 @@ class FileContextStore:
             "progress": None,
             "parent_id": parent_id,
             "status": "active",
-            "is_shared": False,
-            "participants": [],
             "session_ids": [],
             "strains": list(strains or []),
             "references": list(references or []),
@@ -713,102 +711,6 @@ class FileContextStore:
                     roots.append(self._dict_to_campaign(data))
         roots.sort(key=lambda c: c.updated_at or c.created_at, reverse=True)
         return roots
-
-    # ------------------------------------------------------------------
-    # Campaign sharing (mesh coordination)
-    # ------------------------------------------------------------------
-
-    def share_campaign(self, campaign_id: str):
-        folder = self._campaign_folder(campaign_id)
-        if not folder:
-            return
-        data = self._read_yaml(folder / "campaign.yaml")
-        if not data:
-            return
-        data["is_shared"] = True
-        data["updated_at"] = self._now()
-        self._write_yaml(folder / "campaign.yaml", data)
-
-    def unshare_campaign(self, campaign_id: str):
-        folder = self._campaign_folder(campaign_id)
-        if not folder:
-            return
-        data = self._read_yaml(folder / "campaign.yaml")
-        if not data:
-            return
-        data["is_shared"] = False
-        data["updated_at"] = self._now()
-        self._write_yaml(folder / "campaign.yaml", data)
-
-    def get_shared_campaigns(self) -> list[Campaign]:
-        shared = []
-        for _cid, folder in self._campaign_index.items():
-            data = self._read_yaml(folder / "campaign.yaml")
-            if data and data.get("is_shared"):
-                shared.append(self._dict_to_campaign(data))
-        shared.sort(key=lambda c: c.created_at)
-        return shared
-
-    def add_campaign_participant(self, campaign_id: str, instance_id: str, hostname: str):
-        folder = self._campaign_folder(campaign_id)
-        if not folder:
-            return
-        data = self._read_yaml(folder / "campaign.yaml")
-        if not data:
-            return
-        participants = data.get("participants", [])
-        # Replace existing entry for this instance_id
-        participants = [p for p in participants if p.get("instance_id") != instance_id]
-        participants.append(
-            {
-                "campaign_id": campaign_id,
-                "instance_id": instance_id,
-                "hostname": hostname,
-                "joined_at": self._now(),
-            }
-        )
-        data["participants"] = participants
-        self._write_yaml(folder / "campaign.yaml", data)
-
-    def get_campaign_participants(self, campaign_id: str) -> list[dict]:
-        folder = self._campaign_folder(campaign_id)
-        if not folder:
-            return []
-        data = self._read_yaml(folder / "campaign.yaml")
-        if not data:
-            return []
-        participants = data.get("participants", [])
-        participants.sort(key=lambda p: p.get("joined_at", ""))
-        return participants
-
-    # ------------------------------------------------------------------
-    # Plan item claim (mesh)
-    # ------------------------------------------------------------------
-
-    def claim_plan_item(self, item_id: str, instance_id: str, hostname: str) -> bool:
-        loc = self._find_plan_item_location(item_id)
-        if not loc:
-            return False
-        campaign_id, items, idx = loc
-        item = items[idx]
-        existing_claim = item.get("claimed_by")
-        if existing_claim is not None and existing_claim != instance_id:
-            return False
-        item["claimed_by"] = instance_id
-        item["claimed_by_hostname"] = hostname
-        item["updated_at"] = self._now()
-        self._write_plan_items(campaign_id, items)
-        return True
-
-    def unclaim_plan_item(self, item_id: str):
-        loc = self._find_plan_item_location(item_id)
-        if not loc:
-            return
-        campaign_id, items, idx = loc
-        items[idx]["claimed_by"] = None
-        items[idx]["claimed_by_hostname"] = None
-        items[idx]["updated_at"] = self._now()
-        self._write_plan_items(campaign_id, items)
 
     # ==================================================================
     # Projects
@@ -1276,8 +1178,6 @@ class FileContextStore:
             "phase_order": phase_order,
             "references": references,
             "depends_on": depends_on or [],
-            "claimed_by": None,
-            "claimed_by_hostname": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -2861,7 +2761,6 @@ class FileContextStore:
             progress=d.get("progress"),
             parent_id=d.get("parent_id"),
             status=Status(d.get("status", "active")),
-            is_shared=bool(d.get("is_shared", False)),
             strains=list(d.get("strains") or []),
             references=list(d.get("references") or []),
             created_at=datetime.fromisoformat(d["created_at"])
@@ -2949,8 +2848,6 @@ class FileContextStore:
             status=PlanItemStatus(d.get("status", "planned")),
             depends_on=d.get("depends_on", []),
             outcome=d.get("outcome"),
-            claimed_by=d.get("claimed_by"),
-            claimed_by_hostname=d.get("claimed_by_hostname"),
             references=references,
             imaging_spec=imaging_spec,
             bench_spec=bench_spec,

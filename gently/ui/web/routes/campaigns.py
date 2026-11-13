@@ -821,69 +821,7 @@ def create_router(server) -> APIRouter:
         sessions = cs.get_planned_sessions(campaign_id=campaign.id)
         return {"sessions": [_serialize(s) for s in sessions]}
 
-    # ------------------------------------------------------------------
-    # Mesh campaign coordination endpoints (auth required for remote)
-    # ------------------------------------------------------------------
-
-    def _make_campaign_auth(required_scope: str):
-        """Create a FastAPI dependency that checks auth + scope for campaigns."""
-
-        async def _require(request: Request):
-            mesh_svc = getattr(server, "mesh_service", None)
-            pairing_mgr = getattr(mesh_svc, "pairing_manager", None) if mesh_svc else None
-            _audit = getattr(mesh_svc, "audit_log", None) if mesh_svc else None
-            if pairing_mgr is None:
-                return  # no pairing manager = open access
-            host = request.client.host if request.client else ""
-            if host in ("127.0.0.1", "::1", "localhost"):
-                return
-            auth = request.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                peer_id = pairing_mgr.verify_token(auth[7:])
-                if peer_id:
-                    scopes = pairing_mgr.get_scopes_for_peer(peer_id)
-                    if required_scope not in scopes:
-                        if _audit:
-                            from gently.mesh.audit import AuditEvent
-
-                            _audit.log(
-                                AuditEvent.SCOPE_DENIED,
-                                outcome="deny",
-                                peer_id=peer_id,
-                                ip=host,
-                                detail=f"scope={required_scope} path={request.url.path}",
-                            )
-                        raise HTTPException(
-                            status_code=403,
-                            detail=f"Missing scope: {required_scope}",
-                        )
-                    if _audit:
-                        from gently.mesh.audit import AuditEvent
-
-                        _audit.log(
-                            AuditEvent.AUTH_SUCCESS,
-                            outcome="allow",
-                            peer_id=peer_id,
-                            ip=host,
-                        )
-                    return
-            if _audit:
-                from gently.mesh.audit import AuditEvent
-
-                _audit.log(
-                    AuditEvent.AUTH_FAILURE,
-                    outcome="deny",
-                    ip=host,
-                    detail=f"path={request.url.path}",
-                )
-            raise HTTPException(status_code=403, detail="Mesh authentication required")
-
-        return _require
-
-    @router.patch(
-        "/api/campaigns/{campaign_id}/items/{item_id}",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
+    @router.patch("/api/campaigns/{campaign_id}/items/{item_id}")
     async def update_item(campaign_id: str, item_id: str, request: Request):
         """Edit plan-item fields and/or imaging-spec fields inline.
 
@@ -935,93 +873,7 @@ def create_router(server) -> APIRouter:
         updated = cs.get_plan_item(item_id)
         return {"ok": True, "item": _serialize(updated)}
 
-    @router.post(
-        "/api/campaigns/{campaign_id}/share",
-        dependencies=[Depends(_make_campaign_auth("campaigns:admin"))],
-    )
-    async def share_campaign(campaign_id: str):
-        cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
-        cs.share_campaign(campaign.id)
-        return {"ok": True}
-
-    @router.post(
-        "/api/campaigns/{campaign_id}/unshare",
-        dependencies=[Depends(_make_campaign_auth("campaigns:admin"))],
-    )
-    async def unshare_campaign(campaign_id: str):
-        cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
-        cs.unshare_campaign(campaign.id)
-        return {"ok": True}
-
-    @router.get(
-        "/api/campaigns/{campaign_id}/export",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
-    async def export_campaign(campaign_id: str):
-        cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
-        tree = cs._serialize_campaign_tree(campaign.id)
-        _enrich_export_with_claims(tree, cs, campaign.id)
-        return tree
-
-    @router.post(
-        "/api/campaigns/{campaign_id}/join",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
-    async def join_campaign(campaign_id: str, request: Request):
-        cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
-        body = await request.json()
-        instance_id = body.get("instance_id", "")
-        hostname = body.get("hostname", "")
-        if not instance_id:
-            raise HTTPException(status_code=400, detail="instance_id required")
-        cs.add_campaign_participant(campaign.id, instance_id, hostname)
-        return {"ok": True}
-
-    @router.get(
-        "/api/campaigns/{campaign_id}/participants",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
-    async def get_participants(campaign_id: str):
-        cs = _get_store()
-        campaign = _resolve(cs, campaign_id)
-        participants = cs.get_campaign_participants(campaign.id)
-        return {"participants": participants}
-
-    @router.post(
-        "/api/campaigns/{campaign_id}/items/{item_id}/claim",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
-    async def claim_item(campaign_id: str, item_id: str, request: Request):
-        cs = _get_store()
-        _resolve(cs, campaign_id)
-        body = await request.json()
-        instance_id = body.get("instance_id", "")
-        hostname = body.get("hostname", "")
-        if not instance_id:
-            raise HTTPException(status_code=400, detail="instance_id required")
-        ok = cs.claim_plan_item(item_id, instance_id, hostname)
-        if not ok:
-            raise HTTPException(status_code=409, detail="Item already claimed by another node")
-        return {"ok": True}
-
-    @router.post(
-        "/api/campaigns/{campaign_id}/items/{item_id}/unclaim",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
-    async def unclaim_item(campaign_id: str, item_id: str):
-        cs = _get_store()
-        _resolve(cs, campaign_id)
-        cs.unclaim_plan_item(item_id)
-        return {"ok": True}
-
-    @router.post(
-        "/api/campaigns/{campaign_id}/items/{item_id}/status",
-        dependencies=[Depends(_make_campaign_auth("campaigns"))],
-    )
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/status")
     async def update_item_status(campaign_id: str, item_id: str, request: Request):
         cs = _get_store()
         _resolve(cs, campaign_id)
@@ -1065,25 +917,5 @@ def create_router(server) -> APIRouter:
             },
             "children": [_build_campaign_tree(cs, child.id) for child in children],
         }
-
-    def _enrich_export_with_claims(tree: dict, cs, campaign_id: str):
-        """Walk a serialized campaign tree and annotate items with IDs and claim info."""
-        items = cs.get_plan_items(campaign_id=campaign_id)
-        items.sort(key=lambda x: x.phase_order)
-
-        # Match serialized items to real items by index (same ordering)
-        for idx, serialized_item in enumerate(tree.get("items", [])):
-            if idx < len(items):
-                real = items[idx]
-                serialized_item["id"] = real.id
-                serialized_item["status"] = real.status.value
-                serialized_item["claimed_by"] = real.claimed_by
-                serialized_item["claimed_by_hostname"] = real.claimed_by_hostname
-
-        # Recurse into children
-        children = cs.get_subcampaigns(campaign_id)
-        for child_idx, child_tree in enumerate(tree.get("children", [])):
-            if child_idx < len(children):
-                _enrich_export_with_claims(child_tree, cs, children[child_idx].id)
 
     return router

@@ -1,8 +1,8 @@
 """
-Data Reasoning — Cross-network data visibility and assessment.
+Data Reasoning — Local data visibility and assessment.
 
 Provides:
-- DataAssessmentEngine: inventory datasets across local + remote peers
+- DataAssessmentEngine: inventory local datasets
 - CoverageAnalyzer: annotation coverage analysis and gap detection
 - QualityAnalyzer: data quality validation
 - GapPlanner: create plan items to fill annotation gaps

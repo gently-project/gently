@@ -19,7 +19,6 @@ Base:
     │   └── VolumeNotFoundError
     ├── NetworkError           — Inter-service communication failures
     │   ├── DeviceLayerError   — Device layer HTTP API errors
-    │   ├── MeshPeerError      — Mesh peer communication errors
     │   └── ServiceUnavailableError
     └── AgentError             — Agent/conversation failures
         ├── ToolExecutionError
@@ -131,12 +130,6 @@ class NetworkError(GentlyError):
 
 class DeviceLayerError(NetworkError):
     """Device layer HTTP API returned an error."""
-
-    pass
-
-
-class MeshPeerError(NetworkError):
-    """Mesh peer communication failed."""
 
     pass
 

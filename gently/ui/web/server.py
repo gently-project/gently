@@ -50,18 +50,17 @@ except ImportError:
 class _InvalidHttpFilter(logging.Filter):
     """Suppress uvicorn's "Invalid HTTP request received." warning.
 
-    Fires when something speaks non-HTTP at the viz port — typically a
-    mesh peer with a TLS/plain mismatch (one side advertised
-    tls_enabled=True while the other is plain http), or an opportunistic
-    network scanner. uvicorn rejects the connection cleanly; the warning
-    is cosmetic. We downgrade it to a single DEBUG line so the log stays
+    Fires when something speaks non-HTTP at the viz port — typically an
+    HTTPS client reaching a plain-HTTP server, or an opportunistic network
+    scanner. uvicorn rejects the connection cleanly; the warning is
+    cosmetic. We downgrade it to a single DEBUG line so the log stays
     readable but the diagnostic info is still reachable with -v.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         if "Invalid HTTP request received" in msg:
-            logger.debug("uvicorn dropped non-HTTP bytes on viz port (probable TLS/peer mismatch)")
+            logger.debug("uvicorn dropped non-HTTP bytes on viz port")
             return False
         return True
 
@@ -163,7 +162,6 @@ class VisualizationServer(Service):
         self.context_store = None  # FileContextStore — set via set_context_store()
         # Wired in by launch_gently after construction (optional subsystems).
         self.agent_bridge: Any = None
-        self.mesh_service: Any = None
         self.device_supervisor: Any = None  # DeviceLayerSupervisor (RFC #78)
         # Callable that stops the WHOLE backend (launcher keep-alive included);
         # POST /api/shutdown uses it for the desktop shell handshake (issue #85).

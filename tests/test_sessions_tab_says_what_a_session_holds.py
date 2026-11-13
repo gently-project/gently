@@ -165,7 +165,7 @@ def _with_a_night(store, sid):
         },
         {
             "event_type": "STATUS_CHANGED",
-            "data": {"service": "mesh"},
+            "data": {"service": "device_layer"},
             "timestamp": "2026-10-04T21:00:01",
         },
         {

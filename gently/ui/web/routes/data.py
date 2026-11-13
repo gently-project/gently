@@ -1065,7 +1065,6 @@ def create_router(server) -> APIRouter:
                 "viz_port": S.network.viz_port,
                 "device_host": S.network.device_host,
                 "device_port": S.network.device_port,
-                "mesh_port": S.network.mesh_port,
             },
             "models": {
                 "main": S.models.main,
@@ -1085,16 +1084,6 @@ def create_router(server) -> APIRouter:
                 "default_epochs": S.ml.default_epochs,
                 "default_lr": S.ml.default_lr,
                 "model_cache_dir": str(S.ml.model_cache_dir),
-            },
-            "transfer": {
-                "transfer_port": S.transfer.transfer_port,
-                "chunk_size": S.transfer.chunk_size,
-                "max_concurrent_transfers": S.transfer.max_concurrent_transfers,
-            },
-            "mesh": {
-                "broadcast_interval_s": S.mesh.broadcast_interval_s,
-                "stale_threshold_s": S.mesh.stale_threshold_s,
-                "dead_threshold_s": S.mesh.dead_threshold_s,
             },
             "ui": {"ux_v2": S.ui.ux_v2},
             "api": {"ncbi_tool": S.api.ncbi_tool},

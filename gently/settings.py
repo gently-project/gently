@@ -65,23 +65,6 @@ class NetworkSettings:
     viz_host: str = field(default_factory=lambda: _env("VIZ_HOST", "localhost"))
     device_port: int = field(default_factory=lambda: _env("DEVICE_PORT", 60610))
     device_host: str = field(default_factory=lambda: _env("DEVICE_HOST", "127.0.0.1"))
-    mesh_port: int = field(default_factory=lambda: _env("MESH_PORT", 19547))
-    mesh_bind: str = field(default_factory=lambda: _env("MESH_BIND", "0.0.0.0"))
-
-
-@dataclass(frozen=True)
-class MeshSettings:
-    """Mesh networking parameters."""
-
-    broadcast_interval_s: float = field(
-        default_factory=lambda: _env("MESH_BROADCAST_INTERVAL", 5.0)
-    )
-    replay_window_s: float = field(default_factory=lambda: _env("MESH_REPLAY_WINDOW", 30.0))
-    reaper_interval_s: float = field(default_factory=lambda: _env("MESH_REAPER_INTERVAL", 10.0))
-    status_refresh_s: float = field(default_factory=lambda: _env("MESH_STATUS_REFRESH", 30.0))
-    fetch_timeout_s: float = field(default_factory=lambda: _env("MESH_FETCH_TIMEOUT", 5.0))
-    stale_threshold_s: float = field(default_factory=lambda: _env("MESH_STALE_THRESHOLD", 15.0))
-    dead_threshold_s: float = field(default_factory=lambda: _env("MESH_DEAD_THRESHOLD", 30.0))
 
 
 @dataclass(frozen=True)
@@ -167,17 +150,6 @@ class MlSettings:
 
 
 @dataclass(frozen=True)
-class TransferSettings:
-    """Bulk transfer protocol parameters."""
-
-    transfer_port: int = field(default_factory=lambda: _env("TRANSFER_PORT", 19548))
-    chunk_size: int = field(default_factory=lambda: _env("TRANSFER_CHUNK_SIZE", 1048576))  # 1MB
-    max_concurrent_transfers: int = field(
-        default_factory=lambda: _env("TRANSFER_MAX_CONCURRENT", 4)
-    )
-
-
-@dataclass(frozen=True)
 class UISettings:
     """Web UI feature flags."""
 
@@ -245,13 +217,11 @@ class Settings:
     """Top-level settings container."""
 
     network: NetworkSettings = field(default_factory=NetworkSettings)
-    mesh: MeshSettings = field(default_factory=MeshSettings)
     models: ModelSettings = field(default_factory=ModelSettings)
     storage: StorageSettings = field(default_factory=StorageSettings)
     timeouts: TimeoutSettings = field(default_factory=TimeoutSettings)
     api: ApiSettings = field(default_factory=ApiSettings)
     ml: MlSettings = field(default_factory=MlSettings)
-    transfer: TransferSettings = field(default_factory=TransferSettings)
     ui: UISettings = field(default_factory=UISettings)
 
 

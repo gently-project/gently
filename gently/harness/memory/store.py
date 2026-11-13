@@ -302,35 +302,9 @@ class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin, MlPipelinesM
             conn.execute('ALTER TABLE plan_items ADD COLUMN "references" TEXT')
             logger.info("Migration: added 'references' column to plan_items")
 
-        # Mesh campaign coordination columns
-        camp_cols = {row[1] for row in conn.execute("PRAGMA table_info(campaigns)").fetchall()}
-        if "is_shared" not in camp_cols:
-            conn.execute("ALTER TABLE campaigns ADD COLUMN is_shared INTEGER DEFAULT 0")
-            logger.info("Migration: added 'is_shared' column to campaigns")
-
-        if "claimed_by" not in pi_cols:
-            conn.execute("ALTER TABLE plan_items ADD COLUMN claimed_by TEXT")
-            logger.info("Migration: added 'claimed_by' column to plan_items")
-        if "claimed_by_hostname" not in pi_cols:
-            conn.execute("ALTER TABLE plan_items ADD COLUMN claimed_by_hostname TEXT")
-            logger.info("Migration: added 'claimed_by_hostname' column to plan_items")
-
         if "estimated_days" not in pi_cols:
             conn.execute("ALTER TABLE plan_items ADD COLUMN estimated_days INTEGER")
             logger.info("Migration: added 'estimated_days' column to plan_items")
-
-        # Campaign participants table for mesh coordination
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS campaign_participants (
-                campaign_id TEXT NOT NULL,
-                instance_id TEXT NOT NULL,
-                hostname TEXT,
-                joined_at TEXT NOT NULL,
-                PRIMARY KEY (campaign_id, instance_id),
-                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
-            )
-        """)
-        logger.debug("Migration: ensured campaign_participants table exists")
 
     @contextmanager
     def _tx(self):
@@ -357,7 +331,6 @@ class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin, MlPipelinesM
             "planned_sessions",
             "session_intents",
             "projects",
-            "campaign_participants",
             "campaigns",
             "learnings",
             "embryo_understanding",
