@@ -157,11 +157,11 @@ on screen where there are 5.
 
 ```
 ┌ Find…  │ With data · Empty · All │ SPIM  Brightfield │ Complete  Cut short  Never ran │ any time ▾ │ any project ▾ │ 47 of 385 · + New ┐
-├───────────────┬──────────────────────┬─────┬───────┬───────┬────────┬───────┬───────────┬───────┬──────────┬──────┤
-│ WHEN        ▾ │ SESSION              │ EMB │ TIMEP │ EVERY │ LASTED │ BF    │ ENDED     │ SIZE  │ PROJECT  │ BY   │
-│ Oct 26 17:26  │ not named            │   3 │       │ 30 s  │ 14.0 h │ 1,680 │ complete  │ 83 MB │ hatching │      │
-│ Oct 12 17:21  │ not named            │  11 │   935 │ 10 min│ 14.1 h │       │ complete  │ 98 GB │ unfiled  │      │
-│ Oct 7 18:33   │ Four embryos, 40x    │   4 │       │ 30 s  │ 11.4 h │ 2,726 │ complete  │ 178 MB│ pilot    │      │
+├───────────────┬─────┬───────┬───────┬────────┬───────┬───────────┬───────┬──────────┬──────┬───────────────────────┤
+│ WHEN        ▾ │ EMB │ TIMEP │ EVERY │ LASTED │ BF    │ ENDED     │ SIZE  │ PROJECT  │ BY   │ NAME OR NOTE          │
+│ Oct 26 17:26  │   3 │       │ 30 s  │ 14.0 h │ 1,680 │ complete  │ 111 MB│ hatching │      │ not named             │
+│ Oct 12 17:21  │  11 │    85 │ 10 min│ 14.1 h │       │ complete  │ 98 GB │ unfiled  │      │ not named             │
+│ Oct 7 18:33   │   4 │       │ 30 s  │ 11.4 h │ 2,726 │ complete  │ 180 MB│ hatching │      │ Four embryos, overnight│
 │ …                                                                                                                  │
 ├────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ 338 sessions with nothing in them · Show                                                                           │
@@ -170,10 +170,16 @@ on screen where there are 5.
 
 - **A heading sorts.** Pressing a column's heading orders by it; pressing
   again turns it round. The three sort chips go.
+- **Timepoints are how far the run got**, the most any one embryo has, as the
+  list has defined them since #328. Eleven embryos imaged 85 times are 85
+  timepoints and 935 volumes; the volumes are what the size is.
 - **What a session holds is the row.** The derived name was the row's facts in
   a sentence because there was nowhere else to say them. In a table they are
-  the columns, so the Session column holds only what a person wrote: the name,
-  or the first line of the description, or "not named" in the dim.
+  the columns, beside the date. What a person wrote is the last column, with
+  the room that is left: the name, or the first line of the description, or
+  "not named" in the dim. Three of the rig's 384 sessions have a name, so a
+  name column put second left a gap a third of the page wide between the
+  date and the numbers.
 - **The filters are one bar** above the table. The same six questions as
   today: what it holds, which channel, how the run ended, when, which project,
   and the two "has" marks. The count beside them says how many of how many
@@ -223,7 +229,7 @@ panels that keep their places:
 - *This session.* Its name (typed in place), its projects, when, who, its
   size and its folder.
 - *The run.* As started: cadence, volume, laser, overview, which embryos. How
-  it went: rounds, timepoints, how it ended, and the cadence it kept beside
+  it went: timepoints, volumes, how it ended, and the cadence it kept beside
   the one it was asked for.
 - *Notes.* The stream, one line to write in.
 - *Take out.* Export for Fiji, the two movies, the crops.
@@ -258,7 +264,7 @@ without the rest.
 
 - **Whether to build it.** Nothing above is built except the fixes in "What
   was done".
-- **What the Session column says for an unnamed session.** "not named", or
+- **What the last column says for an unnamed session.** "not named", or
   the derived sentence again. The drawing has "not named", since every word
   of the sentence is in a column beside it.
 - **Whether old sessions should get their small pictures in one pass** (S13)

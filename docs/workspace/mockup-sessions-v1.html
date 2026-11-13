@@ -209,7 +209,7 @@
           </colgroup>
           <thead><tr>
             <th data-k="when" aria-sort="descending">When</th><th data-k="emb" class="n" title="Embryos">Emb</th>
-            <th data-k="tp" class="n c-tp" title="Light-sheet timepoints">Timepoints</th><th data-k="every" class="n c-ev" title="The cadence it was started with">Every</th>
+            <th data-k="tp" class="n c-tp" title="How far the light-sheet run got: the most timepoints any one embryo has">Timepoints</th><th data-k="every" class="n c-ev" title="The cadence it was started with">Every</th>
             <th data-k="hours" class="n c-las">Lasted</th><th data-k="bf" class="n c-bf" title="Brightfield frames">Brightfield</th><th data-k="ended">Ended</th>
             <th data-k="bytes" class="n c-size">Size</th><th data-k="proj" class="c-proj">Project</th><th data-k="by" class="c-by">By</th>
             <th data-k="name" class="c-name" title="What someone wrote on it: its name, or the first line of its description">Name or note</th>
@@ -272,7 +272,9 @@
 <script>
 (() => {
   const VOL = 105e6;   // bytes a volume weighs on this rig
-  // when, name, embryos, timepoints, every (s), hours, brightfield frames, ended, project, by, marks
+  // when, name, embryos, volumes, every (s), hours, brightfield frames, ended, project, by, marks.
+  // Timepoints are how far the run got (the most any one embryo has), as the
+  // list defines them; the volumes are every embryo's together, and the size.
   const S = [
     ['2026-11-13T09:12', '', 3, 0, 0, 0, 0, 'live', '', 'claude', ''],
     ['2026-11-07T23:06', '', 3, 0, 0, 0, 0, 'never', '', '', ''],
@@ -299,11 +301,11 @@
     ['2026-06-16T18:33', '', 4, 388, 300, 8.0, 0, 'cut', '', '', ''],
     ['2026-06-02T10:48', '', 4, 44, 60, 0.2, 0, 'complete', '', '', ''],
     ['2026-05-28T11:21', '', 5, 15, 60, 0.1, 0, 'complete', '', '', ''],
-  ].map((a, i) => ({ id: 's' + i, when: a[0], name: a[1], emb: a[2], tp: a[3], every: a[4], hours: a[5], bf: a[6], ended: a[7], proj: a[8], by: a[9], marks: a[10],
+  ].map((a, i) => ({ id: 's' + i, when: a[0], name: a[1], emb: a[2], vol: a[3], tp: a[2] ? Math.ceil(a[3] / a[2]) : 0, every: a[4], hours: a[5], bf: a[6], ended: a[7], proj: a[8], by: a[9], marks: a[10],
                      bytes: a[3] * VOL + a[6] * 66e3 + (a[2] ? 4e5 : 0) }));
   // Eight of the 338 with nothing in them, for when they are asked for.
   const EMPTY = ['2026-11-13T08:55', '2026-11-08T22:14', '2026-11-08T21:40', '2026-11-08T19:02', '2026-11-07T18:31', '2026-11-05T10:12', '2026-11-04T16:47', '2026-11-04T09:20']
-    .map((w, i) => ({ id: 'e' + i, when: w, name: '', emb: 0, tp: 0, every: 0, hours: 0, bf: 0, ended: 'never', proj: '', by: '', marks: '', bytes: 0, empty: true }));
+    .map((w, i) => ({ id: 'e' + i, when: w, name: '', emb: 0, vol: 0, tp: 0, every: 0, hours: 0, bf: 0, ended: 'never', proj: '', by: '', marks: '', bytes: 0, empty: true }));
   const N_EMPTY = 338;
   const NOW = new Date('2026-11-13T12:00');
 
@@ -431,7 +433,7 @@
   function open(id) {
     const s = S.concat(EMPTY).find(x => x.id === id); if (!s) return;
     st.open = id; cur = s; document.body.dataset.open = id;
-    ROUNDS = s.tp ? Math.max(1, Math.round(s.tp / Math.max(1, s.emb))) : s.bf ? Math.min(240, s.bf) : 1; T = ROUNDS;
+    ROUNDS = s.tp ? s.tp : s.bf ? Math.min(240, s.bf) : 1; T = ROUNDS;
     $('scrub').max = ROUNDS; $('scrub').value = T;
     $('r-name').value = s.name;
     $('r-proj').innerHTML = s.proj ? `<span class="pj">${esc(s.proj)}</span>` : '<span class="pj none">unfiled</span>';
@@ -443,7 +445,7 @@
     $('r-vol').textContent = s.tp ? '50 slices · 5 ms' : 'none';
     $('r-laser').textContent = s.tp ? '488 nm' : 'off';
     $('r-ov').textContent = s.bf ? `every round · ${num(s.bf)} frames` : 'off';
-    $('r-took').textContent = s.tp ? `${ROUNDS} rounds · ${num(s.tp)} volumes` : s.bf ? `${num(s.bf)} frames` : 'nothing';
+    $('r-took').textContent = s.tp ? `${num(s.tp)} timepoints · ${num(s.vol)} volumes` : s.bf ? `${num(s.bf)} frames` : 'nothing';
     // The rig keeps about 3.5 s more than it is asked for (calibration-and-acquisition.md, A14).
     $('r-kept').textContent = s.every && s.hours ? `${(s.every + 3.5).toFixed(1)} s for ${s.every}` : '';
     $('r-end').textContent = s.ended === 'live' ? 'live now' : `${ENDED[s.ended]}${s.hours ? ' · ' + when(d1) : ''}`;
