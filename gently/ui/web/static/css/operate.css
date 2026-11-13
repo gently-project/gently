@@ -1929,6 +1929,21 @@
 body[data-run="running"] .devices-run { color: var(--run-live); }
 body[data-run="paused"] .devices-run { color: var(--run-paused); }
 .devices-run[hidden] { display: none; }
+/* Pause, beside the words that say the run (shell.js). */
+.devices-runbtn {
+    flex: none;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text);
+    font: 12px 'Inter Tight', system-ui, sans-serif;
+    cursor: pointer;
+}
+.devices-runbtn:hover { border-color: var(--accent); color: var(--accent); }
+.devices-runbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.devices-runbtn[hidden] { display: none; }
 /* One HALT, on every view of this tab, where the hand learns to find it. */
 .devices-halt {
     flex: none;

@@ -265,6 +265,17 @@
                             <span class="status-indicator" id="timelapse-indicator"></span>
                             <span class="status-text" id="timelapse-status-text">No run</span>
                         </div>
+                        {# This is the tab a run is watched on, and it could
+                           neither pause nor stop one: those were on the
+                           Acquisition surface, which has no picture. Both are
+                           here while a run is going, and the way to plan one
+                           while none is. shell.js draws and answers them. #}
+                        <div class="run-controls" id="embryos-run-controls">
+                            <button class="view-btn" type="button" data-run-control="pause" hidden>Pause</button>
+                            <button class="view-btn" type="button" data-run-control="stop" hidden>Stop</button>
+                            <button class="view-btn run-plan-link" type="button" data-run-control="plan"
+                                    title="The plan, and Start, are on Devices, under Acquisition">Plan a run →</button>
+                        </div>
                         <div class="view-switcher" id="view-switcher">
                             <button class="view-btn active" data-view="default" title="Tiles and analysis (1)" aria-pressed="true">Watch</button>
                             <button class="view-btn" data-view="board" title="Table (2)" aria-pressed="false">Table</button>
@@ -426,6 +437,10 @@
                        the page was found saying "No run" over a running
                        brightfield timelapse. shell.js writes it. #}
                     <span class="devices-run" id="devices-run" hidden></span>
+                    {# And held here, on every view of this tab: Pause beside
+                       the words that say the run. It was on the Acquisition
+                       surface alone. shell.js draws and answers it. #}
+                    <button class="devices-runbtn" type="button" data-run-control="pause" hidden>Pause</button>
                     <span class="op-subnav-meta" id="op-subnav-meta"></span>
                     {# The water, as one reading in the row. The chart is a
                        press away and opens over the bottom of the page: as a

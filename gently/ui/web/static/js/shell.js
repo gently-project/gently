@@ -130,6 +130,66 @@ const Shell = (() => {
             tb.textContent = words;
             tb.hidden = !words;
         }
+        renderRunControls();
+    }
+
+    // ── The run, held from wherever it is said ─────────────────────────────
+    // Pause and Stop were on the Acquisition surface alone, which has no
+    // picture, while the Embryos tab, where a run is watched, could do
+    // neither (docs/workspace/calibration-and-acquisition.md, A6). Any
+    // element with `data-run-control` is one of the run's controls: "pause"
+    // (which is Resume while paused), "stop", and "plan" (the way to where a
+    // run is planned, shown while none is going). Drawn here from the run's
+    // state, and answered here.
+    function renderRunControls() {
+        const going = _run.status !== 'idle';
+        document.querySelectorAll('[data-run-control]').forEach(b => {
+            const what = b.dataset.runControl;
+            if (what === 'plan') { b.hidden = going; return; }
+            b.hidden = !going;
+            if (what === 'pause' && !b.dataset.busy) b.textContent = _run.status === 'paused' ? 'Resume' : 'Pause';
+        });
+    }
+
+    function say(message, level) {
+        if (typeof showGentlyToast === 'function') showGentlyToast(message, null, null, 4000, level || 'success');
+    }
+
+    async function post(url, body) {
+        const r = await fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : `${r.status}`);
+        return d;
+    }
+
+    async function runControl(what, b) {
+        if (what === 'plan') {
+            if (typeof switchTab === 'function') switchTab('devices');
+            if (typeof DevicesManager !== 'undefined' && DevicesManager.switchView) DevicesManager.switchView('operate');
+            if (typeof OperateManager !== 'undefined' && OperateManager.roster) OperateManager.roster.goTo('acquire');
+            return;
+        }
+        if (_run.status === 'idle' || (b && b.dataset.busy)) return;
+        // Stopping a night's run is asked about; pausing it is not.
+        if (what === 'stop' && !window.confirm('Stop the run?')) return;
+        const paused = _run.status === 'paused';
+        if (b) { b.dataset.busy = '1'; b.disabled = true; }
+        try {
+            if (what === 'stop') {
+                await post('/api/devices/timelapse/stop', { reason: 'operator' });
+                say('Run stopped');
+            } else {
+                const d = await post(paused ? '/api/devices/timelapse/resume' : '/api/devices/timelapse/pause');
+                say(paused ? (d && d.continued ? 'Run carried on from its checkpoint' : 'Resumed') : 'Paused');
+            }
+        } catch (e) {
+            say(`${what === 'stop' ? 'Not stopped' : paused ? 'Not resumed' : 'Not paused'} (${e.message})`, 'error');
+        } finally {
+            if (b) { delete b.dataset.busy; b.disabled = false; }
+            pollRun();
+        }
     }
 
     function init() {
@@ -167,6 +227,12 @@ const Shell = (() => {
         }
 
         initCollapse();
+
+        // One listener for the run's controls, wherever a surface puts them.
+        document.addEventListener('click', e => {
+            const b = e.target.closest('[data-run-control]');
+            if (b) runControl(b.dataset.runControl, b);
+        });
 
         renderStrip();
     }

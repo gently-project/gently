@@ -4180,6 +4180,11 @@ kbd {
 }
 
 /* Timelapse Status Badge */
+/* The run's controls on the tab it is watched on (shell.js). */
+.run-controls { display: inline-flex; align-items: center; gap: 4px; }
+.run-controls [hidden] { display: none; }
+.run-controls .run-plan-link { color: var(--text-muted); }
+
 .timelapse-status {
     display: flex;
     align-items: center;
