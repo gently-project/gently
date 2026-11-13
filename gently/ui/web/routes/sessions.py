@@ -1,7 +1,10 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
 import asyncio
+import json
 import logging
+import os
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,6 +13,8 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 
+from gently.core.session_list_cache import SessionListCache
+from gently.core.session_list_cache import fingerprint as _fingerprint
 from gently.core.session_summary import interaction_stats, signal_counts
 from gently.core.session_summary import read_checkpoint as _checkpoint
 from gently.core.session_summary import what_a_session_holds as _what_a_session_holds
@@ -185,8 +190,111 @@ def folder_bytes(
     return total
 
 
+# What the list kept of each session, one cache a storage root: a file
+# beside the session index (gently/core/session_list_cache.py).
+_LIST_CACHES: dict[str, SessionListCache] = {}
+_LIST_CACHES_LOCK = threading.Lock()
+
+
+def list_cache_for(store) -> SessionListCache | None:
+    """The kept rows for this store's root, or None for a store that is not
+    one on disk with a session index (a test's stand-in): that one is read
+    the long way, as every store used to be."""
+    where = getattr(store, "root", None)
+    if not isinstance(where, (str, os.PathLike)):
+        return None
+    if not isinstance(getattr(store, "_index", None), dict):
+        return None
+    key = os.fspath(where)
+    with _LIST_CACHES_LOCK:
+        cache = _LIST_CACHES.get(key)
+        if cache is None:
+            cache = SessionListCache(Path(key) / "sessions" / "_list_cache.json")
+            _LIST_CACHES[key] = cache
+        return cache
+
+
+def _plain(doc: Any) -> Any:
+    """``doc`` as JSON carries it. A kept row is read back from JSON, and the
+    first answer about a session has to be the same as every one after it:
+    a timestamp YAML parsed into a datetime is an ISO string in both."""
+    return json.loads(
+        json.dumps(doc, default=lambda o: o.isoformat() if hasattr(o, "isoformat") else str(o))
+    )
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
+
+    def _kept(
+        store, sid: str, active_id, info: dict | None = None
+    ) -> tuple[dict, list | None] | None:
+        """A session's own record and what its folder holds, with the
+        fingerprint it was read under: from what was kept when the folder is
+        as it was read, from the folder otherwise. None for no such session.
+
+        The live session is always read: it is the one folder that changes
+        between its checkpoints."""
+        cache = list_cache_for(store)
+        fp = None
+        if cache is not None and sid != active_id:
+            # Taken before the read, so a change during it is seen next time.
+            fp = _fingerprint(store._session_dir(sid))
+            kept = cache.get(sid, fp)
+            if kept is not None:
+                return kept, fp
+        if info is None:
+            info = store.get_session(sid)
+        if info is None:
+            return None
+        row = _plain(
+            {
+                "info": info,
+                # Directory names and one checkpoint per session, no image
+                # decoded: what there is before a restore, in the list itself.
+                "held": _what_a_session_holds(store, sid),
+                "bf_frames": _bf_count(store, sid),
+                "brightfield_references": _reference_count(store, sid),
+            }
+        )
+        if cache is not None and fp is not None:
+            row = cache.put(sid, fp, row)
+        return row, fp
+
+    def _session_bytes(store, sid: str, active_id) -> int | None:
+        """What a session weighs: counted afresh for the live one, whose
+        folder is growing; for any other, what was last counted of the
+        folder as it is, and a count now if it never was."""
+        folder = store._session_dir(sid)
+        if sid == active_id:
+            return folder_bytes(folder, fresh=True)
+        cache = list_cache_for(store)
+        if cache is None:
+            return folder_bytes(folder)
+        fp = _fingerprint(folder)
+        kept = cache.get(sid, fp)
+        if kept is not None and kept.get("bytes") is not None:
+            return int(kept["bytes"])
+        counted = folder_bytes(folder)
+        if counted is not None:
+            cache.note(sid, fp, bytes=counted)
+        return counted
+
+    def _forget_size_under(store, path) -> None:
+        """Something was just written into a session's folder (a movie, an
+        export): what that session weighs is no longer what was counted."""
+        cache = list_cache_for(store)
+        if cache is None:
+            return
+        try:
+            parts = set(Path(path).parts)
+        except TypeError:
+            return
+        for sid, folder_name in list(store._index.items()):
+            if folder_name in parts:
+                cache.forget(sid, "bytes")
+                _SIZE_CACHE.pop(str(store._session_dir(sid)), None)
+        cache.save()
 
     def _session_tools(store, sid: str) -> list[str]:
         from gently.tools import session_tools
@@ -274,22 +382,58 @@ def create_router(server) -> APIRouter:
         def gather() -> list[dict]:
             out = []
             served = _plan_items_by_session(cs)
-            for s in store.list_sessions(project_id=project_id, unfiled=unfiled):
-                sid = s.get("session_id")
-                # Directory names and one checkpoint per session, no image
-                # decoded: what there is before a restore, in the list itself.
-                held = _what_a_session_holds(store, sid) or {}
+            cache = list_cache_for(store)
+            candidates: list[tuple[Any, dict | None]]
+            if cache is not None:
+                # From the index: where every session's folder is, is known
+                # without a read, and a session that has not changed since it
+                # was last read is not read at all (session_list_cache.py).
+                candidates = [(sid, None) for sid in list(store._index)]
+            else:
+                candidates = [
+                    (s.get("session_id"), s)
+                    for s in store.list_sessions(project_id=project_id, unfiled=unfiled)
+                ]
+            for sid, given in candidates:
+                got = _kept(store, sid, active_id, given)
+                if got is None:
+                    continue
+                kept, fp = got
+                s = kept["info"]
+                links = (s.get("projects") or []) if given is not None else store.links_of(s)
+                if cache is not None:
+                    if project_id is not None and not any(x.get("id") == project_id for x in links):
+                        continue
+                    if unfiled and links:
+                        continue
+                held = kept.get("held") or {}
                 extra: dict = {}
                 if detail:
-                    folder = store._session_dir(sid)
-                    if folder is not None:
-                        extra.update(signal_counts(Path(folder) / "events.jsonl"))
-                        extra.update(interaction_stats(Path(folder) / "interaction_log.jsonl"))
+                    # Read to the end of the event capture, once: on this rig
+                    # five of them are over 70 MB, and they were read on every
+                    # load of the project view to say two numbers each.
+                    signals = kept.get("signals")
+                    if signals is None:
+                        signals = {}
+                        folder = store._session_dir(sid)
+                        if folder is not None:
+                            signals.update(signal_counts(Path(folder) / "events.jsonl"))
+                            signals.update(
+                                interaction_stats(Path(folder) / "interaction_log.jsonl")
+                            )
+                        if cache is not None:
+                            cache.note(sid, fp, signals=signals)
+                    extra.update(signals)
+                size = kept.get("bytes")
+                if size is None:
+                    # Never a walk from the list, the live session's included:
+                    # its row shows the last size counted, the detail counts afresh.
+                    size = folder_bytes(store._session_dir(sid), cached_only=True)
                 out.append(
                     {
                         "session_id": sid,
                         "project_id": s.get("project_id"),
-                        "projects": s.get("projects") or [],
+                        "projects": links,
                         "operators": [str(x) for x in (s.get("operators") or [])],
                         "tags": s.get("tags") or [],
                         "plan_items": served.get(sid, []),
@@ -302,14 +446,13 @@ def create_router(server) -> APIRouter:
                         "last_image_at": held.get("last_image_at"),
                         "run": held.get("run"),
                         "last_run": held.get("last_run"),
-                        "bf_frames": _bf_count(store, sid),
+                        "bf_frames": kept.get("bf_frames") or 0,
                         # The walk over a session's files is the one slow read
-                        # left here: a cached size comes now, the rest arrive
-                        # through /api/sessions/sizes once the list is drawn.
-                        # Never a walk from the list, the live session's included:
-                        # its row shows the last size counted, the detail counts afresh.
-                        "bytes": folder_bytes(store._session_dir(sid), cached_only=True),
-                        "brightfield_references": _reference_count(store, sid),
+                        # left: a size already counted comes now, the rest arrive
+                        # through /api/sessions/sizes once the list is drawn, and
+                        # are kept from then on.
+                        "bytes": size,
+                        "brightfield_references": kept.get("brightfield_references") or 0,
                         "suggested_name": derive_session_name(
                             created_at=s.get("created_at"),
                             embryo_count=held.get("embryo_count", 0),
@@ -322,6 +465,10 @@ def create_router(server) -> APIRouter:
                         ),
                     }
                 )
+            if cache is not None:
+                out.sort(key=lambda r: r.get("last_active") or "", reverse=True)
+                cache.keep_only(store._index)
+                cache.save()
             return out
 
         try:
@@ -329,7 +476,15 @@ def create_router(server) -> APIRouter:
         except Exception as e:
             logger.warning("Failed to list sessions from FileStore: %s", e)
             sessions = []
-        return {"sessions": sessions}
+        # Said as it is: the rows are already what JSON carries, and walking
+        # several hundred of them again to make sure was a fifth of the answer.
+        try:
+            return Response(
+                content=json.dumps({"sessions": sessions}, separators=(",", ":")),
+                media_type="application/json",
+            )
+        except (TypeError, ValueError):
+            return {"sessions": sessions}
 
     def _reference_count(store, sid: str) -> int:
         """Complete dark+flat reference sets the session holds."""
@@ -367,9 +522,13 @@ def create_router(server) -> APIRouter:
         active_id = _active_session_id()
 
         def gather() -> dict[str, int | None]:
-            return {
-                sid: folder_bytes(store._session_dir(sid), fresh=sid == active_id) for sid in wanted
-            }
+            sizes = {sid: _session_bytes(store, sid, active_id) for sid in wanted}
+            # What was counted is kept, so it is counted once and not after
+            # every restart.
+            cache = list_cache_for(store)
+            if cache is not None:
+                cache.save()
+            return sizes
 
         return {"sizes": await asyncio.to_thread(gather)}
 
@@ -392,16 +551,23 @@ def create_router(server) -> APIRouter:
         def gather() -> list[dict]:
             out: list[dict] = []
             for sid in store.recent_session_ids(scan) or []:
-                held = _what_a_session_holds(store, sid)
-                if held is None:
+                # The launch gate asks this of the forty newest sessions each
+                # time it opens; what the list kept answers it too.
+                got = _kept(store, sid, active)
+                if got is None or not got[0].get("held"):
                     continue
+                kept = got[0]
+                info = kept.get("info") or {}
+                held = dict(kept["held"])
                 held["active"] = sid == active
-                info = store.get_session(sid) or {}
                 held["project_id"] = info.get("project_id")
                 held["operators"] = [str(x) for x in (info.get("operators") or [])]
                 out.append(held)
                 if len(out) >= limit:
                     break
+            cache = list_cache_for(store)
+            if cache is not None:
+                cache.save()
             return out
 
         try:
@@ -748,8 +914,8 @@ def create_router(server) -> APIRouter:
                 "run": held.get("run"),
                 "last_run": held.get("last_run"),
                 # A fresh count only for the live session, whose folder is growing;
-                # a finished session's size is what the cache last counted.
-                "bytes": folder_bytes(store._session_dir(session_id), fresh=session_id == active),
+                # a finished session's size is what was last counted of it.
+                "bytes": _session_bytes(store, session_id, active),
                 "acquisition": acquisition,
                 "embryos": embryos,
                 "bf_frames": bf_frames,
@@ -997,6 +1163,7 @@ def create_router(server) -> APIRouter:
                 out = export_session(store, session_id, dest_path, progress, crops=crops)
                 job["path"] = str(out)
                 job["state"] = "done"
+                _forget_size_under(store, out)
             except Exception as exc:
                 logger.exception("export of %s failed", session_id)
                 job["error"] = str(exc)
@@ -1145,6 +1312,7 @@ def create_router(server) -> APIRouter:
                     base = job["done"]
                 job["done"] = job["total"] = max(job["total"], job["done"])
                 job["state"] = "done" if job["outputs"] else "error"
+                _forget_size_under(_file_store(), path)
                 if not job["outputs"]:
                     job["error"] = job["note"] or "Nothing could be written"
             except Exception as exc:
