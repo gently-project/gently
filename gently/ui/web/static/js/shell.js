@@ -123,6 +123,13 @@ const Shell = (() => {
             : ((typeof state !== 'undefined' && Array.isArray(state.embryos)) ? state.embryos.length : 0);
         const conn = s.gentlyConnected ? (s.microscopeConnected ? 'Connected' : 'Online') : 'Offline';
         el.textContent = `${runWords()}${n} embryo${n === 1 ? '' : 's'} · ${conn}`;
+        // The Devices tab does not draw this strip, so its toolbar says the run.
+        const tb = document.getElementById('devices-run');
+        if (tb) {
+            const words = runWords().replace(/ · $/, '');
+            tb.textContent = words;
+            tb.hidden = !words;
+        }
     }
 
     function init() {

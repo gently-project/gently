@@ -1881,6 +1881,18 @@
    mark, so it is not the same grey as "the camera is live". */
 .devices-status .op-subnav-meta .is-emitting { color: var(--accent-red); font-weight: 700; }
 .devices-status .op-subnav-meta .is-emitting::before { content: '● '; }
+/* A run going, in the colours the rest of the shell says it in. */
+.devices-run {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+.devices-run::before { content: '● '; }
+body[data-run="running"] .devices-run { color: var(--run-live); }
+body[data-run="paused"] .devices-run { color: var(--run-paused); }
+.devices-run[hidden] { display: none; }
 /* One HALT, on every view of this tab, where the hand learns to find it. */
 .devices-halt {
     flex: none;

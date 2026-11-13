@@ -420,6 +420,12 @@
                     </div>
                 </div>
                 <div class="devices-status">
+                    {# A run, said here on every view of this tab. The strip
+                       that says it on the other tabs is not drawn on this one
+                       (its row goes to the picture), and the status bar under
+                       the page was found saying "No run" over a running
+                       brightfield timelapse. shell.js writes it. #}
+                    <span class="devices-run" id="devices-run" hidden></span>
                     <span class="op-subnav-meta" id="op-subnav-meta"></span>
                     {# The water, as one reading in the row. The chart is a
                        press away and opens over the bottom of the page: as a

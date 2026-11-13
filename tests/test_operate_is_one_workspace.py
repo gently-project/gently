@@ -261,6 +261,17 @@ def test_the_page_gives_the_workspace_its_edges() -> None:
     )
 
 
+def test_a_run_is_said_in_the_toolbar_since_the_strip_is_not_drawn_here() -> None:
+    """Hiding the strip on this tab left the status bar as the one place that
+    said a run was going, and it said "No run" over a running brightfield
+    timelapse. The shell, which already knows the run, writes it here too."""
+    assert 'id="devices-run"' in TOOLBAR
+    strip = _fn(SHELL, "    function renderStrip(status) {")
+    assert "document.getElementById('devices-run')" in strip
+    assert "tb.hidden = !words;" in strip
+    assert 'body[data-run="running"] .devices-run' in CSS
+
+
 def test_the_water_is_one_reading_in_the_toolbar_and_its_chart_lies_over_the_page() -> None:
     assert 'id="devices-tempwrap-toggle"' in TOOLBAR and 'id="devices-tempwrap-now"' in TOOLBAR
     wrap = INDEX[INDEX.index('id="devices-tempwrap"') :][:400]
