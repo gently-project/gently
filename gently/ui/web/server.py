@@ -127,7 +127,7 @@ class VisualizationServer(Service):
     Parameters
     ----------
     host : str
-        Server host (default: "0.0.0.0")
+        Server host (default: "localhost" — both loopback addresses, not the network)
     port : int
         Server port (default: 8080)
     data_store : DataStore, optional

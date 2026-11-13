@@ -56,7 +56,13 @@ class NetworkSettings:
     """Ports, hosts, and bind addresses."""
 
     viz_port: int = field(default_factory=lambda: _env("VIZ_PORT", 8080))
-    viz_host: str = field(default_factory=lambda: _env("VIZ_HOST", "0.0.0.0"))
+    # "localhost" binds both loopback addresses (127.0.0.1 and ::1) and nothing
+    # else: the UI answers on this machine and is not offered to the network.
+    # It was 0.0.0.0, which served it to the whole lab network, and only on
+    # IPv4 — so a client that tries ::1 first for "localhost" (curl does) waited
+    # ~200 ms on every new connection before falling back. To serve other
+    # machines on purpose, set GENTLY_VIZ_HOST=0.0.0.0.
+    viz_host: str = field(default_factory=lambda: _env("VIZ_HOST", "localhost"))
     device_port: int = field(default_factory=lambda: _env("DEVICE_PORT", 60610))
     device_host: str = field(default_factory=lambda: _env("DEVICE_HOST", "127.0.0.1"))
     mesh_port: int = field(default_factory=lambda: _env("MESH_PORT", 19547))

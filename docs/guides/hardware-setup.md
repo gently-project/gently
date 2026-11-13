@@ -182,7 +182,7 @@ The device layer exposes status information:
 | `GENTLY_DEVICE_PORT` | `60610` | Device layer port |
 | `GENTLY_STORAGE_PATH` | `D:/Gently3` | Session and data storage directory |
 | `GENTLY_VIZ_PORT` | `8080` | Web visualization server port |
-| `GENTLY_VIZ_HOST` | `0.0.0.0` | Visualization bind address |
+| `GENTLY_VIZ_HOST` | `localhost` | Web UI bind address. The default answers on this machine only; set `0.0.0.0` to serve other machines on the network |
 
 ## Next Steps
 
