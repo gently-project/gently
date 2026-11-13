@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Calibration and Acquisition in the workspace — mockup v1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Mockup. Static: the controls move, nothing reaches a microscope. ─────
+     Three drawings, reached from the toolbar and from Start:
+       Scope, with calibration on it (a Fit row in Sheet, a Fit view in the strip)
+       Acquisition before a run   (the dish · the latest volumes · the plan and what stands in its way)
+       Acquisition during a run   (the same three zones, watching)
+     The reasoning is in calibration-and-acquisition.md, beside this file.
+     Light, Head, Stage and Display are as built and drawn short; Find and
+     Overview frames are left out. The numbers are this rig's: its slopes, the
+     4.0 s a volume costs, the 105 MB it weighs, the cadence it keeps. */
+  :root, [data-theme="dark"] {
+    --bg: #0d1117; --panel: #12161d; --field: #0b0f14; --rule: #262c36; --rule2: #36404d;
+    --ink: #d7dee8; --dim: #7d8899; --accent: #60a5fa; --accent-soft: rgba(96,165,250,.16);
+    --green: #3ee6b0; --amber: #fbbf24; --red: #f0405a; --img: #04070b; --chrome: #0f141b;
+    --amber-soft: rgba(251,191,36,.12); --on-accent: #06101f;
+  }
+  [data-theme="light"] {
+    --bg: #f4f6f9; --panel: #ffffff; --field: #ffffff; --rule: #dfe4ea; --rule2: #c6ced8;
+    --ink: #1c2430; --dim: #667081; --accent: #2563eb; --accent-soft: #e8eefb;
+    --green: #138669; --amber: #a16207; --red: #b4143c; --img: #1b222c; --chrome: #ffffff;
+    --amber-soft: #fff7e6; --on-accent: #ffffff;
+  }
+  :root { --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+          --sans: 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.3 var(--sans); color: var(--ink); background: var(--bg);
+         display: grid; grid-template-columns: 56px minmax(0, 1fr) 46px; grid-template-rows: 46px minmax(0, 1fr) 26px; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; } button:disabled { opacity: .4; cursor: default; }
+  [hidden] { display: none !important; }
+
+  /* ── the app's shell, as it is ───────────────────────────────────────── */
+  .hdr { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--chrome); border-bottom: 1px solid var(--rule); }
+  .hdr .brand { font-weight: 700; font-size: 16px; color: var(--accent); }
+  .chip { font: 11px var(--mono); padding: 2px 8px; border: 1px solid var(--rule); border-radius: 10px; color: var(--dim); background: transparent; }
+  .sp { flex: 1; }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #a855f7, #ec4899); color: #fff; font: 600 11px/26px var(--sans); text-align: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); display: inline-block; }
+  .nav { grid-row: 2; background: var(--chrome); border-right: 1px solid var(--rule); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; }
+  .nav i { width: 34px; height: 30px; border-radius: 6px; display: grid; place-items: center; color: var(--dim); font: 600 10px var(--mono); font-style: normal; }
+  .nav i.on { background: var(--accent-soft); color: var(--accent); }
+  .nav hr { width: 28px; border: 0; border-top: 1px solid var(--rule); margin: 4px 0; }
+  .agent { grid-row: 2; grid-column: 3; border-left: 1px solid var(--rule); background: var(--chrome); display: grid; place-items: start center; padding-top: 12px; color: var(--accent); font-size: 18px; }
+  .sb { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 0 14px; font-size: 11px; color: var(--dim); background: var(--chrome); border-top: 1px solid var(--rule); white-space: nowrap; overflow: hidden; }
+  .sb b { color: var(--ink); font-weight: 500; font-family: var(--mono); } .sb #msg { overflow: hidden; text-overflow: ellipsis; }
+  .sb .mock { color: var(--amber); font-weight: 600; }
+
+  /* ── main: one toolbar row, then one of three workspaces ─────────────── */
+  main { grid-row: 2; grid-column: 2; display: grid; grid-template-rows: 38px minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .tb { display: flex; align-items: center; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--rule); }
+  .tab { padding: 5px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--dim); font-size: 12.5px; }
+  .tab.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .tb .div { width: 1px; height: 18px; background: var(--rule); margin: 0 6px; }
+  .own { font: 11px var(--mono); color: var(--dim); margin-right: 10px; white-space: nowrap; }
+  .own.emit { color: var(--red); font-weight: 600; }
+  .runw { font: 700 11px var(--mono); letter-spacing: .04em; color: var(--green); margin-right: 12px; white-space: nowrap; }
+  body[data-run="paused"] .runw, body[data-run="held"] .runw { color: var(--amber); }
+  .halt { font: 700 12px var(--sans); letter-spacing: .08em; color: #fff; background: #b4143c; border: 0; border-radius: 4px; height: 26px; padding: 0 16px; }
+
+  .ws { display: none; gap: 10px; padding: 12px 10px 8px; min-height: 0; min-width: 0; }
+  body[data-screen="scope"] .ws.scope { display: grid; grid-template-columns: 300px auto minmax(300px, 1fr); container-type: size; }
+  body[data-screen="acq"][data-run="idle"] .ws.design { display: grid; grid-template-columns: 300px minmax(0, 1fr) auto; }
+  body[data-screen="acq"]:not([data-run="idle"]) .ws.watch { display: grid; grid-template-columns: 300px minmax(0, 1fr) 310px; }
+
+  /* ── the panel primitive and its rows, as Scope has them ─────────────── */
+  .p { position: relative; min-width: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 9px 8px; }
+  .p > h3 { position: absolute; top: -7px; left: 8px; margin: 0; padding: 0 5px; background: var(--panel); border-radius: 2px;
+            font: 600 10px/13px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .p > h3 em { font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; margin-left: 6px; }
+  .p > h3 label { letter-spacing: 0; text-transform: none; font-weight: 500; margin-left: 8px; color: var(--ink); }
+  .p > h3 input { vertical-align: -2px; margin: 0 3px 0 0; accent-color: var(--accent); }
+  .r { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+  .r + .r, .line + .r, .r + .line, .line + .line { margin-top: 2px; }
+  .l { flex: 0 0 56px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .v { font: 12px var(--mono); } .u { font-size: 10.5px; color: var(--dim); }
+  .grow { flex: 1 1 auto; min-width: 0; } .right { margin-left: auto; } .nw { white-space: nowrap; }
+  .num { width: 52px; height: 20px; padding: 0 5px; font: 12px var(--mono); text-align: right; color: var(--ink); background: var(--field); border: 1px solid var(--rule2); border-radius: 3px; }
+  .num.n { width: 44px; } .num.w { width: 64px; } .num::placeholder { color: var(--dim); font-style: italic; }
+  .num:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+  .btn { height: 22px; padding: 0 8px; font: 12px var(--sans); border: 1px solid var(--rule2); border-radius: 3px; background: var(--field); color: var(--ink); white-space: nowrap; }
+  .btn.q { color: var(--dim); } .btn.pri { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .btn.live { border-color: var(--green); color: var(--green); font-weight: 600; } .btn.stop { border-color: var(--red); color: var(--red); font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--rule2); border-radius: 3px; overflow: hidden; flex: 0 0 auto; }
+  .seg button { height: 20px; padding: 0 8px; font: 12px var(--sans); border: 0; border-left: 1px solid var(--rule2); background: var(--field); color: var(--dim); white-space: nowrap; }
+  .seg button:first-child { border-left: 0; }
+  .seg button.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .seg button.on.rest { background: var(--rule2); color: var(--ink); }
+  .seg.fill { display: flex; flex: 1 1 auto; } .seg.fill button { flex: 1 1 auto; padding: 0 4px; font: 11.5px var(--mono); }
+  input[type=range] { flex: 1 1 auto; min-width: 40px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .ext { font: 10px var(--mono); color: var(--dim); white-space: nowrap; }
+  select.sel { height: 22px; font: 12px var(--sans); background: var(--field); color: var(--ink); border: 1px solid var(--rule2); border-radius: 3px; min-width: 0; flex: 1 1 auto; }
+  .note { font-size: 10.5px; line-height: 1.35; color: var(--dim); margin: 4px 0 0; }
+  .stat { margin-top: 6px; min-height: 22px; display: flex; align-items: center; gap: 7px; padding: 2px 8px; border-radius: 3px; font-size: 11.5px; border: 1px dashed var(--rule2); color: var(--dim); }
+  .stat::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; flex: 0 0 auto; }
+  .stat.emit { border: 1px solid var(--red); background: var(--red); color: #fff; font-weight: 700; letter-spacing: .03em; }
+  .stat.emit::before { background: #fff; border-color: #fff; }
+  .stat.warn { border: 1px solid var(--amber); background: var(--amber-soft); color: var(--amber); }
+  .flash { animation: flash .7s; } @keyframes flash { 20%, 60% { outline: 2px solid var(--amber); outline-offset: 2px; } 40%, 80% { outline: 2px solid transparent; outline-offset: 2px; } }
+
+  /* ── left: the dish, as a list and as a table ────────────────────────── */
+  .dish { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .embryos { flex: 1 1 auto; min-height: 90px; display: flex; flex-direction: column; }
+  .list { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 -3px; scrollbar-width: thin; }
+  .row, .thead { display: grid; grid-template-columns: 22px 1fr auto 20px; align-items: center; gap: 6px; padding: 0 5px; }
+  .row { height: 26px; border-radius: 3px; font-size: 12px; cursor: default; } .row + .row { margin-top: 1px; }
+  .row.sel { background: var(--accent-soft); } .row.out { opacity: .45; }
+  .row .id { font: 600 11px var(--mono); color: var(--accent); }
+  .row .xy { font: 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .thead { height: 18px; margin: 0 -3px 2px; border-bottom: 1px solid var(--rule); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+  .d { grid-template-columns: 22px 62px 82px 1fr; } .w { grid-template-columns: 22px 30px 62px 1fr 20px; }
+  .tag { font: 10px var(--mono); padding: 0 5px; border-radius: 8px; border: 1px solid var(--rule2); color: var(--dim); white-space: nowrap; justify-self: start; }
+  .tag.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+  .tag.no { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+  .ico { width: 20px; height: 20px; border: 0; border-radius: 3px; background: transparent; color: var(--dim); font-size: 12px; padding: 0; }
+  .ico:hover { background: var(--accent-soft); color: var(--accent); }
+  .cell { height: 20px; padding: 0 5px; font: 11px var(--sans); border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--dim); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell:hover { border-color: var(--rule2); background: var(--field); }
+  .cell.set { color: var(--ink); border-color: var(--rule2); background: var(--field); }
+
+  /* ── middle: a picture, at the height there is ───────────────────────── */
+  .view { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; container-type: inline-size; }
+  .ws.scope .view { container-type: normal; }
+  .viewbar { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+  .viewbar .l { flex: none; } .viewbar .fps { font: 11px var(--mono); color: var(--dim); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .viewbar .grp { display: inline-flex; align-items: center; gap: 8px; }
+  .view.fit .cam-only, .view:not(.fit) .fit-only { display: none; }
+  /* Under the frame: Display for a camera, and for the Fit view what a
+     calibration is asked. The same box, so the frame keeps its size. */
+  .under { height: 66px; display: flex; flex-direction: column; justify-content: center; }
+  .under .l { flex: none; }
+  .img { position: relative; height: calc(100cqh - 28px - 18px - 66px - 3 * 6px); aspect-ratio: 1 / 1; max-width: calc(100cqw - 300px - 300px - 20px);
+         background: var(--img); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .img .blob { position: absolute; border-radius: 50%; background: radial-gradient(circle, #fff 0, #cfe3ff 30%, rgba(180,210,255,.25) 55%, rgba(255,255,255,0) 72%); }
+  .img .b1 { left: 22%; top: 46%; width: 12%; height: 12%; } .img .b2 { left: 66%; top: 44%; width: 8%; height: 8%; opacity: .75; }
+  .img.dark .blob { opacity: .06; }
+  .img .zoom { position: absolute; right: 8px; bottom: 6px; font: 11px var(--mono); color: #9fb3c8; }
+  .cap { display: flex; gap: 10px; height: 18px; font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; }
+  .cap b { font: 500 11px var(--mono); color: var(--ink); }
+
+  /* The Fit view: the same frame, holding the evidence instead of a camera. */
+  .fitview { position: absolute; inset: 0; display: none; grid-template-rows: minmax(0, 1fr) auto auto; gap: 6px; padding: 10px; background: var(--panel); }
+  .img.fit .fitview { display: grid; } .img.fit .blob, .img.fit .zoom { display: none; }
+  .plot { width: 100%; height: 100%; min-height: 0; }
+  .plot .ext { fill: var(--accent-soft); opacity: .5; } .plot .ax { fill: none; stroke: var(--rule2); stroke-width: 1; } .plot .gr { fill: none; stroke: var(--rule); stroke-width: 1; }
+  /* The axis titles carry units, so they are not uppercased: µ would become M. */
+  .plot text { font: 11px var(--mono); fill: var(--dim); } .plot text.t { font: 600 11px var(--sans); fill: var(--ink); }
+  .plot .fitline { stroke: var(--accent); stroke-width: 2; } .plot circle { fill: var(--panel); stroke: var(--green); stroke-width: 2.5; }
+  .plot .none { font: 13px var(--sans); fill: var(--dim); }
+  .curves { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .curve { border: 1px solid var(--rule); border-radius: 3px; padding: 4px 6px 3px; font: 10.5px var(--mono); color: var(--dim); min-width: 0; }
+  .curve svg { display: block; width: 100%; height: 54px; } .curve polyline { fill: none; stroke: var(--ink); stroke-width: 1.4; } .curve line { stroke: var(--green); stroke-width: 1.4; }
+  .curve.wait { opacity: .3; }
+  .frames { display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .fr { flex: 0 0 34px; height: 34px; border-radius: 2px; background: #04070b; position: relative; overflow: hidden; }
+  .fr::after { content: ''; position: absolute; left: 30%; top: 30%; width: 40%; height: 40%; border-radius: 50%; background: #dbe9ff; filter: blur(var(--bl, 0px)); opacity: var(--op, 1); }
+  .frames .u { margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* The volumes: one tile an embryo. */
+  /* As many across as makes them largest in the room there is (set by the script). */
+  .tiles { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(var(--across, 4), minmax(0, 1fr)); gap: 8px; align-content: start; scrollbar-width: thin; }
+  .tile { position: relative; aspect-ratio: 1 / 1; background: #04070b; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .tile i { position: absolute; inset: 0; }
+  .tile b { position: absolute; left: 6px; top: 4px; font: 600 11px var(--mono); color: #93c5fd; }
+  .tile span { position: absolute; left: 6px; right: 6px; bottom: 4px; font: 10px var(--mono); color: #9fb3c8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile.none { background: transparent; border-style: dashed; } .tile.none i { display: none; } .tile.none b { color: var(--dim); }
+  .tile.none span { color: var(--dim); white-space: normal; bottom: auto; top: 42%; text-align: center; }
+  .tile.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); } .tile.now { box-shadow: 0 0 0 2px var(--green); border-color: var(--green); }
+  .tile.now span { color: var(--green); font-weight: 600; } .tile.wait i { opacity: .12; }
+
+  /* ── right: the instrument on Scope; the plan and the run on Acquisition ── */
+  .inst { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 12px 10px; min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; padding-top: 8px; margin-top: -8px; }
+  .inst > .col { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .line { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+  .sw { width: 10px; height: 10px; border-radius: 50%; background: var(--wl); opacity: .35; flex: 0 0 auto; }
+  .line.routed .sw { opacity: 1; } .line.lit .sw { box-shadow: 0 0 7px 2px var(--wl); }
+  .wl { flex: 0 0 28px; font: 12px var(--mono); color: var(--dim); } .line.routed .wl { color: var(--ink); font-weight: 600; }
+  .big { font: 500 16px var(--mono); }
+  .side { display: flex; gap: 10px; min-height: 0; padding-top: 8px; margin-top: -8px; }
+  .side > .col { width: 310px; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .side > .col.plan { overflow: auto; scrollbar-width: thin; padding-top: 8px; margin-top: -8px; }
+  .say { margin: 0; font: 12.5px/1.45 var(--sans); }
+  .pfbox { flex: 1 1 auto; min-height: 60px; display: flex; flex-direction: column; }
+  .pf { display: grid; grid-template-columns: 14px 1fr; gap: 4px 6px; align-content: start; font-size: 12px; line-height: 17px; overflow: auto; min-height: 0; scrollbar-width: thin; }
+  .pf i { font: 700 12px/17px var(--mono); font-style: normal; text-align: center; }
+  .pf .ok { color: var(--green); } .pf .warn { color: var(--amber); } .pf .no { color: var(--red); }
+  .pf .btn { height: 20px; margin: 2px 4px 0 0; font-size: 11.5px; }
+  .start { height: 34px; width: 100%; font: 700 13px var(--sans); letter-spacing: .02em; border-radius: 4px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); }
+  .start.blocked { background: transparent; color: var(--amber); border-color: var(--amber); cursor: not-allowed; opacity: 1; }
+  .foot { display: flex; flex-direction: column; gap: 6px; } .foot .r .btn { flex: 1 1 auto; }
+  .clock { font: 500 30px/1 var(--mono); } .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; margin-top: 8px; }
+  .kv span { color: var(--dim); } .kv b { font: 500 12px var(--mono); text-align: right; }
+
+  @media (max-width: 1180px) {
+    body .ws { display: none; } body[data-screen="scope"] .ws.scope, body[data-screen="acq"][data-run="idle"] .ws.design, body[data-screen="acq"]:not([data-run="idle"]) .ws.watch
+      { display: flex; flex-direction: column; overflow-y: auto; container-type: inline-size; }
+    .img { height: auto; width: min(100%, calc(100vh - 150px)); max-width: none; } .side { flex-wrap: wrap; } .tiles { overflow: visible; }
+    .tb { overflow-x: auto; scrollbar-width: none; }
+  }
+</style>
+</head>
+<body data-screen="scope" data-run="idle">
+
+  <header class="hdr">
+    <span class="brand">Gently Microscopy</span><span class="chip">e2d4e5b6</span><span class="sp"></span>
+    <button class="chip" id="theme" title="Dark for the microscope room; light for the office">◐ theme</button>
+    <span class="avatar">C</span><span class="chip"><span class="dot"></span> Connected ▾</span>
+  </header>
+
+  <nav class="nav"><i>Ho</i><i>Op</i><i>Em</i><hr><i>Pr</i><i>Se</i><i>Nb</i><i>Ga</i><hr><i class="on">Dv</i><i>Ca</i><i>Lg</i><i>St</i></nav>
+
+  <main>
+    <div class="tb">
+      <button class="tab on" data-go="scope">Scope</button><button class="tab" data-go="acq" title="No Calibration entry: it is on Scope, in Sheet and in the picture's strip">Acquisition</button>
+      <span class="div"></span>
+      <button class="tab">Map</button><button class="tab">Details</button><button class="tab">3D</button><button class="tab">Manual</button>
+      <span class="sp"></span>
+      <span class="runw" id="runw" hidden></span>
+      <button class="btn" id="tb-pause" data-run-toggle hidden style="margin-right:12px" title="The run, said and held from every Devices view. It moves no panel.">Pause</button>
+      <span class="own" id="own-light">dark</span>
+      <button class="halt" id="halt" title="Proposed: motion stops first and alone; then the lasers are gated (powers kept), the live views stop, a calibration is aborted and a run is held until Resume.">HALT</button>
+    </div>
+
+    <!-- ══ Scope, with calibration on it ══════════════════════════════════ -->
+    <div class="ws scope">
+      <aside class="dish">
+        <div class="p embryos"><h3>Embryos <em id="n-scope"></em></h3><div class="list" id="list-scope"></div></div>
+        <div class="p"><h3>Fields <em>1</em></h3>
+          <div class="row"><span class="id">F1</span><span class="xy">−124, −355</span><span></span><button class="ico">×</button></div></div>
+        <p class="note">The fit is in the list: a slope and its R², whose slope was borrowed, or <span style="color:var(--amber)">uncal</span>. Find and Overview frames are as built and not drawn here.</p>
+      </aside>
+
+      <section class="view" id="view">
+        <div class="viewbar">
+          <span class="seg" id="src"><button data-src="bottom">Bottom cam</button><button data-src="A">SPIM A</button><button data-src="B">SPIM B</button><button data-src="multi">Multi</button><button data-src="fit" title="New: the selected embryo's calibration, at the picture's size">Fit</button></span>
+          <span class="grp cam-only"><button class="btn live asks" id="live">● Stop view</button><span class="l">Exposure</span><input class="num n" value="20"><span class="u">ms</span></span>
+          <span class="fps" id="fps"></span>
+        </div>
+        <div class="img" id="img">
+          <div class="blob b1"></div><div class="blob b2"></div><span class="zoom">1.0×</span>
+          <div class="fitview">
+            <svg class="plot" viewBox="0 0 600 446" preserveAspectRatio="xMidYMid meet">
+              <rect class="ext" x="80" y="20" width="480" height="400"/>
+              <path class="gr" d="M60 348.6H580M60 277.1H580M60 205.7H580M60 134.3H580M60 62.9H580"/>
+              <path class="ax" d="M60 20V420H580"/>
+              <text x="52" y="352" text-anchor="end">−5</text><text x="52" y="281" text-anchor="end">0</text><text x="52" y="209" text-anchor="end">5</text><text x="52" y="138" text-anchor="end">10</text><text x="52" y="67" text-anchor="end">15</text>
+              <text x="100" y="437" text-anchor="middle">−0.08</text><text x="180" y="437" text-anchor="middle">−0.04</text><text x="260" y="437" text-anchor="middle">0</text><text x="340" y="437" text-anchor="middle">0.04</text><text x="420" y="437" text-anchor="middle">0.08</text><text x="500" y="437" text-anchor="middle">0.12</text>
+              <text class="t" x="68" y="36">piezo focus, µm</text><text class="t" x="574" y="411" text-anchor="end">galvo, deg</text>
+              <text x="88" y="411">shaded: the embryo's extent in the sheet's travel</text>
+              <line class="fitline" id="fitline" x1="80" y1="388" x2="560" y2="52.7"/>
+              <circle class="pt" cx="176" cy="324.1" r="5.5"/><circle class="pt" cx="320" cy="217.1" r="5.5"/><circle class="pt" cx="464" cy="122.9" r="5.5"/>
+              <text class="none" id="plot-none" x="320" y="225" text-anchor="middle"></text>
+            </svg>
+            <div class="curves" id="curves"></div>
+            <div class="frames" id="frames"></div>
+          </div>
+        </div>
+        <div class="cap"><span id="cap"></span></div>
+        <div class="p under">
+          <h3 class="cam-only">Display <em>as built, drawn short</em></h3>
+          <h3 class="fit-only">Fit <em>what a calibration is asked, and the other ways to a fit</em></h3>
+          <div class="r cam-only"><span class="u">counts 83–4527 · log</span><span class="sp"></span><span class="l">black</span><input class="num" value="120"><span class="l">white</span><input class="num" value="3800"><button class="btn q">Auto</button></div>
+          <div class="r fit-only"><span class="l">Method</span><span class="seg" data-radio><button class="on">Scan</button><button>Legacy sweep</button></span><span class="l" style="margin-left:10px">Z buffer</span><input class="num n" value="25"><span class="u">µm</span><button class="btn q" title="Edge step, search range, tolerance, inset: as today, behind this">More…</button><span class="sp"></span><button class="btn q">Open folder</button></div>
+          <div class="r fit-only"><span class="l">Or</span><button class="btn q asks" id="borrow"></button><button class="btn q asks" id="rest"></button><span class="sp"></span><button class="btn q" id="clear">Clear this fit</button></div>
+        </div>
+      </section>
+
+      <aside class="inst">
+        <div class="col">
+          <div class="p" id="light">
+            <h3>Light <em>read 0 s ago</em></h3>
+            <div class="r"><span class="l">LED</span><span class="seg" id="led"><button data-v="closed">Closed</button><button data-v="open">Open</button></span><span class="u">12 %</span></div>
+            <div class="r"><span class="l">Laser</span><span class="seg fill" id="preset"><button data-lines="">Off</button><button data-lines="405">405</button><button data-lines="488">488</button><button data-lines="561">561</button><button data-lines="637">637</button><button data-lines="488,561">488+561</button></span></div>
+            <div class="line" data-wl="488"><span class="sw" style="--wl:#38bdf8"></span><span class="wl">488</span><input type="range" min="2" max="6" step="0.1" value="3.1"><input class="num n" value="3.1" readonly><span class="u">%</span><span class="ext">2–6</span></div>
+            <div class="line" data-wl="561"><span class="sw" style="--wl:#a3e635"></span><span class="wl">561</span><input type="range" min="0" max="100" step="0.1" value="4.9"><input class="num n" value="4.9" readonly><span class="u">%</span><span class="ext">0–100</span></div>
+            <div class="r"><span class="l">Beam</span><span class="seg" id="beam"><button data-side="A">A off</button><button data-side="B">B off</button></span><span class="u">405 and 637 are as built</span></div>
+            <div class="stat" id="stat"></div>
+          </div>
+
+          <div class="p" id="sheet">
+            <h3>Sheet <em>side A · scanner AB · piezo P</em></h3>
+            <div class="r"><span class="l">Galvo</span><span class="ext">−4</span><input type="range" min="-4" max="4" step="0.01" value="0"><span class="ext">+4</span><input class="num" value="0.00"><span class="u">°</span></div>
+            <div class="r"><span class="l">Piezo</span><span class="ext">−75</span><input type="range" min="-75" max="75" step="0.5" value="0"><span class="ext">+75</span><input class="num" value="0.0"><span class="u">µm</span></div>
+            <!-- New, and one row: the column has 25 px to spare in the desktop
+                 window. The fit is the relation between the two axes above it. -->
+            <div class="r"><span class="l">Fit</span><span class="v grow nw" id="fit-say" style="overflow:hidden;text-overflow:ellipsis"></span><button class="btn pri asks" id="cal">Calibrate</button></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="p">
+            <h3>Head <em>sample → objective</em></h3>
+            <div class="r"><span class="big" id="head">114.6</span><span class="u">µm</span><span class="u right" id="head-say"></span></div>
+            <div class="r"><span class="l">Step</span><button class="btn asks">▲ 5</button><button class="btn asks">▲ 50</button><button class="btn asks">▼ 5</button><button class="btn asks">▼ 50</button></div>
+            <div class="r"><span class="l">Go to</span><input class="num w" value="1000"><span class="u">µm</span><button class="btn pri asks" id="go1000">Go</button><button class="btn q right asks" id="load">Load · 25000</button></div>
+          </div>
+          <div class="p">
+            <h3>Stage</h3>
+            <div class="r"><span class="l">XY</span><span class="u">at embryo</span><span class="v" id="at"></span><span class="u right">jog pad, focus and centre as built</span></div>
+            <div class="r"><span class="l">Jog</span><button class="btn asks">◀ −X</button><button class="btn asks">+X ▶</button><button class="btn asks">▲ +Y</button><button class="btn asks">▼ −Y</button></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ══ Acquisition, before a run ═════════════════════════════════════ -->
+    <div class="ws design">
+      <aside class="dish">
+        <div class="p embryos"><h3>Embryos <em id="n-design"></em></h3>
+          <div class="thead d"><span>#</span><span>role</span><span>fit</span><span>ends</span></div>
+          <div class="list" id="list-design"></div></div>
+        <div class="p"><h3>Fields <em>1</em></h3>
+          <div class="row"><span class="id">F1</span><span class="xy">−124, −355</span><span></span><button class="ico">×</button></div></div>
+        <p class="note">One table for what is per embryo: its role, its fit, how it ends. Press a role or an ending to change it.</p>
+      </aside>
+
+      <section class="view">
+        <div class="viewbar">
+          <span class="seg" data-radio><button class="on">Volumes</button><button>Overview</button></span>
+          <button class="btn pri" id="test-one"></button><button class="btn" id="test-all"></button>
+          <span class="fps">one volume each, taken with the plan on the right; not part of a run</span>
+        </div>
+        <div class="tiles" id="tiles-design"></div>
+      </section>
+
+      <aside class="side">
+        <div class="col plan">
+          <div class="p"><h3>Cadence</h3>
+            <div class="r"><span class="l">Every</span><input class="num n" id="every" value="5"><select class="sel" id="unit" style="flex:0 0 60px"><option value="60">min</option><option value="1">s</option></select><span class="u grow" id="every-say"></span></div>
+          </div>
+          <div class="p"><h3>SPIM volume <label><input type="checkbox" id="spim" checked>every embryo, every round</label></h3>
+            <div class="r"><span class="l">Slices</span><input class="num n" id="slices" value="50"><span class="l" style="margin-left:14px">Exposure</span><input class="num n" id="exp" value="10"><span class="u">ms</span></div>
+            <div class="r"><span class="l">Lasers</span><span class="seg fill" id="plan-lasers"><button data-lines="asis">As it is</button><button data-lines="488">488</button><button data-lines="561">561</button><button data-lines="488,561" class="on">488+561</button></span></div>
+            <div class="line routed" data-pl="488"><span class="sw" style="--wl:#38bdf8"></span><span class="wl">488</span><input class="num n" placeholder="3.1"><span class="u">%</span><span class="ext">2–6</span><span class="u right">empty keeps 3.1</span></div>
+            <div class="line routed" data-pl="561"><span class="sw" style="--wl:#a3e635"></span><span class="wl">561</span><input class="num n" placeholder="4.9"><span class="u">%</span><span class="ext">0–100</span><span class="u right">empty keeps 4.9</span></div>
+          </div>
+          <div class="p"><h3>Brightfield overview <label><input type="checkbox" id="bf" checked>one frame of the field</label></h3>
+            <div class="r"><span class="l">Every</span><input class="num n" value="1"><span class="u">round(s)</span></div>
+            <div class="r"><span class="l">From</span><span class="seg" data-radio><button class="on">Centroid</button><button>Fields · 1</button></span></div>
+            <div class="r"><span class="l">Lit</span><span class="u grow">LED 1 % · the camera's exposure</span><button class="btn q" data-go="scope">Set on Scope ▸</button></div>
+          </div>
+          <div class="p"><h3>Ends</h3>
+            <div class="r"><span class="l">The run</span><select class="sel" id="stopk"><option value="duration">after N hours</option><option value="timepoints">after N timepoints</option><option value="manual">until stopped</option><option value="hatching">at hatching</option></select><input class="num n" id="stopv" value="16"></div>
+            <p class="note" id="ends-say"></p>
+          </div>
+          <div class="p"><h3>Watching</h3>
+            <div class="r"><span class="l">Monitor</span><span class="seg" data-radio><button class="on">Idle</button><button>Expression</button><button>Division</button></span></div>
+          </div>
+        </div>
+
+        <div class="col run">
+          <div class="p"><h3>This run <em id="plan-name">unsaved</em></h3><p class="say" id="say-plan"></p></div>
+          <div class="p pfbox"><h3>Before it starts</h3><div class="pf" id="pf"></div></div>
+          <div class="foot">
+            <button class="start" id="start"></button>
+            <div class="r"><button class="btn q" title="A saved plan is loaded into the form, not a mode beside it">Load…</button><button class="btn q">Save…</button><button class="btn q" title="Hands the embryos to the agent, which proposes and starts a plan">Hand to the agent</button></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- ══ Acquisition, during a run ═════════════════════════════════════ -->
+    <div class="ws watch">
+      <aside class="dish">
+        <div class="p embryos"><h3>Embryos <em id="n-watch"></em></h3>
+          <div class="thead w"><span>#</span><span>t</span><span>next</span><span>ends</span><span></span></div>
+          <div class="list" id="list-watch"></div></div>
+        <p class="note">The same table, with the run's columns. An ending can still be changed; × stops one embryo.</p>
+      </aside>
+
+      <section class="view">
+        <div class="viewbar">
+          <span class="seg" data-radio><button class="on">Volumes</button><button>Overview</button></span>
+          <span class="u nw">the latest volume of each embryo, as it lands</span>
+          <button class="btn q right" title="The Embryos tab: Watch, Table, Film, Vitals and the stage calls. One deep monitor; this is the shallow one beside the controls.">Full monitor ▸ Embryos</button>
+        </div>
+        <div class="tiles" id="tiles-watch"></div>
+      </section>
+
+      <aside class="side"><div class="col run">
+        <div class="p"><h3>Run <em id="run-state"></em></h3>
+          <div class="r"><span class="clock" id="clock">3:12</span><span class="u" id="clock-say">to the next round</span></div>
+          <div class="kv"><span>Round</span><b id="k-round"></b><span>Elapsed</span><b id="k-elapsed"></b><span>Ends</span><b id="k-ends"></b><span>Volumes</span><b id="k-vols"></b><span>Written</span><b id="k-gb"></b><span>Cadence kept</span><b id="k-kept"></b><span>Last error</span><b>none</b></div>
+          <div class="r" style="margin-top:10px"><button class="btn grow" data-run-toggle>Pause</button><button class="btn stop grow" id="stop">Stop</button></div>
+        </div>
+        <div class="p"><h3>As started</h3><p class="say" id="say-run"></p></div>
+        <p class="note">The form is not on screen while a run is going. Stop brings it back, as it was.</p>
+      </div></aside>
+    </div>
+  </main>
+
+  <aside class="agent">✦</aside>
+
+  <footer class="sb">
+    <span><b>12</b> embryos</span><span>water <b>20.0°</b> ▸</span><span id="msg">Select embryo 3, arm a laser, press Calibrate. Or go to Acquisition and press Start.</span>
+    <span class="sp"></span><span class="mock">Mockup — the controls move, nothing reaches the microscope</span>
+  </footer>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const say = t => { $('#msg').textContent = t; };
+  const f = (k, r2, from) => ({ k, r2, from });
+
+  // The dish. One list, drawn three ways.
+  const E = [
+    { id: 1, xy: '−124, −355', fit: f(97.8, 1.00), test: '14:02' }, { id: 2, xy: '−310, −402', fit: f(96.1, 0.99), test: '14:02' },
+    { id: 3, xy: '−88, −511', fit: null }, { id: 4, xy: '212, −140', fit: f(98.4, 0.99), test: '14:03' },
+    { id: 5, xy: '305, 88', fit: f(97.2, 0.98) }, { id: 6, xy: '−40, 120', fit: f(97.8, 0.99, 1), test: '14:03' },
+    { id: 7, xy: '−260, 244', fit: f(95.9, 0.97), end: 'at hatching' }, { id: 8, xy: '118, 301', fit: null },
+    { id: 9, xy: '402, −266', fit: f(98.0, 0.99) }, { id: 10, xy: '−371, −60', fit: f(96.6, 0.98) },
+    { id: 11, xy: '15, −300', fit: null }, { id: 12, xy: '266, 190', fit: f(97.5, 0.99), ref: true },
+  ];
+  const ENDS = [undefined, 'at hatching', 'at comma stage', 'after 40 timepoints'];
+  const STEPS = ['extent: one slice-only volume', 'focus at galvo −0.04°', 'focus at galvo +0.03°', 'focus at galvo +0.10°', 'the line through them'];
+  const S = { run: 'idle', sel: 3, at: 1, src: 'A', live: true, led: 'closed', preset: '', beam: { A: false, B: false }, power: { 488: 3.1, 561: 4.9 },
+              head: 114.6, out: new Set(), cal: null, round: 1, next: 0 };
+  const sel = () => E.find(e => e.id === S.sel);
+  const subjects = () => E.filter(e => !e.ref && !S.out.has(e.id));
+  const lines = p => (p || '').split(',').filter(Boolean);
+  const lit = () => lines(S.preset).filter(wl => S.power[wl] > 0);
+  const emitting = () => (S.beam.A || S.beam.B) && lit().length > 0;
+  const mmss = s => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  const tag = e => !e.fit ? '<span class="tag no" title="Not calibrated: a run refuses this embryo">uncal</span>'
+    : e.fit.from ? `<span class="tag ok" title="Slope borrowed from embryo ${e.fit.from}; its own extent and focus">from ${e.fit.from} · ${e.fit.r2.toFixed(2)}</span>`
+    : `<span class="tag ok" title="${e.fit.k.toFixed(1)} µm/deg · R² ${e.fit.r2.toFixed(2)}">${e.fit.k.toFixed(1)} · ${e.fit.r2.toFixed(2)}</span>`;
+
+  // The plan, read from the form, and the arithmetic said beside it.
+  // Measured on this rig's own records: a volume and its move cost about
+  // 3.5 s plus the scan, and each embryo's clock restarts when its volume is
+  // saved, so the cadence kept is the cadence asked plus one of those.
+  function plan() {
+    const n = subjects().length, spim = $('#spim').checked, bf = $('#bf').checked || !spim;
+    const asked = Math.max(1, +$('#every').value || 1) * +$('#unit').value, slices = +$('#slices').value || 50, exp = +$('#exp').value || 10;
+    const per = 3.5 + slices * exp / 1000, round = spim ? n * per : 2, kept = spim ? Math.max(asked + per, round) : asked;
+    const k = $('#stopk').value, v = +$('#stopv').value || 1;
+    const rounds = k === 'duration' ? Math.floor(v * 3600 / kept) : k === 'timepoints' ? v : null;
+    const gbEach = slices * 512 * 2048 * 2 / 1e9;
+    const preset = $('#plan-lasers .on').dataset.lines;
+    return { n, spim, bf, asked, slices, exp, per, round, kept, k, v, rounds, gbEach, preset,
+             lasers: preset === 'asis' ? lines(S.preset) : lines(preset) };
+  }
+  const every = s => s % 3600 === 0 ? `${s / 3600} h` : s % 60 === 0 ? `${s / 60} min` : `${s} s`;
+  const stopWords = p => p.k === 'duration' ? `after ${p.v} h` : p.k === 'timepoints' ? `after ${p.v} timepoints` : p.k === 'hatching' ? 'at hatching' : 'until stopped';
+  function sentence(p) {
+    const own = subjects().filter(e => e.end).map(e => `embryo ${e.id} ${e.end}`);
+    if (!p.spim) return `Every ${every(p.asked)}: one brightfield frame of the field on the bottom camera, from the centroid, under the LED at 1 % · ${stopWords(p)}. No SPIM volumes.`;
+    return `Every ${every(p.asked)}: SPIM volumes (${p.slices} slices · ${p.exp} ms · ${p.lasers.length ? p.lasers.join(' and ') : 'lasers as they are'}) of ${p.n} embryo${p.n === 1 ? '' : 's'}`
+      + (p.bf ? ' + one brightfield overview per round from the centroid, under the LED at 1 %' : '') + ` · ${stopWords(p)}` + (own.length ? '; ' + own.join(', ') : '') + '.';
+  }
+
+  // What stands in the way, each line derived, each with its fix beside it.
+  function preflight(p) {
+    const L = [], add = (k, t, fix = '') => L.push({ k, t, fix });
+    const refs = E.filter(e => e.ref).length, left = S.out.size;
+    if (p.spim && !p.n) add('no', 'No embryos in the run.');
+    else add('ok', `${p.n} embryo${p.n === 1 ? '' : 's'} in the run` + (refs ? `; ${refs} reference left out` : '') + (left ? `; ${left} left out by you` : ''));
+    if (p.spim) {
+      const un = subjects().filter(e => !e.fit);
+      if (un.length) add('no', `${un.length} of ${p.n} ${un.length === 1 ? 'is' : 'are'} not calibrated: ${un.map(e => e.id).join(', ')}. A run refuses them.`,
+        `<button class="btn pri" data-fix="cal">Calibrate ${un.length} ▸ Scope</button><button class="btn" data-fix="out">Run without them</button>`);
+      else add('ok', 'Every embryo in the run has a fit.');
+      if (!p.lasers.length) add('warn', 'Lasers as they are, and they are off: the volumes would be dark.');
+      else add('ok', p.lasers.map(wl => `${wl} at ${S.power[wl]} %`).join(', ') + ': inside this rig\'s limits.');
+      if (p.round > p.asked) add('warn', `A round takes about ${Math.round(p.round)} s (${p.n} × ${p.per.toFixed(1)} s): every ${every(p.asked)} cannot be kept. ${every(p.asked)} holds ${Math.floor(p.asked / p.per)} embryos.`);
+      else add('ok', `A round takes about ${Math.round(p.round)} s of the ${every(p.asked)} between rounds.`);
+      const gb = p.rounds == null ? null : p.rounds * p.n * p.gbEach, perHour = 3600 / p.kept * p.n * p.gbEach;
+      const size = gb == null ? `About ${perHour.toFixed(0)} GB an hour, with no end set` : `About ${(p.rounds * p.n).toLocaleString('en-US')} volumes, ${Math.round(gb).toLocaleString('en-US')} GB`;
+      add(gb != null && gb > 3400 ? 'no' : gb == null || gb > 1700 ? 'warn' : 'ok', `${size}; 3.4 TB free on D:.`);
+      if (S.head > 1000) add('warn', `The head is at ${S.head.toLocaleString('en-US')} µm, off the sample.`, '<button class="btn" data-fix="head">To 1000 µm</button>');
+      else add('ok', `The head is at ${S.head} µm, at the sample.`);
+    }
+    if (p.bf) add('warn', 'Overview: no dark and flat yet, so its frames cannot be corrected.', '<button class="btn" data-go="scope">Set up ▸ Scope</button>');
+    return L;
+  }
+
+  // A stand-in for a projection: a few nuclei in an embryo's outline.
+  function proj(id) {
+    const dots = [...Array(8)].map((_, i) => `radial-gradient(circle at ${30 + (id * 13 + i * 29) % 40}% ${36 + (id * 7 + i * 17) % 28}%, rgba(255,255,255,.95) 0 1.8%, transparent 3%)`);
+    return `transform:rotate(${(id * 37) % 60 - 30}deg);background:${dots.join(',')},radial-gradient(ellipse 34% 22% at 50% 50%, rgba(120,170,255,.3) 0 70%, transparent 100%)`;
+  }
+
+  // As many tiles across as makes them largest without scrolling.
+  function fitTiles() {
+    $$('.tiles').forEach(host => { const n = host.children.length, W = host.clientWidth, H = host.clientHeight; if (!n || !W || !H) return;
+      let across = Math.max(1, Math.ceil(Math.sqrt(n * W / H)));
+      while (across < n && Math.ceil(n / across) * ((W - (across - 1) * 8) / across + 8) - 8 > H) across += 1;
+      host.style.setProperty('--across', across); });
+  }
+  window.addEventListener('resize', fitTiles);
+
+  function render() {
+    document.body.dataset.run = S.run;
+    const p = plan(), e = sel(), running = S.run !== 'idle';
+
+    // ── the dish, three ways ──
+    $('#n-scope').textContent = E.length;
+    $('#list-scope').innerHTML = E.map(x => `<div class="row ${x.id === S.sel ? 'sel' : ''}" data-id="${x.id}"><span class="id">${x.id}</span><span class="xy">${x.xy}</span>${tag(x)}<button class="ico asks" data-centre="${x.id}" title="Centre the stage on this embryo">◎</button></div>`).join('');
+    $('#n-design').textContent = `${E.length} · ${p.n} in the run`;
+    $('#list-design').innerHTML = E.map(x => `<div class="row d ${x.id === S.sel ? 'sel' : ''} ${S.out.has(x.id) ? 'out' : ''}" data-id="${x.id}"><span class="id">${x.id}</span>`
+      + `<button class="cell ${x.ref ? 'set' : ''}" data-role="${x.id}" title="A reference is calibrated on and not imaged">${x.ref ? 'reference' : S.out.has(x.id) ? 'left out' : 'subject'}</button>${tag(x)}`
+      + `<button class="cell ${x.end ? 'set' : ''}" data-end="${x.id}" ${x.ref ? 'disabled' : ''}>${x.ref ? '' : x.end || 'as the run'}</button></div>`).join('');
+    $('#n-watch').textContent = `${p.n} in the run`;
+    // A round sweeps through the embryos: done this round, being imaged, still to come.
+    const since = Math.max(0, Math.round(p.kept) - S.next), nowIdx = S.run === 'running' && p.spim ? Math.floor(since / p.per) : -1;
+    const at = i => nowIdx < 0 || i < nowIdx ? 'done' : i === nowIdx ? 'now' : 'due';
+    $('#list-watch').innerHTML = subjects().map((x, i) => `<div class="row w ${x.id === S.sel ? 'sel' : ''}" data-id="${x.id}"><span class="id">${x.id}</span><span class="xy">${at(i) === 'done' ? `t${S.round}` : S.round > 1 ? `t${S.round - 1}` : '—'}</span>`
+      + `<span class="xy" ${at(i) === 'now' ? 'style="color:var(--green)"' : ''}>${S.run !== 'running' ? 'held' : at(i) === 'now' ? 'imaging' : at(i) === 'due' ? `in ${Math.round((i - nowIdx) * p.per)} s` : mmss(S.next + Math.round(i * p.per))}</span>`
+      + `<button class="cell ${x.end ? 'set' : ''}" data-end="${x.id}">${x.end || 'as the run'}</button><button class="ico" title="Stop this embryo; the rest go on">×</button></div>`).join('');
+
+    // ── Scope: the camera, or the fit ──
+    $$('#src button').forEach(b => b.classList.toggle('on', b.dataset.src === S.src));
+    const isFit = S.src === 'fit';
+    $('#view').classList.toggle('fit', isFit);
+    $('#img').className = 'img' + (isFit ? ' fit' : '') + (!S.live || !emitting() ? ' dark' : '');
+    $('#live').textContent = S.live ? '● Stop view' : 'Start view'; $('#live').className = 'btn asks ' + (S.live ? 'live' : 'pri');
+    $('#fps').textContent = isFit ? (e.fit ? `embryo ${e.id} · kept with the embryo` : `embryo ${e.id}`) : S.live ? '4.3 fps · 2304²' : 'stopped';
+    $('#cap').innerHTML = isFit ? (S.cal ? `Calibrating embryo <b>${e.id}</b> · step <b>${S.cal.step + 1}</b> of 5 · ${STEPS[S.cal.step]}`
+        : e.fit ? `Embryo <b>${e.id}</b> · <b>${e.fit.k.toFixed(1)}</b> µm/deg · R² <b>${e.fit.r2.toFixed(2)}</b> · ${e.fit.from ? `slope from embryo ${e.fit.from}` : 'scan'} · 153 exposures`
+        : `Embryo <b>${e.id}</b> has no fit. Calibrate is in Sheet, on the right.`)
+      : `Embryo <b>${S.at}</b> · at the stage · side ${S.src === 'B' ? 'B' : 'A'}` + (S.live && !emitting() ? ' · nothing lit' : '');
+    const shown = S.cal ? Math.max(0, S.cal.step - 1) + (S.cal.step >= 1 ? 1 : 0) - (S.cal.step >= 4 ? 1 : 0) : e.fit ? 3 : 0;
+    $$('.plot .pt').forEach((c, i) => { c.style.display = i < shown ? '' : 'none'; });
+    $('#fitline').style.display = (e.fit && !S.cal) ? '' : 'none';
+    $('#plot-none').textContent = !e.fit && !S.cal ? `No fit for embryo ${e.id} yet` : '';
+    $('#curves').innerHTML = [['−0.04', '−3.3', '0.99'], ['+0.03', '4.2', '0.99'], ['+0.10', '10.8', '1.00']].map((c, i) => {
+      const pts = [...Array(25)].map((_, j) => `${j * 6.5},${46 - 38 * Math.exp(-(((j - 9 - i * 3) / 4) ** 2)) + ((j * 7 + i * 3) % 5)}`).join(' ');
+      return `<div class="curve ${i < shown ? '' : 'wait'}"><svg viewBox="0 0 160 54" preserveAspectRatio="none"><polyline points="${pts}"/><line x1="${(9 + i * 3) * 6.5}" y1="2" x2="${(9 + i * 3) * 6.5}" y2="52"/></svg>galvo ${c[0]}° · focus ${c[1]} µm · R² ${c[2]}</div>`; }).join('');
+    $('#frames').innerHTML = (shown ? [...Array(Math.min(9, shown * 3))].map((_, j) => `<span class="fr" style="--bl:${Math.abs((j % 3) - 1) * 3}px;--op:${1 - Math.abs((j % 3) - 1) * .3}"></span>`).join('') : '')
+      + `<span class="u">${shown ? 'the frames behind each point, as they land' : 'frames appear here as they are taken'}</span>`;
+
+    // ── Light, and what it means for a fit ──
+    $$('#led button').forEach(b => { b.className = b.dataset.v === S.led ? 'on' + (b.dataset.v === 'closed' ? ' rest' : '') : ''; });
+    $$('#preset button').forEach(b => { b.className = b.dataset.lines === S.preset ? 'on' + (S.preset ? '' : ' rest') : ''; });
+    $$('#light .line').forEach(l => { const wl = l.dataset.wl; l.classList.toggle('routed', lines(S.preset).includes(wl)); l.classList.toggle('lit', emitting() && lit().includes(wl)); });
+    $$('#beam button').forEach(b => { b.textContent = `${b.dataset.side} ${S.beam[b.dataset.side] ? 'on' : 'off'}`; b.classList.toggle('on', S.beam[b.dataset.side]); });
+    const armed = ['A', 'B'].filter(s => S.beam[s]);
+    const st = emitting() ? ['emit', `EMITTING · ${lit().join(' + ')} nm · side ${armed.join(' + ')}`] : S.preset && !armed.length ? ['warn', 'Lines routed, beam off: will not emit']
+      : armed.length && !S.preset ? ['warn', 'Beam armed, nothing routed: nothing emits'] : S.led === 'open' ? ['', 'LED open at 12 %'] : ['', 'Dark: nothing emits'];
+    $('#stat').className = 'stat ' + st[0]; $('#stat').textContent = st[1];
+    $('#own-light').className = 'own ' + (emitting() ? 'emit' : ''); $('#own-light').textContent = emitting() ? `● LASER ${lit().join('+')}` : S.led === 'open' ? 'LED open' : 'dark';
+
+    const lender = E.filter(x => x.fit && !x.fit.from && x.id !== e.id).sort((a, b) => b.fit.r2 - a.fit.r2)[0];
+    const uncal = E.filter(x => !x.fit);
+    $('#fit-say').innerHTML = `<b style="color:var(--accent)">${e.id}</b> ` + (S.cal ? `step ${S.cal.step + 1} of 5`
+      : e.fit ? `${e.fit.k.toFixed(1)} µm/deg · ` + (e.fit.from ? `from ${e.fit.from}` : `R² ${e.fit.r2.toFixed(2)}`) : 'not calibrated');
+    $('#cal').textContent = S.cal ? 'Abort' : S.anyway ? 'Calibrate anyway' : e.fit ? 'Recalibrate' : 'Calibrate'; $('#cal').className = 'btn asks ' + (S.cal ? 'stop' : 'pri');
+    $('#borrow').textContent = lender ? `Borrow embryo ${lender.id}'s slope` : 'Borrow a slope'; $('#borrow').disabled = !!e.fit || !lender || !!S.cal;
+    $('#rest').textContent = `Calibrate ${uncal.length} uncalibrated`; $('#rest').disabled = !uncal.length || !!S.cal;
+    $('#clear').disabled = !e.fit || !!S.cal;
+    // What stands in the way of a fit is already said somewhere on this page:
+    // the Light panel's line, the Stage's readout, the Head's readout. A
+    // refused press points at the one that applies; it has no line of its own.
+    S.way = S.cal ? null
+      : !emitting() ? [S.led === 'open' ? 'the LED is open and the laser dark; a fit needs fluorescence' : 'the laser is dark, so nothing would be seen', '#stat']
+      : S.at !== e.id ? [`the stage is at embryo ${S.at}, not ${e.id}; ◎ in the list centres on it`, '#at']
+      : S.head > 1000 ? [`the head is at ${S.head.toLocaleString('en-US')} µm, off the sample`, '#head'] : null;
+    $('#head').textContent = S.head.toLocaleString('en-US'); $('#head-say').textContent = S.head > 1000 ? 'load height' : S.head === 1000 ? 'above the sample' : '85 µm to floor';
+    $('#at').textContent = S.at;
+
+    // ── Acquisition, before a run ──
+    $('#test-one').textContent = `Test embryo ${e.id}`; $('#test-one').disabled = !e.fit || e.ref || !p.spim;
+    const ready = subjects().filter(x => x.fit);
+    $('#test-all').textContent = `Test all ${ready.length} · about ${Math.round(ready.length * p.per)} s`; $('#test-all').disabled = !p.spim;
+    $('#tiles-design').innerHTML = subjects().map(x => x.test
+      ? `<div class="tile ${x.id === S.sel ? 'sel' : ''}" data-id="${x.id}"><i style="${proj(x.id)}"></i><b>${x.id}</b><span>test ${x.test} · ${p.slices} sl · ${p.exp} ms</span></div>`
+      : `<div class="tile none ${x.id === S.sel ? 'sel' : ''}" data-id="${x.id}"><b>${x.id}</b><span>${x.fit ? 'no volume yet' : 'needs a fit first'}</span></div>`).join('');
+    $('#every-say').textContent = p.spim ? `kept as about ${p.kept >= 60 ? `${Math.floor(p.kept / 60)} min ${Math.round(p.kept % 60)} s` : `${p.kept.toFixed(1)} s`}` : '';
+    $('#every-say').title = 'Each embryo\'s clock restarts when its volume is saved, so a round is the interval plus one volume. Measured on this rig: 303 s kept for 300 s asked, 33.5 s for 30 s.';
+    $$('[data-pl]').forEach(l => { l.hidden = !p.spim || !p.lasers.includes(l.dataset.pl); });
+    $$('#slices, #exp').forEach(i => { i.disabled = !p.spim; });
+    const own = subjects().filter(x => x.end);
+    $('#ends-say').textContent = own.length ? `${own.length} embryo${own.length === 1 ? ' ends' : 's end'} on ${own.length === 1 ? 'its' : 'their'} own: ${own.map(x => `${x.id} ${x.end}`).join(', ')}. Set in the table.` : 'Every embryo ends with the run. An embryo\'s own ending is set in the table.';
+    $('#stopv').hidden = !['duration', 'timepoints'].includes(p.k);
+    $('#say-plan').textContent = sentence(p);
+    const L = preflight(p), no = L.filter(l => l.k === 'no').length;
+    $('#pf').innerHTML = L.map(l => `<i class="${l.k}">${l.k === 'ok' ? '✓' : l.k === 'warn' ? '!' : '✕'}</i><div>${l.t}${l.fix ? '<br>' + l.fix : ''}</div>`).join('');
+    $('#start').className = 'start' + (no ? ' blocked' : ''); $('#start').disabled = !!no;
+    $('#start').textContent = no ? `${no} thing${no === 1 ? '' : 's'} in the way` : p.spim ? 'Start the run' : 'Start the brightfield run';
+
+    // ── Acquisition, during a run; and the run said everywhere ──
+    const words = S.run === 'running' ? `● RUNNING · round ${S.round} · next ${mmss(S.next)}` : S.run === 'paused' ? '❚❚ PAUSED' : S.run === 'held' ? '■ HELD BY HALT' : '';
+    $('#runw').textContent = words; $('#runw').hidden = !running;
+    $('#tb-pause').hidden = !running;
+    $$('[data-run-toggle]').forEach(b => { b.textContent = S.run === 'running' ? 'Pause' : 'Resume'; });
+    $('#run-state').textContent = S.run === 'running' ? 'running' : S.run === 'held' ? 'held by HALT' : 'paused';
+    $('#clock').textContent = S.run === 'running' ? mmss(S.next) : '—'; $('#clock-say').textContent = S.run === 'running' ? `to round ${S.round + 1}` : 'not counting';
+    $('#k-round').textContent = `${S.round}` + (p.rounds ? ` of about ${p.rounds}` : ''); $('#k-ends').textContent = stopWords(p);
+    $('#k-vols').textContent = (S.round * p.n).toLocaleString('en-US'); $('#k-gb').textContent = `${(S.round * p.n * p.gbEach).toFixed(1)} GB`;
+    $('#k-kept').textContent = `${Math.round(p.kept)} s, asked ${p.asked}`;
+    $('#say-run').textContent = sentence(p);
+    $('#tiles-watch').innerHTML = subjects().map((x, i) => { const st = at(i), t = st === 'done' ? S.round : S.round - 1;
+      const ago = st === 'done' ? since - (i + 1) * p.per : since + p.kept - (i + 1) * p.per;
+      return `<div class="tile ${x.id === S.sel ? 'sel' : ''} ${st === 'now' ? 'now' : ''} ${t < 1 ? 'wait' : ''}" data-id="${x.id}"><i style="${proj(x.id + Math.max(1, t))}"></i><b>${x.id}</b>`
+        + `<span>${st === 'now' ? `imaging t${S.round}…` : t < 1 ? 'first volume to come' : `t${t} · ${mmss(Math.max(0, Math.round(ago)))} ago`}</span></div>`; }).join('');
+    const el = Math.max(0, Math.round((S.round - 1) * p.kept + since));
+    $('#k-elapsed').textContent = el >= 3600 ? `${Math.floor(el / 3600)} h ${Math.floor(el % 3600 / 60)} min` : el >= 60 ? `${Math.floor(el / 60)} min ${el % 60} s` : `${el} s`;
+    fitTiles();
+  }
+
+  // ── presses ──
+  // While a run is going, a verb that would take the instrument from it asks first.
+  document.addEventListener('click', ev => {
+    const b = ev.target.closest('.asks'); if (!b || S.run !== 'running') return;
+    if (b.dataset.armed) { delete b.dataset.armed; return; }
+    ev.stopImmediatePropagation(); ev.preventDefault(); b.dataset.armed = '1'; setTimeout(() => { delete b.dataset.armed; }, 3000);
+    say(`A run is going: "${(b.title || b.textContent).trim()}" would take the instrument from it. Pause the run, or press again to do it anyway.`);
+  }, true);
+
+  document.addEventListener('click', ev => {
+    const t = ev.target, go = t.closest('[data-go]'), row = t.closest('[data-id]'), fix = t.closest('[data-fix]');
+    if (go) { document.body.dataset.screen = go.dataset.go; $$('.tab[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === go.dataset.go)); }
+    if (t.closest('[data-centre]')) { S.at = +t.closest('[data-centre]').dataset.centre; say(`Stage centred on embryo ${S.at} (mockup)`); }
+    else if (t.closest('[data-role]')) { const x = E.find(e => e.id === +t.closest('[data-role]').dataset.role);
+      if (x.ref) x.ref = false; else if (S.out.has(x.id)) { S.out.delete(x.id); x.ref = true; } else S.out.add(x.id); }
+    else if (t.closest('[data-end]')) { const x = E.find(e => e.id === +t.closest('[data-end]').dataset.end); x.end = ENDS[(ENDS.indexOf(x.end) + 1) % ENDS.length]; }
+    if (row) S.sel = +row.dataset.id;
+    if (fix) { const un = subjects().filter(e => !e.fit);
+      if (fix.dataset.fix === 'out') un.forEach(e => S.out.add(e.id));
+      if (fix.dataset.fix === 'head') S.head = 1000;
+      if (fix.dataset.fix === 'cal') { S.sel = un[0].id; document.body.dataset.screen = 'scope'; $$('.tab[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === 'scope')); say(`On Scope with embryo ${S.sel} selected: "Calibrate ${un.length} uncalibrated" is in Sheet.`); } }
+    const g = t.closest('.seg[data-radio]'); if (g && t.closest('button')) $$('button', g).forEach(b => b.classList.toggle('on', b === t.closest('button')));
+    render();
+  });
+
+  // As built: choosing another source stops the view that was live and starts nothing.
+  $('#src').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b && b.dataset.src !== S.src) { S.src = b.dataset.src; S.live = false; } });
+  $('#live').addEventListener('click', () => { S.live = !S.live; });
+  $('#led').addEventListener('click', ev => { const b = ev.target.closest('button'); if (!b) return; S.led = b.dataset.v; if (S.led === 'open') { S.preset = ''; } });
+  $('#preset').addEventListener('click', ev => { const b = ev.target.closest('button'); if (!b) return; S.preset = b.dataset.lines; if (S.preset) S.led = 'closed'; });
+  $('#beam').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) S.beam[b.dataset.side] = !S.beam[b.dataset.side]; });
+  $$('#light .line').forEach(l => $('input[type=range]', l).addEventListener('input', ev => { S.power[l.dataset.wl] = +ev.target.value; $('.num', l).value = (+ev.target.value).toFixed(1); render(); }));
+  $('#plan-lasers').addEventListener('click', ev => { const b = ev.target.closest('button'); if (b) $$('#plan-lasers button').forEach(x => x.classList.toggle('on', x === b)); });
+  $$('#every, #unit, #slices, #exp, #stopk, #stopv, #spim, #bf').forEach(i => i.addEventListener('input', render));
+  $('#go1000').addEventListener('click', () => { S.head = 1000; }); $('#load').addEventListener('click', () => { S.head = 25000; });
+
+  // Calibrate: refused by the page, in words, when read-back says it cannot work.
+  let calTimer = null;
+  const stopCal = () => { clearInterval(calTimer); S.cal = null; };
+  $('#cal').addEventListener('click', () => {
+    const e = sel();
+    if (S.cal) { stopCal(); say('Calibration aborted · every positioner halted (mockup)'); return; }
+    if (S.way && !S.anyway) { S.anyway = true; setTimeout(() => { S.anyway = false; render(); }, 4000);
+      const where = S.way[1]; requestAnimationFrame(() => { const el = $(where); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); });
+      say(`Not started, and no exposure spent: ${S.way[0]}.`); return; }
+    S.anyway = false; S.src = 'fit'; S.cal = { step: 0 }; say(`Calibrating embryo ${e.id}: the picture shows the frames as they land`);
+    calTimer = setInterval(() => { S.cal.step += 1;
+      if (S.cal.step > 4) { stopCal(); e.fit = f(96.9, 0.99); say(`Embryo ${e.id} calibrated: 96.9 µm/deg · R² 0.99 · kept with the embryo`); }
+      render(); }, 900);
+  });
+  $('#borrow').addEventListener('click', () => { const e = sel(), l = E.filter(x => x.fit && !x.fit.from).sort((a, b) => b.fit.r2 - a.fit.r2)[0]; e.fit = f(l.fit.k, 0.98, l.id); say(`Embryo ${e.id} takes embryo ${l.id}'s slope and measures its own extent and focus: a short scan (mockup)`); });
+  $('#rest').addEventListener('click', () => { const un = E.filter(x => !x.fit); un.forEach((x, i) => { x.fit = f(96.4 + i * .5, 0.98); }); say(`${un.length} embryos calibrated, one after another (mockup)`); });
+  $('#clear').addEventListener('click', () => { sel().fit = null; say('Fit cleared. Two presses on the rig: it costs about 150 exposures to measure again.'); });
+
+  $('#test-one').addEventListener('click', () => { sel().test = 'now'; say(`One volume of embryo ${S.sel} with this plan: its projection is on its tile, not in a toast`); });
+  $('#test-all').addEventListener('click', () => { subjects().filter(e => e.fit).forEach(e => { e.test = 'now'; }); say('One volume of each calibrated embryo, with this plan'); });
+
+  // Start, Pause, Stop, and the clock.
+  $('#start').addEventListener('click', () => { S.run = 'running'; S.round = 1; S.next = Math.round(plan().kept) - 9; say('The run has started. The form is put away; this page watches it. It is said in the toolbar on every Devices view.'); });
+  $$('[data-run-toggle]').forEach(b => b.addEventListener('click', () => { S.run = S.run === 'running' ? 'paused' : 'running'; say(S.run === 'running' ? 'Run resumed' : 'Run paused: nothing moves until Resume'); }));
+  let stopArmed = 0;
+  $('#stop').addEventListener('click', ev => { if (Date.now() - stopArmed < 3000) { S.run = 'idle'; ev.target.textContent = 'Stop'; say('Run stopped. The plan is back as it was started.'); }
+    else { stopArmed = Date.now(); ev.target.textContent = 'Press again to stop'; setTimeout(() => { ev.target.textContent = 'Stop'; }, 3000); ev.stopPropagation(); } });
+  setInterval(() => { if (S.run !== 'running') return; S.next -= 1; if (S.next < 0) { S.round += 1; S.next = Math.round(plan().kept); } render(); }, 1000);
+
+  // HALT, as proposed: motion first and alone, then everything else, each free to undo.
+  $('#halt').addEventListener('click', () => {
+    const did = ['motion stopped'];
+    if (S.preset || S.beam.A || S.beam.B) did.push('lasers gated, powers kept'); S.preset = ''; S.beam = { A: false, B: false };
+    if (S.live) { S.live = false; did.push('view stopped'); }
+    if (S.cal) { stopCal(); did.push('calibration aborted'); }
+    if (S.run === 'running') { S.run = 'held'; did.push('run held until Resume'); }
+    render(); say('HALT · ' + did.join(' · '));
+  });
+
+  $('#theme').addEventListener('click', () => { const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; });
+  render();
+})();
+</script>
+</body>
+</html>
