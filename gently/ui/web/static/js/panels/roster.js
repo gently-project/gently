@@ -2,8 +2,14 @@
  * Roster — the embryo list, rendered once and mounted wherever it is needed.
  *
  *     RosterPanel.mount('op-erail-list', { actions: ['remove'] });
- *     RosterPanel.mount('op-roster',     { actions: ['role', 'centre', 'remove'],
+ *     RosterPanel.mount('op-roster',     { table: true, showFit: true,
+ *                                          cell: emb => html, out: emb => bool,
  *                                          emptyAction: 'bottom' });
+ *
+ * A mount is a list (a name, where it is, its verbs) or, with `table`, a
+ * table of what is per embryo: its number, its role, its fit, and one cell
+ * the mounting page draws (`cell`) and hears changes from
+ * (`roster.cellChange`). Acquisition's is how the embryo ends.
  *
  * WHY
  *
@@ -82,6 +88,11 @@ const RosterPanel = (() => {
             actions: (opts && opts.actions) || [],
             emptyAction: opts && opts.emptyAction,
             showFit: !!(opts && opts.showFit),
+            // A table row instead of a list row, its last cell drawn by the
+            // mounting page, and a row the page says is out of the run dimmed.
+            table: !!(opts && opts.table),
+            cell: opts && typeof opts.cell === 'function' ? opts.cell : null,
+            out: opts && typeof opts.out === 'function' ? opts.out : null,
             // The rail is ~168px beside the frame. A word-width button there
             // pushes "Embryo 1  −184, −585" onto three wrapped lines, so its
             // verbs draw as glyphs with the label carried by title/aria-label.
@@ -143,12 +154,44 @@ const RosterPanel = (() => {
         mounts.forEach((opts, hostId) => {
             const host = document.getElementById(hostId);
             if (!host) return;
-            host.innerHTML = legend(embryos, selected, inSet)
-                + (embryos.length
-                    ? embryos.map(e => row(e, selected, inSet, opts)).join('')
-                    : empty(opts)) + removed(opts);
-            wire(host);
+            const draw = opts.table ? tableRow : row;
+            patch(host, [legend(embryos, selected, inSet)]
+                .concat(embryos.length ? embryos.map(e => draw(e, selected, inSet, opts)) : [empty(opts)])
+                .concat([removed(opts)])
+                .filter(Boolean));
+            wire(host, opts);
         });
+    }
+
+    /**
+     * Redraw the list a part at a time, leaving alone a part that still says
+     * what it said.
+     *
+     * The whole list used to be replaced on every change to the roster or
+     * the selection. A table row holds a select (how the embryo ends), and a
+     * select replaced while it is open shuts under the hand; a press that
+     * starts on a button and ends on its replacement is no press at all.
+     */
+    function patch(host, parts) {
+        const had = host._parts || [];
+        const held = document.activeElement;
+        const typing = held && /^(SELECT|INPUT)$/.test(held.tagName) && host.contains(held);
+        parts.forEach((html, i) => {
+            if (had[i] === html && host.children[i]) return;
+            // A row being typed in, or chosen from, waits: replacing it
+            // takes the focus with it, and the next key pressed then goes to
+            // the page (where a digit is a tab shortcut). It is caught up
+            // when the focus leaves (wire).
+            if (typing && host.children[i] && host.children[i].contains(held)) { parts[i] = had[i]; return; }
+            const t = document.createElement('template');
+            t.innerHTML = html.trim();
+            const el = t.content.firstElementChild;
+            if (!el) return;
+            if (host.children[i]) host.replaceChild(el, host.children[i]);
+            else host.appendChild(el);
+        });
+        while (host.children.length > parts.length) host.lastElementChild.remove();
+        host._parts = parts.slice();
     }
 
     /**
@@ -270,9 +313,70 @@ const RosterPanel = (() => {
             : `<span class="rp-fit" title="Calibrated: ${slope.toFixed(1)} µm/deg">cal</span>`;
     }
 
-    function wire(host) {
+    /**
+     * The fit, as numbers: its slope and its R², or whose slope it borrowed.
+     *
+     * "Which of my twelve are calibrated, and how well" used to be twelve
+     * clicks: the list said `cal` or `uncal`, and the numbers were a line on
+     * the Calibration page for whichever embryo was selected. The worse of
+     * the two ends is the R² said, as it is everywhere a fit is judged.
+     */
+    function fitCell(emb) {
+        const slope = fitOf(emb);
+        if (slope == null) {
+            return '<span class="rp-fit rp-fit-none" title="Not calibrated: a run refuses this embryo">uncal</span>';
+        }
+        const cal = emb.calibration || {};
+        const ends = [cal.r_squared_top, cal.r_squared_bottom].filter(v => v != null);
+        const r2 = ends.length ? Math.min(...ends) : (cal.r_squared != null ? Number(cal.r_squared) : null);
+        const from = cal.borrowed_from ? labelOf({ id: cal.borrowed_from }) : null;
+        const said = (from ? `from ${from}` : slope.toFixed(1)) + (r2 != null && Number.isFinite(r2) ? ` · ${r2.toFixed(2)}` : '');
+        const title = `${slope.toFixed(1)} µm/deg` + (r2 != null && Number.isFinite(r2) ? `, R² ${r2.toFixed(2)}` : '')
+            + (from ? `. The slope is embryo ${from}'s; the extent and focus are its own.` : '');
+        return `<span class="rp-fit rp-fit-num" title="${esc(title)}">${esc(said)}</span>`;
+    }
+
+    /** A row of the table: its number, its role, its fit, the page's cell. */
+    function tableRow(emb, selected, inSet, opts) {
+        const role = (emb.role && emb.role !== 'unassigned') ? emb.role : 'lineaging';
+        const isRef = role === 'calibration';
+        const cls = (inSet.has(emb.id) || emb.id === selected ? ' is-sel' : '')
+            + (emb.id === selected ? ' is-primary' : '')
+            + (opts.out && opts.out(emb) ? ' is-out' : '');
+        const n = labelOf(emb);
+        return `<div class="rp-row rp-trow${cls}" tabindex="0" data-embryo="${esc(emb.id)}" aria-label="Embryo ${esc(n)}">
+                  <span class="rp-id">${esc(n)}</span>
+                  <button class="rp-btn rp-role${isRef ? ' is-reference' : ''}" type="button"
+                    title="${isRef ? 'Reference embryo: calibrated on, not imaged. Click to make it a subject.'
+                                   : 'Subject embryo. Click to make it a reference.'}"
+                    data-verb="toggleRole" data-id="${esc(emb.id)}">${isRef ? 'ref' : 'subj'}</button>
+                  ${fitCell(emb)}
+                  <span class="rp-cell" data-cell>${opts.cell ? opts.cell(emb) : ''}</span>
+                </div>`;
+    }
+
+    function wire(host, opts) {
+        // A row left alone while it was being typed in is caught up when the
+        // focus leaves it.
+        if (!host._catchUp) {
+            host._catchUp = true;
+            host.addEventListener('focusout', e => {
+                if (e.target.closest && e.target.closest('[data-cell]')) setTimeout(render, 0);
+            });
+        }
+        // A change in the page's own cell goes to the page, with the embryo.
+        host.onchange = e => {
+            const cell = e.target.closest('[data-cell]');
+            const row = cell && cell.closest('[data-embryo]');
+            const v = verbs();
+            if (row && v && v.cellChange) v.cellChange(row.dataset.embryo, e.target);
+        };
         host.onclick = e => {
             const v = verbs();
+            // A control in a cell is pressed to be used, not to select the
+            // row: a plain click on a row replaces the selection, and that
+            // must never be how an ending gets chosen.
+            if (e.target.closest('[data-cell]')) return;
             // An action button first: it sits inside the row, and a click on it
             // must not also select. This was a live bug on the old rail.
             const act = e.target.closest('[data-verb]');
@@ -296,6 +400,9 @@ const RosterPanel = (() => {
         };
         host.onkeydown = e => {
             if (e.key !== 'Enter' && e.key !== ' ') return;
+            // The row itself, not a control inside it: Space on a select
+            // opens the select.
+            if (e.target.closest('[data-cell], [data-verb]')) return;
             const row = e.target.closest('[data-embryo]');
             if (!row) return;
             e.preventDefault();

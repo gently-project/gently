@@ -24,7 +24,7 @@ def test_the_plan_module_is_loaded_before_the_pane_that_uses_it():
 
 def test_the_pane_asks_only_for_what_the_instrument_cannot_answer():
     """Positions are the roster; z is each embryo's calibration. Not asked."""
-    panel = HTML[HTML.index('id="op-panel-adaptive"') : HTML.index('id="op-panel-library"')]
+    panel = HTML[HTML.index('id="op-panel-adaptive"') : HTML.index('class="op-acq-col op-acq-run"')]
     for needed in (
         "op-tl-interval",
         "op-plan-unit",
@@ -36,10 +36,13 @@ def test_the_pane_asks_only_for_what_the_instrument_cannot_answer():
         "op-plan-bf-pos",
         "op-tl-stop",
         "op-tl-condval",
-        "op-plan-overrides",
         "op-tl-monitor",
     ):
         assert f'id="{needed}"' in panel, f"the pane lost {needed}"
+    # An embryo's own ending is asked on its row in the table, not in the
+    # form: a row an embryo there is what pushed Start off the screen.
+    assert 'id="op-plan-overrides"' not in HTML
+    assert "cell: emb => endingCell(emb)," in OPERATE
     for not_asked in ("galvo", "piezo", "position_x", "z_start"):
         assert not_asked not in panel.lower(), (
             f"the pane asks for {not_asked}, which calibration answers"
@@ -96,15 +99,16 @@ def test_taken_from_the_fields_captures_the_stage_when_chosen_not_at_start():
 
 
 def test_the_sentence_sits_beside_start_not_atop_a_scrolling_panel():
-    panel = HTML[HTML.index('id="op-panel-adaptive"') : HTML.index('id="op-panel-library"')]
+    panel = HTML[HTML.index('id="op-panel-adaptive"') : HTML.index('class="op-acq-col op-acq-run"')]
     assert 'id="op-plan-say"' not in panel, "the sentence is back at the top of the panel"
-    # Beside Start means in the one foot with it, which does not scroll.
-    # Between them now is what stands in the run's way, and nothing else:
-    # no form control has come between the sentence and the press.
-    foot = HTML[HTML.index('class="op-runfoot"') :]
-    foot = foot[: foot.index('id="op-plan-save"')]
-    assert 'id="op-plan-say"' in foot and 'id="op-run-start"' in foot
-    tail = foot[foot.index('id="op-plan-say"') : foot.index('id="op-run-start"')]
+    # Beside Start means in the one column with it, the run's, which does not
+    # scroll (the plan's column beside it may). Between them is what stands
+    # in the run's way and the Saved list, and no form control: nothing is
+    # filled in between reading the sentence and pressing Start.
+    run = HTML[HTML.index('class="op-acq-col op-acq-run"') :]
+    run = run[: run.index('id="op-run-status"')]
+    assert 'id="op-plan-say"' in run and 'id="op-run-start"' in run
+    tail = run[run.index('id="op-plan-say"') : run.index('id="op-run-start"')]
     assert 'id="op-preflight"' in tail
     for control in ("<input", "<select", 'class="op-field"'):
         assert control not in tail, f"{control} sits between the sentence and Start"

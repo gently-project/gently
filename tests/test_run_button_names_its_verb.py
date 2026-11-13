@@ -1,15 +1,16 @@
-"""`Start` must say which of four things it will do.
+"""`Start` must say what it will do.
 
-`startRun` branches on `_mode` into four different verbs — `single` acquires
-one volume and finishes, `adaptive` starts a timelapse, `library` runs a saved
-tactic, `agent` hands over a prompt. The button said "Start" for all four, and
-the mode selector lives in a block above it, so an operator who chose a mode
-and then looked away had nothing on the button to read.
+`startRun` branched on `_mode` into four different verbs, and the button said
+"Start" for all four. Two of the four were never kinds of run, and are no
+longer modes of Start: a test volume is a button beside the pictures that
+names its embryo, and handing the embryos to the agent is a button under
+Start. What is left is the form's plan (`adaptive`) and a saved tactic run as
+it is (`library`).
 
 Two invariants worth pinning, because both rot silently:
 
-1. Every mode has a verb. A mode added to `setMode`'s list but not to
-   `RUN_VERB` falls back to "Start" and quietly reintroduces the ambiguity.
+1. Every mode has a verb. A mode `setMode` can set but `RUN_VERB` does not
+   name falls back to "Start" and quietly reintroduces the ambiguity.
 2. `subjectIds()` keeps no fallback. The old `subs.length ? subs : all` could
    only ever fire when EVERY embryo was marked `calibration` — an embryo with
    no role, or 'test', or 'unassigned' already passes the filter. So it fired
@@ -40,10 +41,10 @@ def test_every_run_mode_has_a_verb() -> None:
     block = src[src.index("const RUN_VERB = {") : src.index("function renderRunButton")]
     verbs = set(re.findall(r"(\w+):\s*'", block))
 
-    assert re.search(r"\['single', 'adaptive', 'library', 'agent'\]", src), (
-        "setMode's mode list changed shape — update this test alongside it"
+    assert "_mode = m === 'library' ? 'library' : 'adaptive';" in src, (
+        "setMode's modes changed — update this test alongside it"
     )
-    modes = {"single", "adaptive", "library", "agent"}
+    modes = {"adaptive", "library"}
 
     assert modes <= verbs, (
         f"modes with no verb in RUN_VERB: {sorted(modes - verbs)} — the button "
@@ -51,17 +52,19 @@ def test_every_run_mode_has_a_verb() -> None:
     )
 
 
-def test_single_mode_does_not_claim_to_start_anything() -> None:
-    """It acquires one volume and finishes. The label must not imply a run."""
+def test_a_test_volume_does_not_claim_to_start_anything() -> None:
+    """It acquires one volume and finishes. Its button must not imply a run,
+    and must say which embryo."""
     src = _src()
     block = src[src.index("const RUN_VERB = {") : src.index("function renderRunButton")]
-    single = re.search(r"single:\s*'([^']+)'", block)
-    assert single, "single mode lost its verb"
-    label = single.group(1).lower()
-    assert "start" not in label, (
-        f"single mode's label is {label!r} — it acquires one volume and stops, "
-        "so it must not read as starting an experiment"
-    )
+    assert "single:" not in block and "agent:" not in block
+    name = src[src.index("    function renderSingle() {") :]
+    name = name[: name.index("\n    }")]
+    label = re.search(r"b\.textContent = emb \? `([^`]+)` : '([^']+)';", name)
+    assert label, "the test volume's button lost its name"
+    for said in label.groups():
+        assert "start" not in said.lower(), f"{said!r} reads as starting an experiment"
+    assert "${labelFor(emb)}" in label.group(1), "it does not say which embryo"
 
 
 def test_subject_ids_keeps_no_fallback() -> None:

@@ -42,7 +42,16 @@ CONTROLS = {
     "op-halt": "$('op-halt')",
     "op-fd-to": "$('op-fd-to')",
     "op-calibrate": "$('op-calibrate')",
-    "op-modes": "$('op-modes')",
+    # A test volume, the agent, the Saved list, the pictures and the two
+    # states: Acquisition's controls that are not the form's.
+    "op-test-one": "$('op-test-one')",
+    "op-run-agent": "$('op-run-agent')",
+    "op-plan-load": "$('op-plan-load')",
+    "op-tiles": "$('op-tiles')",
+    "op-tiles-kind": "$('op-tiles-kind')",
+    "op-acq-monitor": "$('op-acq-monitor')",
+    "op-acq-new": "$('op-acq-new')",
+    "op-acq-show-run": "$('op-acq-show-run')",
     "op-tl-stop": "$('op-tl-stop')",
     "op-lib-list": "$('op-lib-list')",
     "op-run-start": "$('op-run-start')",
@@ -61,7 +70,6 @@ CONTROLS = {
     # The head, to a typed height.
     "op-fd-go": "$('op-fd-go')",
     "op-fd-goto": "$('op-fd-goto')",
-    "[data-mode]": "[data-mode]",
     "[data-lib]": "[data-lib]",
     # Which camera is on screen: the strip above the frame.
     "[data-source]": "#op-source [data-source]",

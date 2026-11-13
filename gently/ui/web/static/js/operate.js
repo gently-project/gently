@@ -142,7 +142,7 @@ const OperateManager = (function () {
     // this pane never chose, and the pane follows it (adoptLsParams).
     const SIDE_SWITCH_MS = 2000;
     let _sideChangedAt = 0;
-    let _mode = 'single';
+    let _mode = 'adaptive';
     let _selectedLib = null;
     let _runPaused = false;
 
@@ -2260,11 +2260,14 @@ const OperateManager = (function () {
     // of which (single) acquires a volume and finishes, and is not starting an
     // experiment at all. The mode selector sits in a block above, so an
     // operator who chose a mode and then looked away had nothing to read.
+    // The form is the run (`adaptive`). A saved tactic that is not a plan
+    // cannot fill a form, so it is run as it is (`library`). The other two
+    // things this used to offer as peers of those were never kinds of run: a
+    // test volume is a button beside the pictures (testVolume), and handing
+    // the embryos to the agent is a button under Start (handToAgent).
     const RUN_VERB = {
-        single: 'Acquire one volume',
         adaptive: 'Start timelapse',
         library: 'Run tactic',
-        agent: 'Brief the agent',
     };
 
     // A run is running or paused: nothing else may start. The button used to
@@ -2286,35 +2289,117 @@ const OperateManager = (function () {
             : v.blocked ? 'What stands in the way is listed above' : '';
     }
 
+    /**
+     * What Start does: the form's plan (`adaptive`), or a saved tactic as it
+     * is (`library`). There is no strip of modes: the form is always there,
+     * and a tactic is chosen from the Saved list.
+     */
     function setMode(m) {
-        _mode = m;
-        document.querySelectorAll('#op-modes [data-mode]').forEach(b =>
-            b.classList.toggle('is-on', b.dataset.mode === m));
-        ['single', 'adaptive', 'library', 'agent'].forEach(k => {
-            const p = $(`op-panel-${k}`);
-            if (p) p.hidden = k !== m;
-        });
-        if (m === 'library') loadLibrary();
-        if (m === 'adaptive') { loadLaserPresets(); renderPlan(); }
+        _mode = m === 'library' ? 'library' : 'adaptive';
+        if (_mode === 'library') showSaved(true);
+        if (_mode === 'adaptive') { _selectedLib = null; loadLaserPresets(); renderPlan(); }
         const say = $('op-plan-say');
-        if (say) say.hidden = m !== 'adaptive';
-        const save = $('op-plan-save');
-        if (save) save.hidden = m !== 'adaptive';
+        if (say) say.classList.toggle('is-aside', _mode !== 'adaptive');
+        renderPlanName();
         renderPreflight();
         renderSingle();
     }
 
+    /** The Saved list, open or shut. Load opens it; choosing a plan shuts it. */
+    function showSaved(open) {
+        const box = $('op-panel-library'), b = $('op-plan-load');
+        if (box) box.hidden = !open;
+        if (b) b.setAttribute('aria-expanded', String(!!open));
+        if (open) loadLibrary();
+    }
+
+    // The saved plan the form was filled from: {id, name, edited}. Left as
+    // it was loaded, Start runs it as that tactic, so the run is filed as
+    // what it was loaded from; once edited it is the form's own.
+    let _loaded = null;
+
+    /** The form has been changed by hand: a pending change, and no longer
+     *  the saved plan it may have been loaded from. */
+    function planTouched() {
+        _planDirty = true;
+        if (_loaded) _loaded.edited = true;
+    }
+
+    function renderPlanName() {
+        const el = $('op-plan-name');
+        if (!el) return;
+        el.textContent = _mode === 'library' ? 'a saved tactic, as it is'
+            : _loaded ? (_loaded.edited ? `${_loaded.name}, edited` : _loaded.name)
+                : '';
+    }
+
+    /**
+     * The test volume's button: which embryo, and why not when it cannot.
+     *
+     * It is the selected embryo's volume with the plan's slices and exposure,
+     * kept under the embryo as its next timepoint, and its projection lands
+     * on its tile. It used to be a mode with fields of its own, and what it
+     * took was shown nowhere on the page that took it.
+     */
     function renderSingle() {
-        const t = $('op-single-target'), d = $('op-single-delta');
+        const b = $('op-test-one');
+        if (!b || _testing) return;
         const emb = _embryos.find(e => e.id === _selected);
-        if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'none selected';
-        if (!d) return;
+        const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
+        const why = !emb ? 'Select an embryo first'
+            : _runBusy ? 'A run is going'
+                : !volumes ? 'This plan takes no volumes'
+                    : !hasFit(emb) ? `Embryo ${labelFor(emb)} has no calibration: a volume of it would be refused`
+                        : '';
+        b.textContent = emb ? `Test embryo ${labelFor(emb)}` : 'Test volume';
+        b.disabled = !!why;
+        // A fact, not a gate: how far off the stage is. The volume goes to
+        // the embryo wherever the stage is now.
         const xy = emb ? resolveXY(emb) : null;
-        // A fact, not a gate: the operator is told how far off the stage is and
-        // decides for themselves. Acquire is never disabled on this.
-        if (!xy || !_xy) { d.textContent = '—'; return; }
-        const dx = xy.x - _xy.x, dy = xy.y - _xy.y;
-        d.textContent = `${Math.round(Math.hypot(dx, dy))} µm away`;
+        const away = xy && _xy ? ` The stage is ${Math.round(Math.hypot(xy.x - _xy.x, xy.y - _xy.y))} µm from it.` : '';
+        b.title = why || `One volume of embryo ${labelFor(emb)} with this plan's slices and exposure, kept as its next timepoint.${away}`;
+    }
+
+    let _testing = false;
+
+    async function testVolume() {
+        const b = $('op-test-one');
+        const emb = _embryos.find(e => e.id === _selected);
+        if (!emb || _testing) return;
+        if (_runBusy) { toastFail('A run is going. Stop it before taking a test volume.'); return; }
+        const plan = readPlan();
+        _testing = true; _acquiring = true; renderSubnavMeta();
+        if (b) { b.disabled = true; b.textContent = `Taking embryo ${labelFor(emb)}…`; }
+        try {
+            const d = await postJSON('/api/devices/acquire/volume', {
+                // Say WHICH embryo. The route used to receive no id at
+                // all, so it imaged wherever the stage happened to be
+                // and could not check whether that embryo had ever been
+                // calibrated. Manual-mode snapping still omits it on
+                // purpose — a test shot at the current position is a
+                // real thing to want.
+                embryo_id: emb.id,
+                num_slices: plan.spim.slices != null ? plan.spim.slices : (emb.num_slices || 50),
+                exposure_ms: plan.spim.exposureMs != null ? plan.spim.exposureMs : (emb.exposure_ms || 10),
+            });
+            // The first line of what the acquisition said: which embryo,
+            // and whether it was kept.
+            toast(String((d && d.message) || 'Volume acquired').split(/\r?\n/)[0]);
+            // Its picture, on its tile, now: the roster's own update follows.
+            try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) { /* the broadcast will */ }
+        } catch (e) {
+            // In the operator's words. The route's own are for a caller that
+            // can pass a flag: "…or pass allow_uncalibrated=true to acquire
+            // anyway".
+            if (e && e.status === 409 && /not calibrated/i.test(String((e.data || {}).detail || ''))) {
+                toastFail(`No volume taken: embryo ${labelFor(emb)} has no calibration.`);
+            } else {
+                toastFail(`No volume taken (${why(e)})`);
+            }
+        } finally {
+            _testing = false; _acquiring = false;
+            await forceLedOff(); renderSubnavMeta(); renderSingle(); renderTiles();
+        }
     }
 
     async function loadLibrary() {
@@ -2333,10 +2418,54 @@ const OperateManager = (function () {
                     ? AcquisitionPlan.describe(AcquisitionPlan.fromStructure(t.structure), subjects)
                     : (t.kind || '');
                 return `<button class="op-libitem${t.id === _selectedLib ? ' is-sel' : ''}" type="button" ` +
-                    `data-lib="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}` +
+                    `data-lib="${escapeHtml(t.id)}"${isPlan ? ' data-lib-plan="1"' : ''} ` +
+                    `title="${isPlan ? 'Fill the form with this plan' : 'Run this tactic as it is'}">${escapeHtml(t.name || t.id)}` +
                     `<small class="${isPlan ? 'op-lib-say' : ''}">${escapeHtml(sub)}</small></button>`;
             }).join('');
+            _library = items;
         } catch (_) { host.innerHTML = '<div class="op-empty">Library unavailable</div>'; }
+    }
+
+    let _library = [];
+
+    /**
+     * One of the Saved list, chosen. A plan fills the form and the list
+     * shuts: the form is then that plan, said in the sentence, checked by
+     * the lines, started by Start. A tactic that is not a plan has no form
+     * to fill, so it stays chosen and Start runs it as it is.
+     */
+    function chooseSaved(id) {
+        const t = _library.find(x => x.id === id);
+        if (!t) return;
+        if (t.kind === 'standing_timelapse' && t.structure) {
+            try { fillPlan(AcquisitionPlan.fromStructure(t.structure)); } catch (e) { toastFail('That plan could not be read'); return; }
+            _loaded = { id: t.id, name: t.name || t.id, edited: false };
+            // A pending change: the embryos do not hold it yet, and a form
+            // that follows the embryos would write theirs back over it.
+            _planDirty = true;
+            _selectedLib = null;
+            showSaved(false);
+            setMode('adaptive');
+            toast(`“${_loaded.name}” is in the form`);
+            return;
+        }
+        _selectedLib = id;
+        setMode('library');
+    }
+
+    /** The embryos, handed to the agent with the roster said in words. */
+    function handToAgent() {
+        const roster = _embryos.map(e => {
+            const xy = resolveXY(e);
+            const r = e.role === 'calibration' ? 'reference' : 'subject';
+            return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
+        }).join(', ');
+        const prompt = `I marked ${_embryos.length} embryos: ${roster}. ` +
+            'Propose and start an Operation Plan to image them.';
+        if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
+            AgentChat.togglePanel(true);
+            if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
+        } else toastFail('Agent chat unavailable');
     }
 
     /**
@@ -2377,6 +2506,8 @@ const OperateManager = (function () {
             b.classList.toggle('is-on', on);
             b.setAttribute('aria-pressed', String(on));
         });
+        const inrun = $('op-roster-inrun');
+        if (inrun) inrun.textContent = _embryos.length ? `· ${subjectIds().length} in the run` : '';
         const a = el.querySelector('[data-scope="all"]');
         const s2 = el.querySelector('[data-scope="selected"]');
         if (a) a.textContent = `All subjects (${all})`;
@@ -2390,6 +2521,9 @@ const OperateManager = (function () {
         _targetScope = scope === 'selected' ? 'selected' : 'all';
         renderTargetScope();
         renderSingle();
+        // Which embryos is part of the plan: its sentence, its lines, the
+        // table's dimming and the pictures all follow.
+        if (_pane === 'acquire') renderPlan();
     }
 
     // Every embryo marked as a reference means there is nothing to image. Say
@@ -2412,27 +2546,6 @@ const OperateManager = (function () {
         _starting = true;
         if (b) { b.disabled = true; b.textContent = 'Working…'; }
         try {
-            if (_mode === 'single') {
-                if (!_selected) { toastFail('Select an embryo first'); return; }
-                _acquiring = true; renderSubnavMeta();
-                try {
-                    const d = await postJSON('/api/devices/acquire/volume', {
-                        // Say WHICH embryo. The route used to receive no id at
-                        // all, so it imaged wherever the stage happened to be
-                        // and could not check whether that embryo had ever been
-                        // calibrated. Manual-mode snapping still omits it on
-                        // purpose — a test shot at the current position is a
-                        // real thing to want.
-                        embryo_id: _selected,
-                        num_slices: Math.max(1, Number(($('op-vol-slices') || {}).value) || 50),
-                        exposure_ms: Math.max(1, Number(($('op-vol-exp') || {}).value) || 10),
-                    });
-                    // The first line of what the acquisition said: which embryo,
-                    // and whether it was kept.
-                    toast(String((d && d.message) || 'Volume acquired').split(/\r?\n/)[0]);
-                } finally { _acquiring = false; await forceLedOff(); renderSubnavMeta(); }
-                return;
-            }
             if (_mode === 'adaptive') {
                 const plan = readPlan();
                 // A brightfield frame is of the field. It is taken with no
@@ -2443,6 +2556,16 @@ const OperateManager = (function () {
                 if (problems.length) { toastFail(problems[0]); return; }
                 // One object: the sentence the operator just read is exactly
                 // what goes on the wire, and what the run view says back.
+                // A saved plan, loaded and left as it was, is run as that
+                // tactic: the run is then filed as what it was loaded from.
+                if (_loaded && !_loaded.edited && !(_setupItem && _setupItem.id)) {
+                    const d = await postJSON('/api/operate/run-tactic',
+                        { library_id: _loaded.id, embryo_ids: ids, scope: _targetScope });
+                    if (!d.success) { toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`); return; }
+                    toast(`“${_loaded.name}” started`);
+                    landOnRun(AcquisitionPlan.describe(plan, planSubjects()));
+                    return;
+                }
                 const payload = AcquisitionPlan.toPayload(plan, ids);
                 payload.scope = _targetScope;   // "what to run", kept with the plan
                 if (_setupItem && _setupItem.id) payload.plan_item_id = _setupItem.id;
@@ -2463,19 +2586,6 @@ const OperateManager = (function () {
                 if (d.success) { toast('Tactic started'); renderRun(); }
                 else toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`);
                 return;
-            }
-            if (_mode === 'agent') {
-                const roster = _embryos.map(e => {
-                    const xy = resolveXY(e);
-                    const r = e.role === 'calibration' ? 'reference' : 'subject';
-                    return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
-                }).join(', ');
-                const prompt = `I marked ${_embryos.length} embryos: ${roster}. ` +
-                    'Propose and start an Operation Plan to image them.';
-                if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
-                    AgentChat.togglePanel(true);
-                    if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
-                } else toastFail('Agent chat unavailable');
             }
         } catch (e) {
             toastFail(`Start failed (${why(e)})`);
@@ -2811,14 +2921,11 @@ const OperateManager = (function () {
         set('op-tl-stop', plan.stop.kind);
         set('op-tl-condval', plan.stop.value);
         set('op-tl-monitor', plan.monitoringMode || 'idle');
-        renderOverrideRows();
-        plan.overrides.forEach(o => {
-            const row = document.querySelector(`#op-plan-overrides [data-embryo="${CSS.escape(o.embryoId)}"]`);
-            if (!row) return;
-            const sel = row.querySelector('select'), inp = row.querySelector('input');
-            if (sel) sel.value = o.kind;
-            if (inp && o.value != null) inp.value = o.value;
-        });
+        // Every ending is written: an embryo the plan leaves alone is cleared
+        // of the last plan's.
+        _endings = {};
+        plan.overrides.forEach(o => { _endings[o.embryoId] = { kind: o.kind, value: o.value }; });
+        renderEndings();
     }
 
     /**
@@ -2873,12 +2980,11 @@ const OperateManager = (function () {
 
     function readPlan() {
         const v = id => { const el = $(id); return el ? el.value : undefined; };
-        const overrides = [];
-        document.querySelectorAll('#op-plan-overrides [data-embryo]').forEach(row => {
-            const kind = (row.querySelector('select') || {}).value || 'default';
-            const val = (row.querySelector('input') || {}).value;
-            overrides.push({ embryoId: row.dataset.embryo, kind, value: val });
-        });
+        // Only of the embryos this run images: an ending set on one that is
+        // then left out is kept on its row, and is not sent.
+        const inRun = new Set(subjectIds());
+        const overrides = Object.keys(_endings).filter(id => inRun.has(id))
+            .map(id => ({ embryoId: id, kind: _endings[id].kind, value: _endings[id].value }));
         const laserPowers = {};
         document.querySelectorAll('#op-plan-powers [data-plan-power]').forEach(inp => {
             laserPowers[inp.dataset.planPower] = inp.value;
@@ -2915,33 +3021,71 @@ const OperateManager = (function () {
         return opts.join('');
     }
 
-    /** Rows for per-embryo endings, kept in step with the roster. */
-    function renderOverrideRows() {
-        const host = $('op-plan-overrides');
-        if (!host) return;
-        const current = {};
-        host.querySelectorAll('[data-embryo]').forEach(row => {
-            current[row.dataset.embryo] = {
-                kind: (row.querySelector('select') || {}).value,
-                value: (row.querySelector('input') || {}).value,
-            };
-        });
-        const subjects = planSubjects();
-        if (!subjects.length) { host.innerHTML = ''; return; }
-        host.innerHTML = subjects.map(sub => {
-            const c = current[sub.id] || { kind: 'default', value: '' };
-            const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
-            return `<div class="op-field op-plan-ovr-row" data-embryo="${escapeHtml(sub.id)}">` +
-                `<span class="op-label">embryo ${escapeHtml(sub.label)}</span>` +
-                `<span class="op-plan-pair"><select class="op-sel">${stopOptions(c.kind, true)}</select>` +
-                `<input class="op-num-in" type="number" min="1" value="${escapeHtml(c.value || '')}"${needs ? '' : ' hidden'}></span></div>`;
-        }).join('');
+    // How each embryo ends, where it is not as the run does: {id: {kind,
+    // value}}. It was a row an embryo in the plan's form, so the form grew
+    // with the roster, which is what pushed Start off the screen. It is a
+    // cell on the embryo's own row in the table now (panels/roster.js draws
+    // the row and asks here for the cell), and the form does not grow.
+    let _endings = {};
+
+    /** The ending cell of one embryo's row in the Acquisition table. */
+    function endingCell(emb) {
+        if (!emb || emb.role === 'calibration') return '';
+        const c = _endings[emb.id] || { kind: 'default', value: '' };
+        const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+        // An embryo's own ending is the ending of its volumes.
+        const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
+        const who = `embryo ${labelFor(emb)}`;
+        return `<select class="op-sel rp-end" data-ending="kind" aria-label="How ${escapeHtml(who)} ends"${volumes ? '' : ' disabled'}>` +
+            `${stopOptions(c.kind, true)}</select>` +
+            (needs ? `<input class="op-numbox rp-end-n" type="number" min="1" data-ending="value" ` +
+                `value="${escapeHtml(c.value == null ? '' : c.value)}" ` +
+                `aria-label="${needs === 'count' ? 'After how many timepoints' : 'After how many hours'}, ${escapeHtml(who)}">` : '');
+    }
+
+    /** A change in an ending cell: the select, or the number beside it. */
+    function setEnding(id, control) {
+        if (!id || !control) return;
+        const cur = _endings[id] || { kind: 'default', value: '' };
+        if (control.dataset.ending === 'kind') cur.kind = control.value;
+        else cur.value = control.value;
+        if (cur.kind === 'default') delete _endings[id];
+        else _endings[id] = cur;
+        planTouched();
+        // The number box comes and goes with the kind; a typed number must
+        // not redraw the box it is being typed in.
+        if (control.dataset.ending === 'kind') renderEndings();
+        renderPlan();
+    }
+
+    /** The table's ending cells, and what the plan says of them. */
+    function renderEndings() {
+        if (typeof RosterPanel !== 'undefined' && RosterPanel.render) RosterPanel.render();
+        // How many the run images, beside how many there are: it follows a
+        // role and the scope alike, so it is said where both redraw.
+        const inrun = $('op-roster-inrun');
+        if (inrun) inrun.textContent = _embryos.length ? `· ${subjectIds().length} in the run` : '';
+        const say = $('op-plan-ends-say');
+        if (!say) return;
+        const ids = new Set(subjectIds());
+        const own = _embryos.filter(e => ids.has(e.id) && _endings[e.id]);
+        const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
+        say.hidden = !volumes;
+        say.textContent = !own.length
+            ? 'Every embryo ends with the run. One embryo\'s own ending is on its row, on the left.'
+            : `${own.length} embryo${own.length === 1 ? ' ends' : 's end'} on ${own.length === 1 ? 'its' : 'their'} own: ` +
+                own.map(e => `${labelFor(e)} ${AcquisitionPlan.stopWords(_endings[e.id].kind, _endings[e.id].value)}`).join(', ') +
+                '. Set on the row, on the left.';
+    }
+
+    /** Is this embryo imaged by the run as it stands? For the table's dimming. */
+    function inRun(emb) {
+        return !!emb && subjectIds().includes(emb.id);
     }
 
     function renderPlan() {
         const say = $('op-plan-say');
         if (!say) return;
-        renderOverrideRows();
         renderPowerRows();
         syncPlanFromEmbryos();
         let plan = readPlan();
@@ -2995,7 +3139,7 @@ const OperateManager = (function () {
             // closed state, and the Acquisition pane's line with the way there.
             if (ovSummary) ovSummary.innerHTML = said;
             if (setup) {
-                setup.innerHTML = `${said} — `
+                setup.innerHTML = `<span>${said}</span>`
                     + '<button type="button" class="op-btn op-btn-quiet" data-goto-pane="bottom" '
                     + 'title="The light, exposure, dark and flat are set beside the live view">Change on Scope →</button>';
             }
@@ -3006,7 +3150,11 @@ const OperateManager = (function () {
         // stays the plan and nothing more.
         say.dataset.bad = '0';
         say.title = '';
+        renderEndings();
+        renderPlanName();
         renderPreflight(plan);
+        renderSingle();
+        renderTiles();
     }
 
     // ══ BEFORE IT STARTS ══════════════════════════════════════════════════
@@ -3074,10 +3222,15 @@ const OperateManager = (function () {
      * it was the first thing pressed after typing. It also keeps the focus
      * of someone who tabbed onto a fix while the light was being re-read.
      */
-    function patchLines(host, html) {
+    function patchLines(host, html, opts) {
         const had = host._lines || [];
+        const held = opts && opts.keepFocused ? document.activeElement : null;
         html.forEach((h, i) => {
             if (had[i] === h && host.children[i]) return;
+            // A select being chosen from, or a number being typed: the line
+            // waits for the next redraw rather than close under the hand.
+            if (held && host.children[i] && host.children[i].contains(held)
+                && /^(SELECT|INPUT)$/.test(held.tagName)) { html[i] = had[i]; return; }
             const t = document.createElement('template');
             t.innerHTML = h;
             const el = t.content.firstElementChild;
@@ -3100,7 +3253,15 @@ const OperateManager = (function () {
         const host = $('op-preflight');
         if (!host) return;
         if (_mode !== 'adaptive') {
-            host.hidden = true; _preflight = [];
+            // A tactic runs as it was saved: this form, and so its lines,
+            // do not apply to it.
+            _preflight = [];
+            host.hidden = false;
+            patchLines(host, ['<div class="op-pf-line is-ok" role="listitem"><span class="op-pf-mark" aria-hidden="true">·</span>' +
+                '<span class="op-pf-says">A saved tactic runs as it was saved. The form on the left is not what Start will run; ' +
+                'shut the Saved list to go back to it.</span></div>']);
+            const keptEl = $('op-plan-kept');
+            if (keptEl) keptEl.textContent = '';
             renderRunButton();
             return;
         }
@@ -3178,12 +3339,16 @@ const OperateManager = (function () {
         host.dataset.lines = key;
         host.innerHTML = lines.map(wl => {
             const lim = (_laserLimits && _laserLimits[wl]) || null;
-            const range = lim ? `${lim.min}–${lim.max} %` : '%';
-            return `<div class="op-field"><label class="op-label" for="op-plan-power-${wl}">` +
-                `${wl} nm power <span class="op-cap">${range}</span></label>` +
-                `<input class="op-num-in" id="op-plan-power-${wl}" data-plan-power="${wl}" ` +
+            const range = lim ? `${lim.min}–${lim.max}` : '';
+            // The label is the line's number alone: a label is uppercased,
+            // and "405 nm" came out "405 NM".
+            return `<div class="op-row op-plan-line"><label class="op-label" for="op-plan-power-${wl}" ` +
+                `title="The ${wl} nm line">${wl}</label>` +
+                `<input class="op-numbox op-numbox-wide" id="op-plan-power-${wl}" data-plan-power="${wl}" ` +
                 `type="number" step="0.1"${lim ? ` min="${lim.min}" max="${lim.max}"` : ''} ` +
-                `value="${escapeHtml(typed[wl] || '')}" placeholder="as it is"></div>`;
+                `value="${escapeHtml(typed[wl] || '')}" placeholder="as it is" ` +
+                `aria-label="${wl} nm power, percent"><span class="op-unit">%</span>` +
+                `<span class="op-ext" title="The limits this line's power is held to on this rig">${range}</span></div>`;
         }).join('');
     }
 
@@ -3200,7 +3365,6 @@ const OperateManager = (function () {
         const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
         show('op-plan-spim-body', volumes);
         show('op-plan-bf-every-field', volumes);
-        show('op-plan-overrides', volumes);
         show('op-plan-watch-sec', volumes);
         show('op-plan-watch-field', volumes);
         const cap = $('op-plan-spim-cap');
@@ -3264,7 +3428,9 @@ const OperateManager = (function () {
                 rationale: AcquisitionPlan.describe(plan, planSubjects()),
                 source: 'operate',
             });
-            toast(`Saved “${d.name || name.trim()}” — it is under Saved tactic`);
+            toast(`Saved “${d.name || name.trim()}”. Load brings it back.`);
+            const box = $('op-panel-library');
+            if (box && !box.hidden) loadLibrary();
         } catch (e) { toastFail(`Save failed (${why(e)})`); }
     }
 
@@ -3276,9 +3442,195 @@ const OperateManager = (function () {
     function landOnRun(sentence) {
         const head = $('op-run-plan');
         if (head) { head.textContent = sentence; head.hidden = false; }
+        setAcqView('watch');
         renderRun();
-        const col = $('op-runspine');
-        if (col && col.scrollIntoView) col.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    // ══ TWO STATES ════════════════════════════════════════════════════════
+    // Designing a run and watching one never happen at once, so the surface
+    // is one or the other, each with the whole page (`data-acq` on the pane;
+    // the template says which parts belong to which). The state follows the
+    // run. With none going the operator may look back at the last one, or
+    // plan another, and that is the only time it is theirs to choose.
+    let _acqView = 'design';
+    let _runGoing = false;      // running, paused, or there to be carried on
+
+    function setAcqView(view) {
+        _acqView = view === 'watch' ? 'watch' : 'design';
+        const pane = $('op-pane-acquire');
+        if (pane) pane.dataset.acq = _acqView;
+        renderTiles();
+    }
+
+    // ══ THE PICTURES ══════════════════════════════════════════════════════
+    // Each embryo's latest volume, as its saved projection: one tile each,
+    // as large as the room allows. Before a run they are what a test volume
+    // took; during one they are what the run is seeing. The Embryos tab is
+    // the deep monitor (every timepoint, the film, the stage calls); this is
+    // the shallow one, beside the controls.
+    let _runRows = {};          // the run's rows as last read, by embryo id
+    let _runBrightfield = false;    // the run takes no volumes
+    let _runOverview = false;       // the run takes overview frames
+    let _tilesKind = 'volumes';     // which pictures, where there are both
+    let _bfFrames = [];             // the session's overview frames, as last listed
+    let _bfFramesAt = 0;
+
+    /** Which pictures the zone shows, and whether there is a choice. */
+    function picturesKind() {
+        const watching = _acqView === 'watch';
+        const plan = watching ? null : readPlan();
+        const volumes = watching ? !_runBrightfield : plan.spim.enabled !== false;
+        const overview = watching ? _runOverview : !!plan.bf.enabled;
+        return { volumes, overview, kind: !volumes ? 'overview' : !overview ? 'volumes' : _tilesKind };
+    }
+
+    /** The overview's frames, listed at most every few seconds. */
+    async function readOverviewFrames() {
+        if (Date.now() - _bfFramesAt < 4000) return;
+        _bfFramesAt = Date.now();
+        try {
+            const d = await getJSON('/api/bf/frames');
+            _bfFrames = (d && Array.isArray(d.frames)) ? d.frames : [];
+        } catch (_) { /* the frames already listed stand */ }
+        if (_pane === 'acquire') renderTiles();
+    }
+
+    /** The newest round of overview frames: one a field. */
+    function overviewTiles() {
+        if (!_bfFrames.length) return [];
+        const last = _bfFrames[_bfFrames.length - 1];
+        const perRound = Math.max(1, Number(last.fields) || 1);
+        return _bfFrames.slice(-perRound).map((f, i) => {
+            const at = f.captured_at ? new Date(f.captured_at) : null;
+            const when = at && !isNaN(at) ? at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const field = perRound > 1 ? `field ${Number(f.field) > 0 ? f.field : i + 1}` : 'overview';
+            return {
+                id: `bf:${f.stem}`, label: field,
+                src: `${f.url}?max=1200`,
+                said: [`frame ${f.frame != null ? f.frame : _bfFrames.length - perRound + i + 1}`, when].filter(Boolean).join(' · '),
+            };
+        });
+    }
+
+    function tilesModel() {
+        const sid = SharedState.get('sessionId');
+        const watching = _acqView === 'watch';
+        const ids = watching && Object.keys(_runRows).length ? Object.keys(_runRows) : subjectIds();
+        return ids.map(id => {
+            const emb = _embryos.find(e => e.id === id);
+            const row = _runRows[id] || {};
+            const t = Math.max(Number(row.timepoints) || 0, Number(emb && emb.timepoints_acquired) || 0);
+            const due = row.next_due_at ? (new Date(row.next_due_at) - Date.now()) / 1000 : null;
+            return {
+                id, label: emb ? labelFor(emb) : id, t,
+                src: sid && t > 0 ? `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(id)}&t=${t}` : null,
+                fit: !!emb && hasFit(emb),
+                // Due and not done: it is being imaged, or is next.
+                now: watching && _runBusy && !row.is_complete && due != null && due <= 0,
+                done: !!row.is_complete,
+                said: row.is_complete ? (row.completion_reason || 'done') : '',
+            };
+        });
+    }
+
+    function renderTiles() {
+        const host = $('op-tiles');
+        if (!host) return;
+        const watching = _acqView === 'watch';
+        const pics = picturesKind();
+        const kindSeg = $('op-tiles-kind');
+        if (kindSeg) {
+            kindSeg.hidden = !(pics.volumes && pics.overview);
+            kindSeg.querySelectorAll('[data-kind]').forEach(b => {
+                const on = b.dataset.kind === pics.kind;
+                b.classList.toggle('is-on', on);
+                b.setAttribute('aria-pressed', String(on));
+            });
+        }
+        const say = $('op-tiles-say');
+        if (pics.kind === 'overview') {
+            readOverviewFrames();
+            const frames = overviewTiles();
+            if (say) { say.textContent = 'The overview\'s latest frames'; say.title = ''; }
+            host.dataset.kind = 'overview';
+            patchLines(host, frames.length ? frames.map(t =>
+                `<button type="button" class="op-tile op-tile-bf" data-tile-frame="${escapeHtml(t.id)}" title="${escapeHtml(t.label)}, ${escapeHtml(t.said)}">` +
+                `<img loading="lazy" decoding="async" src="${escapeHtml(t.src)}" alt="The overview, ${escapeHtml(t.label)}, ${escapeHtml(t.said)}">` +
+                `<span class="op-tile-id">${escapeHtml(t.label)}</span><span class="op-tile-say">${escapeHtml(t.said)}</span></button>`)
+                : ['<div class="op-empty op-tiles-empty">No overview frame yet. The first is taken when the run starts.</div>']);
+            fitTiles();
+            return;
+        }
+        host.dataset.kind = 'volumes';
+        const tiles = tilesModel();
+        if (say) {
+            say.textContent = !tiles.length ? ''
+                : watching ? 'Each embryo\'s latest volume, as it lands'
+                    : 'Each embryo\'s latest volume';
+            say.title = watching ? '' : 'A test volume is taken with this plan\'s slices and exposure, and kept as the embryo\'s next timepoint.';
+        }
+        if (!tiles.length) {
+            patchLines(host, ['<div class="op-empty op-tiles-empty">No embryos in the run.</div>']);
+            return;
+        }
+        patchLines(host, tiles.map(t => {
+            const cls = (t.id === _selected ? ' is-sel' : '') + (t.now ? ' is-now' : '') + (t.src ? '' : ' is-none') + (t.done ? ' is-done' : '');
+            const said = t.now ? `imaging t${t.t + 1}…`
+                : t.src ? `t${t.t}${t.said ? ` · ${t.said}` : ''}`
+                    : t.fit || watching ? 'no volume yet' : 'needs a fit first';
+            return `<button type="button" class="op-tile${cls}" data-tile="${escapeHtml(t.id)}" ` +
+                `title="Embryo ${escapeHtml(t.label)}${t.src ? `, timepoint ${t.t}` : ''}">` +
+                (t.src ? `<img loading="lazy" decoding="async" src="${escapeHtml(t.src)}" alt="Embryo ${escapeHtml(t.label)}, timepoint ${t.t}">` : '') +
+                `<span class="op-tile-id">${escapeHtml(t.label)}</span><span class="op-tile-say">${escapeHtml(said)}</span></button>`;
+        }));
+        fitTiles();
+    }
+
+    /**
+     * As many tiles across as makes them largest in the room there is,
+     * without scrolling where that is possible. A projection is 1024 × 630.
+     */
+    function fitTiles() {
+        const host = $('op-tiles');
+        if (!host) return;
+        const n = host.querySelectorAll('.op-tile').length;
+        // The box, not what is left of it beside a scrollbar: asking the
+        // room inside a scrollbar for the size that needs no scrollbar goes
+        // round in a circle, and ends with a scrollbar and nothing to scroll.
+        const W = host.offsetWidth, H = host.offsetHeight;
+        if (!n || !W || !H) return;
+        // A projection is 1024 × 630; a frame of the bottom camera is square.
+        const gap = 8, ar = host.dataset.kind === 'overview' ? 1 : 1024 / 630, smallest = 132;
+        let best = 1, bestW = 0;
+        for (let across = 1; across <= n; across++) {
+            const rows = Math.ceil(n / across);
+            // As wide as the row allows, and no taller than the rows allow.
+            const w = Math.min((W - (across - 1) * gap) / across, ar * (H - (rows - 1) * gap) / rows);
+            if (w > bestW) { best = across; bestW = w; }
+        }
+        if (bestW >= smallest) {
+            host.style.setProperty('--across', String(best));
+            host.style.setProperty('--tile-w', `${Math.floor(bestW)}px`);
+            host.style.overflowY = 'hidden';
+        } else {
+            // Too many for the room at a size worth looking at: they scroll.
+            host.style.setProperty('--across', String(Math.max(1, Math.floor((W - 10 + gap) / (smallest + gap)))));
+            host.style.setProperty('--tile-w', '1fr');
+            host.style.overflowY = 'auto';
+        }
+    }
+
+    /** A tile pressed: the instrument is pointed at that embryo. The set a
+     *  run images is left as it is. */
+    function pointAt(id) {
+        if (!id || !_embryos.some(e => e.id === id)) return;
+        if (_targets.includes(id)) {
+            _selected = id;
+            SharedState.set('selectedEmbryoId', _selected);
+            publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle(); renderTiles();
+        } else {
+            selectEmbryo(id);
+        }
     }
 
     // ══ THE RUN ═══════════════════════════════════════════════════════════════
@@ -3314,17 +3666,24 @@ const OperateManager = (function () {
             : r.last_error ? 'error' : 'running';
         const cls = r.is_complete ? 'is-done' : r.last_error ? 'is-error' : live ? 'is-live' : 'is-waiting';
         const ending = r.stop_condition || 'manual';
+        // The table's row, with the run's columns: who, its timepoint, when
+        // it is next due, its ending, Stop. Under them, what its next
+        // acquisition uses (the agent changes these per embryo, and this is
+        // where that shows against the embryo it was made on).
+        const next = r.is_complete || !live ? state
+            : state !== 'running' ? state : `next ${fmtWhen(due)}`;
+        const every = r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : '';
+        const more = [every, paramsWords(r)].filter(Boolean).join(' · ');
         return `<div class="op-runrow ${cls}" data-run-id="${escapeHtml(id)}">` +
-            `<span class="op-runrow-who">embryo ${escapeHtml(label)}</span>` +
+            `<span class="op-runrow-who" title="Embryo ${escapeHtml(label)}">${escapeHtml(label)}</span>` +
             `<span class="op-runrow-n">t${r.timepoints}</span>` +
-            `<span class="op-runrow-next">${r.is_complete || !live ? '' : `next ${fmtWhen(due)}`}</span>` +
-            `<span class="op-runrow-int">${r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : ''}</span>` +
-            `<span class="op-runrow-params" title="${escapeHtml(paramsTitle(r))}">${escapeHtml(paramsWords(r))}</span>` +
-            `<span class="op-runrow-state">${escapeHtml(state)}</span>` +
+            `<span class="op-runrow-next">${escapeHtml(next)}</span>` +
             (r.is_complete || !live ? '<span></span><span></span>' :
-                `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends">` +
-                    runStopOptions(ending) + '</select>' +
-                `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" title="Stop this embryo; the rest carry on">Stop</button>`) +
+                `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends" ` +
+                    `aria-label="How embryo ${escapeHtml(label)} ends">` + runStopOptions(ending) + '</select>' +
+                `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" ` +
+                    `title="Stop this embryo; the rest carry on" aria-label="Stop embryo ${escapeHtml(label)}">Stop</button>`) +
+            `<span class="op-runrow-params" title="${escapeHtml(paramsTitle(r))}">${escapeHtml(more)}</span>` +
             '</div>';
     }
 
@@ -3378,6 +3737,7 @@ const OperateManager = (function () {
         if (wasBusy !== _runBusy && _pane === 'acquire') renderPlan();
         const rows = (st && st.embryos) || {};
         const ids = Object.keys(rows);
+        _runRows = rows;
         const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');
         // A run restored from its checkpoint after a restart: idle, embryos
         // still going. The one button it needs is Resume — the same route a
@@ -3389,6 +3749,31 @@ const OperateManager = (function () {
         if (p) p.textContent = _runPaused ? (resumable ? 'Resume run' : 'Resume') : 'Pause';
         const stopb = $('op-run-stop');
         if (stopb) stopb.hidden = !running && live.length === 0;
+
+        // The surface follows the run: going, it watches; ended, the form is
+        // back. Only the change moves it, so with no run going the operator's
+        // own choice (look back, or plan another) is left alone.
+        // A run somebody stopped is one they are done with, so the form is
+        // back, with the way to look at it (and carry it on) under Start. One
+        // that was interrupted is still the business in hand.
+        const going = !!running || live.length > 0 || (resumable && st.ended !== 'stopped');
+        if (going !== _runGoing) { _runGoing = going; setAcqView(going ? 'watch' : 'design'); }
+        const anything = ids.length > 0 || tactics.length > 0;
+        _runBrightfield = !!(st && st.volumes === false && st.bf);
+        _runOverview = !!(st && st.bf);
+        const fresh = $('op-acq-new');
+        if (fresh) fresh.hidden = !!running;
+        const back = $('op-acq-show-run');
+        if (back) {
+            back.hidden = going || !anything;
+            back.textContent = st && st.ended ? `The last run (${st.ended}) →` : 'The last run →';
+        }
+        const stateEl = $('op-run-state');
+        if (stateEl) {
+            stateEl.textContent = running ? st.status
+                : resumable ? (st.ended === 'stopped' ? 'stopped' : 'interrupted')
+                    : (st && st.ended) || '';
+        }
 
         const parts = [];
         // A brightfield run has no embryo rows to be seen by.
@@ -3413,13 +3798,35 @@ const OperateManager = (function () {
                 bits.push(`brightfield ${st.bf.frames || 0} frame${st.bf.frames === 1 ? '' : 's'}` +
                     (st.bf.seconds_until_next != null && running ? `, next ${fmtWhen(st.bf.seconds_until_next)}` : ''));
             }
-            parts.push(`<div class="op-run-status">${escapeHtml(bits.join(' · '))}</div>`);
-            parts.push(`<div class="op-runrows">${ids.map(id => runRow(id, rows[id], running)).join('')}</div>`);
+            // The clock: what there is to wait for, large, then the rest.
+            const clock = running && st.status === 'running' && st.seconds_until_next_round != null
+                ? `<span class="op-run-clock">${escapeHtml(fmtWhen(st.seconds_until_next_round))}</span>` +
+                  '<span class="op-run-clock-say">to the next round</span>'
+                : '';
+            parts.push(`<div class="op-run-clockrow">${clock}</div>` +
+                `<div class="op-run-bits">${escapeHtml(bits.join(' · '))}</div>`);
         }
-        if (tactics.length) parts.push(tactics.map(tacticCard).join(''));
-        host.innerHTML = parts.length ? parts.join('') : '<div class="op-empty">Nothing running.</div>';
+        const status = $('op-run-status');
+        if (status) status.innerHTML = parts.join('');
+        // The rows, one at a time: a row whose ending is being chosen is not
+        // redrawn under the hand by the next poll.
+        patchLines(host, ids.length ? ids.map(id => runRow(id, rows[id], running))
+            : [`<div class="op-empty">${brightfield ? 'A brightfield run images no embryo.' : 'Nothing running.'}</div>`],
+        { keepFocused: true });
+        const tact = $('op-run-tactics');
+        if (tact) tact.innerHTML = tactics.map(tacticCard).join('');
         const head = $('op-run-plan');
-        if (head && !running && !ids.length) head.hidden = true;
+        if (head && !going) head.hidden = true;
+        // Reloaded over a run: the sentence Start was pressed on is gone
+        // with the page, but the form was filled from the session's own
+        // plan and nobody has typed over it, so it says the same thing.
+        if (head && going && head.hidden && _planRestored && !_planDirty && $('op-plan-say')) {
+            head.textContent = AcquisitionPlan.describe(readPlan(), planSubjects());
+            head.hidden = false;
+        }
+        const headBox = head && head.closest('.op-panel');
+        if (headBox) headBox.hidden = head.hidden;
+        if (_pane === 'acquire') renderTiles();
     }
 
     async function stopEmbryo(id) {
@@ -3454,8 +3861,10 @@ const OperateManager = (function () {
         const state = t.state || 'planned';
         const struct = t.structure || {};
         const meta = [];
-        if (struct.cadence_s != null) meta.push(`${struct.cadence_s}s`);
-        if (struct.interval != null) meta.push(`${struct.interval}s`);
+        // One cadence, in words: "30s · 30s" was the same number from two
+        // fields of the structure.
+        const cadence = struct.cadence_s != null ? struct.cadence_s : struct.interval;
+        if (cadence != null && Number.isFinite(Number(cadence))) meta.push(`every ${AcquisitionPlan.intervalWords(Number(cadence))}`);
         if (struct.status) meta.push(struct.status);
         if (struct.laser_config) meta.push(struct.laser_config);
         if (struct.volumes === false) meta.push('brightfield');
@@ -3467,13 +3876,19 @@ const OperateManager = (function () {
         if (live.started) when.push(`started ${live.started}`);
         if (live.ended) when.push(live.ended);
         if (live.acquired) when.push(live.acquired);
+        // The code's names for things are not the operator's: a plan started
+        // from this pane is `standing_timelapse`, "Started from the Operate
+        // Run step." The first is said by the card's own name and the second
+        // says nothing the card does not.
+        const kind = t.kind === 'standing_timelapse' ? '' : String(t.kind || '').replace(/_/g, ' ');
+        const why = /^Started from the Operate Run step\.?$/.test(String(t.rationale || '').trim()) ? '' : (t.rationale || '');
         return `<div class="op-tcard st-${escapeHtml(state)}">` +
             `<div class="op-tcard-head"><span class="op-tcard-name">${escapeHtml(t.name || t.id)}</span>` +
             `<span class="op-tcard-state">${escapeHtml(state)}</span></div>` +
-            `<div class="op-tcard-kind">${escapeHtml(t.kind || '')}</div>` +
+            (kind ? `<div class="op-tcard-kind">${escapeHtml(kind)}</div>` : '') +
             (meta.length ? `<div class="op-tcard-meta">${escapeHtml(meta.join(' · '))}</div>` : '') +
             (when.length ? `<div class="op-tcard-meta op-tcard-when">${escapeHtml(when.join(' · '))}</div>` : '') +
-            (t.rationale ? `<div class="op-tcard-meta">${escapeHtml(t.rationale)}</div>` : '') +
+            (why ? `<div class="op-tcard-meta">${escapeHtml(why)}</div>` : '') +
             '</div>';
     }
     async function pauseRun() {
@@ -3637,8 +4052,14 @@ const OperateManager = (function () {
             if ($('op-roster')) {
                 // The fit is shown here too: this is the list a run is
                 // started from, and a run refuses an embryo without one.
-                RosterPanel.mount('op-roster',
-                    { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom', showFit: true });
+                // As a table: its role, its fit, how it ends. Centring and
+                // removing are Scope's, beside the picture they are judged on.
+                RosterPanel.mount('op-roster', {
+                    actions: [],
+                    table: true, emptyAction: 'bottom', showFit: true,
+                    cell: emb => endingCell(emb),
+                    out: emb => !inRun(emb),
+                });
             }
         }
         mountFieldsPanels();
@@ -4106,13 +4527,36 @@ const OperateManager = (function () {
         const raise = $('op-fd-raise');
         if (raise) raise.addEventListener('click', raiseHead);
 
-        const modes = $('op-modes');
-        if (modes) {
-            modes.addEventListener('click', e => {
-                const b = e.target.closest('[data-mode]');
-                if (b) setMode(b.dataset.mode);
+        const test = $('op-test-one'); if (test) test.addEventListener('click', testVolume);
+        const agentBtn = $('op-run-agent'); if (agentBtn) agentBtn.addEventListener('click', handToAgent);
+        const loadBtn = $('op-plan-load');
+        if (loadBtn) loadBtn.addEventListener('click', () => {
+            const box = $('op-panel-library');
+            const open = !box || box.hidden;
+            // Shutting the list lets go of a tactic chosen in it: the form is
+            // the run again.
+            if (!open && _mode === 'library') setMode('adaptive');
+            showSaved(open);
+        });
+        const tiles = $('op-tiles');
+        if (tiles) {
+            tiles.addEventListener('click', e => {
+                const t = e.target.closest('[data-tile]');
+                if (t) pointAt(t.dataset.tile);
             });
+            if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => fitTiles()).observe(tiles);
         }
+        const monitor = $('op-acq-monitor');
+        if (monitor) monitor.addEventListener('click', () => {
+            if (typeof switchTab === 'function') switchTab('embryos');
+        });
+        const kindSeg = $('op-tiles-kind');
+        if (kindSeg) kindSeg.addEventListener('click', e => {
+            const b = e.target.closest('[data-kind]');
+            if (b) { _tilesKind = b.dataset.kind === 'overview' ? 'overview' : 'volumes'; renderTiles(); }
+        });
+        const fresh = $('op-acq-new'); if (fresh) fresh.addEventListener('click', () => setAcqView('design'));
+        const lastRun = $('op-acq-show-run'); if (lastRun) lastRun.addEventListener('click', () => setAcqView('watch'));
         // The acquisition plan. One listener on the pane re-says the plan for
         // every input, including the per-embryo rows that come and go with
         // the roster; the run's own stop select is populated here, once.
@@ -4122,9 +4566,11 @@ const OperateManager = (function () {
         if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('duration', false);
         const planPanel = $('op-panel-adaptive');
         if (planPanel) {
-            planPanel.addEventListener('input', () => { _planDirty = true; renderPlan(); });
+            planPanel.addEventListener('input', () => { planTouched(); renderPlan(); });
+            // (An embryo's own ending is on its row in the table, which is
+            // the roster's: it comes here through roster.cellChange.)
             planPanel.addEventListener('change', e => {
-                _planDirty = true;
+                planTouched();
                 // "Taken from the fields" with none in the list yet makes one
                 // from where the stage is, the way the rail's button does —
                 // the operator drove there and said so. Choosing the centroid
@@ -4155,7 +4601,7 @@ const OperateManager = (function () {
         if (lib) {
             lib.addEventListener('click', e => {
                 const b = e.target.closest('[data-lib]');
-                if (b) { _selectedLib = b.dataset.lib; loadLibrary(); }
+                if (b) chooseSaved(b.dataset.lib);
             });
         }
         const scope = $('op-target-scope');
@@ -4294,7 +4740,9 @@ const OperateManager = (function () {
     }
 
     function renderSetupBanner() {
-        const pane = $('op-pane-acquire');
+        // In the run's column, over the sentence: as the pane's first child
+        // it was a row above three zones, and pushed every one of them down.
+        const pane = $('op-setup-host') || $('op-pane-acquire');
         if (!pane) return;
         let el = document.getElementById('op-setup-banner');
         if (!_setupItem) { if (el) el.remove(); return; }
@@ -4365,6 +4813,8 @@ const OperateManager = (function () {
             },
             toggleRole: id => toggleRole(id),
             goTo: pane => showPane(pane),
+            // A change in a row's own cell (the Acquisition table's ending).
+            cellChange: (id, control) => setEnding(id, control),
         },
         // panels/fields.js renders SharedState.overviewFields and calls
         // these. The list, the stage position and the plan stay here.

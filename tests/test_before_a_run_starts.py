@@ -103,13 +103,24 @@ def test_the_lines_sit_between_the_sentence_and_start():
 
 
 def test_start_is_in_a_foot_that_does_not_scroll():
+    # The run's column: the sentence, the lines, then Start in its foot. The
+    # column does not scroll; the plan's beside it may, and the lines scroll
+    # inside their own box if there are more than fit.
+    run = HTML.index('class="op-acq-col op-acq-run"')
     foot = HTML.index('class="op-runfoot"')
-    assert foot < HTML.index('id="op-plan-say"') < HTML.index('id="op-run-start"')
-    rule = CSS[CSS.index(".op-runfoot {") :]
-    rule = rule[: rule.index("}")]
-    assert "position: sticky" in rule and "bottom: 0" in rule
-    # Opaque, or the form shows through it as it scrolls underneath.
-    assert "background:" in rule
+    assert run < HTML.index('id="op-plan-say"') < HTML.index('id="op-preflight"') < foot
+    assert foot < HTML.index('id="op-run-start"')
+
+    def rule(sel):
+        body = CSS[CSS.index(sel) :]
+        return body[: body.index("}")]
+
+    assert "overflow-y: auto" in rule(".op-acq-plan {")
+    assert "overflow" not in rule(".op-acq-col {")
+    assert "flex: 1 1 auto" in rule(".op-acq-run > .op-acq-pf {")
+    assert "overflow-y: auto" in rule(".op-preflight {")
+    foot_rule = rule(".op-runfoot {")
+    assert "margin-top: auto" in foot_rule
 
 
 def test_the_lines_are_derived_from_what_the_page_has_read():
@@ -177,7 +188,7 @@ def test_a_line_that_says_what_it_said_is_not_redrawn():
     draw = _fn(OPERATE, "    function renderPreflight(plan) {")
     assert "patchLines(host, _preflight.map(" in draw
     assert "host.innerHTML" not in draw
-    patch = _fn(OPERATE, "    function patchLines(host, html) {")
+    patch = _fn(OPERATE, "    function patchLines(host, html, opts) {")
     assert "if (had[i] === h && host.children[i]) return;" in patch
 
 

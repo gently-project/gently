@@ -2043,6 +2043,12 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
     border-radius: 3px;
 }
 .op-numbox-wide { width: 84px; }
+/* No spinner in a box this small: it takes a third of the box, and a press
+   meant to put the cursor in it lands on the arrow and changes the number
+   instead. The arrow keys still step it. */
+.op-numbox[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.op-numbox[type="number"]::-webkit-inner-spin-button,
+.op-numbox[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .op-numbox::placeholder { color: var(--op-ink-dim, var(--text-muted)); opacity: 0.8; font-size: 10.5px; }
 .op-numbox:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
 .op-numbox.is-draft { color: var(--accent); font-style: italic; }
@@ -2364,4 +2370,222 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
     .op-pane-scope .op-block-display { width: min(100%, calc(100vh - 150px)); }
     .op-pane-scope .op-bar { height: auto; flex: 0 0 auto; white-space: normal; }
     .op-pane-scope .op-inst { flex: 0 0 auto; overflow: visible; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Acquisition — the same three zones (2026-11-13)
+
+   The dish (left, as a table), a picture (middle: each embryo's latest
+   volume), the controls (right: the plan, and the run). One surface with two
+   states, designing a run and watching one, each with the whole page:
+   `data-acq` on the pane says which, and `data-when` on a part says which
+   state it belongs to. docs/workspace/calibration-and-acquisition.md has the
+   why; mockup-run-v1.html in that folder is the drawing this was built from.
+
+   The rules are Scope's: every box has one place and keeps it, the picture
+   takes the room there is, and Start does not scroll.
+   ══════════════════════════════════════════════════════════════════════════ */
+.op-pane-acquire {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+}
+.op-acq {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr) auto;
+    gap: 10px;
+    /* Room for the first boxes' names, which sit on their top edges. */
+    padding-top: 8px;
+}
+.op-pane-acquire[data-acq="design"] [data-when="watch"],
+.op-pane-acquire[data-acq="watch"] [data-when="design"] { display: none; }
+
+/* ── the dish, as a table ────────────────────────────────────────────────── */
+.op-acq-dish { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+.op-acq-roster { flex: 1 1 auto; min-height: 120px; }
+.op-acq-fields { flex: 0 0 auto; }
+.op-acq-fields .op-roster { max-height: 180px; overflow-y: auto; scrollbar-width: thin; }
+.op-acq-scope { display: flex; flex: 0 0 auto; }
+.op-acq-scope .op-segbtn { flex: 1 1 0; min-width: 0; }
+.op-acq-table { flex: 1 1 auto; min-height: 0; gap: 1px; overflow-y: auto; scrollbar-width: thin; }
+.op-acq-thead {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 22px 44px 82px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    height: 18px;
+    padding: 0 5px;
+    border-bottom: 1px solid var(--op-rule);
+    font: 500 10px var(--op-ui);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+}
+.op-acq-thead-run { grid-template-columns: 22px 34px 78px minmax(0, 1fr) 34px; }
+
+/* A row of the table (panels/roster.js, tableRow). */
+.rp-trow {
+    display: grid;
+    grid-template-columns: 22px 44px 82px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+    min-height: 26px;
+    padding: 0 5px;
+    border-radius: 3px;
+}
+.rp-trow .rp-id { font: 600 11px var(--op-mono); color: var(--accent); }
+.rp-trow .rp-role { justify-self: start; height: 20px; padding: 0 6px; font-size: 11px; }
+.rp-trow .rp-fit { justify-self: start; margin: 0; }
+.rp-fit-num { font-family: var(--op-mono); white-space: nowrap; }
+.rp-trow .rp-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.rp-trow .rp-end { flex: 1 1 auto; min-width: 0; height: 20px; padding: 0 2px; font-size: 11px; }
+.rp-trow .rp-end-n { flex: 0 0 40px; width: 40px; }
+/* Not in the run as it stands: a reference, or not among the selected. */
+.rp-trow.is-out > .rp-id, .rp-trow.is-out > .rp-fit, .rp-trow.is-out > .rp-cell { opacity: 0.45; }
+
+/* The same table with the run's columns (operate.js, runRow): who, its
+   timepoint, when it is next due, its ending, Stop; under them what its next
+   acquisition uses. */
+.op-acq-table .op-runrow {
+    grid-template-columns: 22px 34px 78px minmax(0, 1fr) 34px;
+    gap: 2px 6px;
+    padding: 3px 5px;
+    border-left: 2px solid var(--op-rule);
+    font-size: 11px;
+}
+.op-acq-table .op-runrow-who { color: var(--accent); }
+.op-acq-table .op-runrow-next { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-acq-table .op-runrow-stop { height: 20px; padding: 0 2px; font-size: 11px; min-width: 0; }
+.op-acq-table .op-runrow-halt { height: 20px; padding: 0 4px; font-size: 10.5px; }
+.op-acq-table .op-runrow-params { grid-column: 2 / -1; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── the pictures: each embryo's latest volume ───────────────────────────── */
+.op-acq-view { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+/* In the desktop window the middle is 366 px, and the strip's three things do
+   not fit on a line: they wrap, and the tiles give up the line. */
+.op-acq-viewbar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 28px; }
+.op-acq-viewbar .op-btn { flex: none; height: 22px; padding: 0 10px; font-size: 12px; border-radius: 3px; white-space: nowrap; }
+.op-acq-viewsay { flex: 1 1 40px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* As many across as makes them largest in the room (operate.js, fitTiles). */
+.op-tiles {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(var(--across, 3), minmax(0, var(--tile-w, 1fr)));
+    gap: 8px;
+    align-content: start;
+    justify-content: start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+.op-tile {
+    position: relative;
+    aspect-ratio: 1024 / 630;      /* a saved projection: the three views */
+    min-width: 0;
+    padding: 0;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: #04070b;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    overflow: hidden;
+    cursor: pointer;
+}
+.op-tile img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.op-tile-id { position: absolute; left: 6px; top: 4px; font: 600 11px var(--op-mono); color: #93c5fd; text-shadow: 0 0 3px #000, 0 0 3px #000; }
+.op-tile-say {
+    position: absolute; left: 6px; right: 6px; bottom: 4px;
+    font: 10px var(--op-mono); color: #9fb3c8; text-shadow: 0 0 3px #000, 0 0 3px #000;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.op-tile-bf { aspect-ratio: 1 / 1; cursor: default; }
+.op-acq-kind { flex: none; }
+.op-tile.is-none { background: transparent; border-style: dashed; }
+.op-tile.is-none .op-tile-id { color: var(--op-ink-dim); text-shadow: none; }
+.op-tile.is-none .op-tile-say { bottom: auto; top: 44%; text-align: center; color: var(--op-ink-dim); text-shadow: none; }
+.op-tile.is-sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.op-tile.is-now { border-color: var(--op-live); box-shadow: 0 0 0 2px var(--op-live); }
+.op-tile.is-now .op-tile-say { color: var(--op-live); font-weight: 600; }
+.op-tile.is-done { opacity: 0.6; }
+.op-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.op-tiles-empty { grid-column: 1 / -1; }
+
+/* ── the plan, and the run ───────────────────────────────────────────────── */
+.op-acq-side { display: flex; gap: 10px; min-width: 0; min-height: 0; }
+.op-acq-col { flex: none; width: 310px; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+/* The plan may scroll in a short window; nothing in it grows with the roster. */
+.op-acq-plan { overflow-y: auto; scrollbar-width: thin; padding-top: 8px; margin-top: -8px; }
+.op-acq-plan > .op-panel { flex: 0 0 auto; }
+.op-acq .op-plan-chan { margin-top: 0; }
+.op-acq-plan .op-label { flex: 0 0 54px; }
+.op-acq-plan .op-label-next { flex: 0 0 auto; margin-left: 8px; }
+.op-acq-plan .op-sel { flex: 1 1 auto; min-width: 0; height: 22px; padding: 0 4px; font-size: 12px; }
+.op-acq-plan .op-acq-unit { flex: 0 0 58px; }
+.op-acq-plan .op-cap { font-size: 10.5px; line-height: 1.35; }
+.op-acq-plan .op-plan-kept { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-acq-plan .op-plan-spim-body, .op-acq-plan .op-plan-bf-body { display: flex; flex-direction: column; gap: 4px; }
+.op-acq-plan .op-plan-bf-body[hidden] { display: none; }
+.op-acq-plan .op-plan-powers { display: flex; flex-direction: column; gap: 2px; }
+.op-acq-plan .op-plan-powers:empty { display: none; }
+.op-acq-plan .op-plan-now { margin: 0; }
+.op-acq-plan .op-plan-bf-setup { display: flex; align-items: center; gap: 6px; }
+.op-acq-plan .op-plan-bf-setup > span { flex: 1 1 auto; min-width: 0; }
+.op-acq-plan .op-plan-bf-setup .op-btn { flex: none; }
+.op-acq-plan .op-plan-line .op-ext { margin-left: 2px; }
+/* A channel's switch is in its box's name. */
+.op-panel-name .op-plan-check { gap: 5px; color: var(--op-ink); }
+.op-panel-name .op-plan-check input { margin: 0; accent-color: var(--accent); }
+
+.op-acq-run > .op-panel { flex: 0 0 auto; }
+/* The lines take what is left, and scroll inside their box if they must:
+   Start stays where it is. */
+.op-acq-run > .op-acq-pf { flex: 1 1 auto; min-height: 64px; }
+.op-acq-pf .op-preflight { flex: 1 1 auto; min-height: 0; max-height: none; }
+.op-acq-lib { max-height: 40%; }
+.op-acq-lib .op-lib-list { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.op-acq .op-plan-say { margin: 0; font: 12.5px/1.45 var(--op-ui); }
+.op-acq .op-plan-say.is-aside { opacity: 0.45; }
+.op-acq .op-run-plan { color: var(--op-ink); }
+.op-acq-run .op-runfoot { padding-top: 0; border-top: 0; }
+.op-acq-footrow { display: flex; gap: 6px; }
+.op-acq-footrow .op-btn { flex: 1 1 auto; height: 22px; padding: 0 6px; font-size: 12px; border: 1px solid var(--op-rule); border-radius: 3px; white-space: nowrap; }
+.op-acq-last { height: 22px; font-size: 12px; text-align: left; padding: 0 2px; }
+.op-acq-run .op-btn-wide { height: 34px; font-size: 13px; font-weight: 700; border-radius: 4px; }
+
+/* During a run: what there is to wait for, large, then the rest. */
+.op-acq-clock .op-run-status { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.op-run-clockrow { display: flex; align-items: baseline; gap: 8px; min-height: 30px; }
+.op-run-clockrow:empty { display: none; }
+.op-run-clock { font: 500 28px/1 var(--op-mono); color: var(--op-ink); }
+.op-run-clock-say { font-size: 10.5px; color: var(--op-ink-dim); }
+.op-run-bits { font: 11px/1.45 var(--op-mono); color: var(--op-ink-dim); }
+.op-acq-clock .op-actions { display: flex; gap: 6px; margin-top: 6px; }
+.op-acq-clock .op-actions .op-btn { flex: 1 1 0; }
+.op-run-tactics { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; scrollbar-width: thin; }
+.op-run-tactics:empty { display: none; }
+
+/* A window too narrow for three zones: they stack, and the pane scrolls. The
+   picture comes first, then the controls, then the dish. */
+@container operate (max-width: 1260px) {
+    .op-acq-side { flex-direction: column; overflow-y: auto; scrollbar-width: thin; }
+    .op-acq-plan { overflow-y: visible; flex: 0 0 auto; }
+    .op-acq-run { flex: 0 0 auto; }
+    .op-acq-run > .op-acq-pf { flex: 0 0 auto; }
+}
+@container operate (max-width: 1060px) {
+    .op-pane-acquire { overflow-y: auto; }
+    .op-acq { display: flex; flex-direction: column; }
+    .op-acq-view { order: 1; flex: 0 0 auto; }
+    .op-acq-side { order: 2; flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; overflow: visible; }
+    .op-acq-dish { order: 3; flex: 0 0 auto; }
+    .op-acq-col { flex: 1 1 300px; width: auto; }
+    .op-tiles { overflow: visible; flex: 0 0 auto; }
+    .op-acq-table { max-height: 320px; }
 }
