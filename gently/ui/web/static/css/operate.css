@@ -1,10 +1,12 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Operate — three instrument surfaces.
+   Operate — one workspace, and two surfaces beside it.
 
-   Bottom cam · SPIM head · Acquisition. Each pane is fully live whenever it is
-   visible; nothing here is disclosed or gated by "which step you are on",
-   because there are no steps. There is deliberately no rule in this file that
-   shows or hides a control based on anything but its own pane.
+   Scope (the dish · what the rig sees · the instrument) · Calibration ·
+   Acquisition. Each surface is fully live whenever it is visible; nothing
+   here is disclosed or gated by "which step you are on", because there are
+   no steps. There is deliberately no rule in this file that shows or hides a
+   control based on anything but its own surface. The workspace's own layout
+   is at the end of the file ("Scope — the workspace").
 
    Restyle scope: Operate only. Theme tokens are inherited from main.css so
    light/dark keeps working; on top of them sits a local instrument layer with
@@ -58,24 +60,6 @@
     --op-ink-dim: #667081;
 }
 
-/* ── sub-navigation ─────────────────────────────────────────────────────── */
-.op-subnav {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--op-3);
-    padding-bottom: var(--op-2);
-    border-bottom: 1px solid var(--op-rule);
-    flex: 0 0 auto;
-}
-.op-subviews .view-btn { font-size: 0.72rem; }
-.op-subnav-meta {
-    font-family: var(--op-mono);
-    font-size: 0.62rem;
-    color: var(--op-ink-dim);
-    letter-spacing: 0.04em;
-}
-
 /* ── shared embryo rail + pane area ─────────────────────────────────────── */
 .op-body {
     flex: 1 1 auto;
@@ -92,28 +76,8 @@
 }
 /* The rail is redundant on Acquisition, which carries its own richer roster. */
 .op-body[data-pane="acquire"] .op-embryos { display: none; }
-.op-embryos {
-    flex: 0 0 208px;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--op-rule);
-    border-radius: 6px;
-    background: var(--op-panel);
-    overflow: hidden;
-}
-.op-erail-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--op-2) var(--op-3);
-    border-bottom: 1px solid var(--op-rule);
-    font-size: 0.72rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--op-ink-dim);
-    flex: 0 0 auto;
-}
+/* The rail itself (a column of boxes: the dish) is laid out with the
+   workspace, at the end of this file. */
 .op-erail-list {
     flex: 1 1 auto;
     min-height: 0;
@@ -123,11 +87,6 @@
     flex-direction: column;
     gap: var(--op-1);
 }
-/* The fields list shares the rail with the embryos'. The embryos keep the
-   room — there are more of them, and they are selected from — and the fields
-   take what they need up to a cap, each list scrolling on its own. */
-.op-frail-head { border-top: 1px solid var(--op-rule); }
-.op-frail-list { flex: 0 1 auto; max-height: 42%; }
 
 /* ── Fields panel (panels/fields.js) ─────────────────────────────────────
    The roster's row, so the two lists read as one kind of thing. */
@@ -149,8 +108,8 @@
 .fp-add:disabled { opacity: 0.45; cursor: not-allowed; }
 .op-fields-head { margin-top: var(--op-2); }
 
-/* The Overview frames block on the Bottom cam rail: the plan's own
-   fields, so the inputs are the plan's inputs, narrowed to the rail. */
+/* The Overview frames block in the rail: the plan's own fields, so the
+   inputs are the plan's inputs, narrowed to the rail. */
 .op-block-overview .op-num-in, .op-block-overview .op-sel { width: 96px; }
 .op-block-overview .op-cap { margin: 0; }
 .op-plan-bf-setup .op-btn { margin-left: 2px; }
@@ -677,31 +636,17 @@
        rail and swallowed its clicks — "Start camera" was unclickable by mouse
        at any width below the breakpoint. The rail gets its own row. */
     .op-main { grid-column: 1; grid-row: 1; }
-    .op-inst { grid-column: 1; grid-row: 2; }
     /* min-height:0 is right in the two-column layout, where .op-main must be
-       allowed to shrink so the camera can take the leftover height. Stacked it
-       is wrong: the row squashed to 403px around a 708px square camera, which
-       then overflowed its own column and painted across the rail beneath —
-       swallowing every click on "Start camera". Content sets the height here
-       and .op-pane scrolls, which is what its overflow-y:auto is for. */
+       allowed to shrink. Stacked it is wrong: the row squashed around its
+       content, which then overflowed its own column and painted across
+       whatever was beneath — swallowing every click there. Content sets the
+       height here and .op-pane scrolls, which is what its overflow-y:auto is
+       for. (The workspace has its own small-window layout, at the end of
+       this file, where the frame and the instrument are a flex column and
+       cannot share a cell.) */
     .op-main { min-height: auto; }
-    .op-inst { overflow-y: visible; }
-    .op-cam { flex: 0 0 auto; min-height: 260px; }
-    /* Stacked/narrow: the box is width-limited, so width drives and height
-       follows the aspect (the parent's height is no longer definite here). */
-    .op-cam-fit { width: 100%; height: auto; }
-    /* Keep the embryo rail beside the camera even here — just make it narrower.
-       It only stacks on top at the much smaller breakpoint below. */
-    .op-embryos { flex: 0 0 168px; }
     .op-col { overflow-y: visible; }
     .op-main-cols { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* Only when there is genuinely no room for two columns does the rail stack on
-   top of the pane, capped so the camera keeps most of the height. */
-@container operate (max-width: 560px) {
-    .op-body { flex-direction: column; }
-    .op-embryos { flex: 0 0 auto; max-height: 148px; }
 }
 
 /* ── Light panel ──────────────────────────────────────────────────────────
@@ -783,28 +728,6 @@
     border-color: var(--accent-red);
     color: var(--accent-red);
     font-weight: 600;
-}
-
-/* Presence-driven (PANELS.md rule 6): present only while light is actually
-   coming out, and derived from read-back state, never from a flag. */
-.lp-emit {
-    margin-top: 4px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 0.72rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: #fff;
-    background: var(--accent-red);
-}
-
-/* "I do not know" must not look like "no". */
-.lp-emit-unknown {
-    color: var(--text-muted);
-    background: transparent;
-    border: 1px dashed var(--border);
-    font-weight: 500;
-    letter-spacing: 0;
 }
 
 /* ── ImageView ────────────────────────────────────────────────────────────
@@ -1327,82 +1250,45 @@
 
 .mk-session .mk-acts { margin-top: 8px; }
 
-/* ── Light panel: the laser's own settings ────────────────────────────────
-   Indented under the Laser row because Beam and power only MATTER once a line
-   is routed — scope, not dependency. They are not caused by the config, and
-   #106 is what happens when someone assumes they are, which is why the
-   contradiction below gets its own line rather than being softened by the
-   indent. */
-.lp-sub {
-    margin: 2px 0 4px 10px;
-    padding-left: 10px;
-    border-left: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-/* Routed lines with the beam off: configured, and will not emit. Not a hazard
-   — the opposite — but the single most misleading state this panel can be in,
-   so it is stated rather than left to be inferred from two rows. */
-.lp-warn {
-    margin: 0;
-    padding: 3px 6px;
-    border-radius: 3px;
-    font-size: 0.68rem;
-    line-height: 1.35;
-    color: var(--accent-amber);
-    background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
-}
-
-/* Armed with nothing routed — safe, surprising, and the state the rig is left
-   in. Muted, because nothing is wrong. */
-.lp-note {
-    margin: 0 0 2px 10px;
-    font-size: 0.66rem;
-    line-height: 1.35;
-    color: var(--op-ink-dim);
-}
-
-/* ── Light panel: mode as the root of the control ─────────────────────────
-   LED and laser are two independent Micro-Manager config groups, so their
-   exclusivity is a policy this panel asserts, not an interlock the hardware
-   enforces. `is-on` is read back from the device; `is-open` is only which
-   branch is on screen. They are different things and look different: a mode
-   that is actually engaged is filled, a branch merely being viewed is outlined.
-   Both light up together when both sources are open, which is the #106 fault
-   and gets its own .lp-warn line. */
+/* ── Segmented buttons (the Light panel's switches and presets) ───────────
+   Filled when the device says so. A press is a request; what is lit after it
+   is what was read back. */
 .lp-seg {
     display: inline-flex;
     flex: 0 0 auto;
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    border: 1px solid var(--op-rule2, var(--border));
+    border-radius: 3px;
     overflow: hidden;
 }
 
 .lp-mbtn {
-    font-size: 0.72rem;
-    padding: 2px 10px;
+    height: 20px;
+    padding: 0 8px;
+    font: 12px var(--op-ui, inherit);
     border: 0;
-    border-left: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text-muted);
+    border-left: 1px solid var(--op-rule2, var(--border));
+    background: var(--op-field, var(--bg-card));
+    color: var(--op-ink-dim, var(--text-muted));
+    white-space: nowrap;
     cursor: pointer;
 }
 
 .lp-mbtn:first-child { border-left: 0; }
+.lp-mbtn:hover { color: var(--op-ink, var(--text)); }
+.lp-mbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Engaged: the device says this source is open. */
+/* Engaged: the device says this is on. */
 .lp-mbtn.is-on {
     background: var(--accent);
-    color: #fff;
+    color: var(--op-on-accent, #fff);
     font-weight: 600;
 }
 
-/* Disclosed but not engaged — viewing the branch to configure it. */
-.lp-mbtn.is-open:not(.is-on) {
-    color: var(--text);
-    box-shadow: inset 0 -2px 0 var(--accent);
+/* Chosen, and the choice is rest (Closed, Off): marked, not lit. */
+.lp-mbtn.is-rest {
+    background: var(--op-rule2, var(--border));
+    color: var(--op-ink, var(--text));
+    font-weight: 600;
 }
 
 /* A control carrying out a request is not a control you may not press. The
@@ -1677,14 +1563,6 @@
 .al-row { display: flex; align-items: center; gap: var(--op-2); font-size: 0.7rem; }
 .al-when { color: var(--op-ink-dim); font-family: var(--op-mono); }
 .al-val { margin-left: auto; font-family: var(--op-mono); color: var(--op-ink); }
-.op-adv {
-    display: flex;
-    flex-direction: column;
-    gap: var(--op-2);
-    margin-top: var(--op-2);
-    padding-top: var(--op-2);
-    border-top: 1px dashed var(--op-rule);
-}
 
 /* See rig-menu.css: a class-level `display` beats the UA `[hidden]` rule at
    equal specificity, so every element this file hides through the property
@@ -1693,7 +1571,6 @@
 .cp[hidden] { display: none; }
 .cp-strip[hidden] { display: none; }
 .cal-adv[hidden] { display: none; }
-.op-adv[hidden] { display: none; }
 
 /* ── The rail's folding cards (operate.js wireDisclosures) ───────────────
    A head row that stays, a body that folds. The body carries the same
@@ -1852,17 +1729,25 @@
 .bf-thumb { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid var(--op-rule); border-radius: 4px; background: #000; display: block; }
 .bf-warn { color: var(--op-warn); font-size: 12px; }
 
-/* ── XY stage pad (panels/stage-pad.js) ───────────────────────────────── */
-.sp { display: grid; gap: var(--op-2); outline: none; }
-.sp:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 6px; }
-.sp-row { display: flex; align-items: baseline; gap: var(--op-2); flex-wrap: wrap; }
-.sp-pos { font-size: 12px; color: var(--op-ink-dim); }
+/* ── XY stage pad (panels/stage-pad.js) ─────────────────────────────────
+   Where the stage is, then the pad with its step sizes beside it: three
+   rows of buttons, whatever the panel's width. */
+.sp { display: flex; flex-direction: column; gap: 4px; outline: none; }
+.sp:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 4px; }
+.sp-row { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.sp-pos { font-size: 12px; color: var(--op-ink-dim); white-space: nowrap; }
 .sp-pos .op-num { color: var(--op-ink); }
-.sp-grid { display: grid; grid-template-columns: repeat(3, max-content); gap: var(--op-1); justify-content: start; align-items: center; }
-.sp-btn { min-width: 56px; }
-.sp-mid { font-size: 11px; color: var(--op-ink-dim); text-align: center; min-width: 56px; }
-.sp-steps .is-on { border-color: var(--accent); color: var(--op-ink); }
-.sp-note { max-width: 320px; }
+.sp-pos i { font-style: normal; font-size: 10.5px; }
+.sp-said { margin-left: auto; font-size: 10.5px; color: var(--op-ink-dim); white-space: nowrap; }
+.sp-jog { display: flex; align-items: flex-start; gap: 6px; }
+.sp-jog > .op-label { line-height: 22px; }
+.sp-grid { display: grid; grid-template-columns: repeat(3, 52px); grid-auto-rows: 22px; gap: 3px; }
+.sp-btn { min-width: 0; padding: 0; }
+.sp-steps { display: grid; grid-template-columns: repeat(2, 52px); grid-auto-rows: 22px; gap: 3px; margin-left: 12px; }
+.sp-steps-cap { grid-column: 1 / -1; align-self: center; }
+.sp-steps .op-nbtn { padding: 0; }
+.sp-steps .is-on { border-color: var(--accent); background: var(--accent); color: var(--op-on-accent, #fff); font-weight: 600; }
+.sp-note { font-size: 10.5px; }
 
 /* What the plan's "taken from the fields" means, under the select. The
    fields themselves are the list in the left column (panels/fields.js). */
@@ -1876,110 +1761,559 @@
 .op-setup-clear { margin-left: auto; font: inherit; font-size: 12px; background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); padding: 2px 8px; cursor: pointer; }
 .op-setup-clear:hover { color: var(--text); border-color: var(--accent); }
 
-/* ── Row panes: the frame hugs its own width, the rail takes the rest ──────
-   The frame is height-driven (see .op-cam-fit), so at a desk-sized window it
-   was a 450 px square centred in an 1100 px column while the rail's panels
-   queued in a 260 px strip that scrolled. On a row pane (.op-pane-row: the
-   Bottom cam and the SPIM head) the frame's column and the rail share one
-   row. The column holds the image box, its caption line and the display
-   panel at the width the frame's aspect gives it at the row's height, and
-   sits at the left; the rail takes the rest, its panels flowing into as many
-   240 px columns as fit, so at a desk-sized window nothing scrolls. What the
-   pane has beneath the frame besides (the Bottom cam's marking block) sits
-   under the row at full width.
+/* ── Light panel: one place for every control ────────────────────────────
+   LED · the presets · a row per line · the beam · one status line. Rows are
+   22 px; a label is 46 px; a number is typed in the same box everywhere
+   (.op-numbox). */
+.lp-light { gap: 3px; }
+.lp-light .lp-row, .lp-light .lp-line { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+.lp-light .lp-label { flex: 0 0 46px; font-size: 10px; letter-spacing: 0.06em; white-space: nowrap; }
+.lp-light .lp-range { flex: 1 1 auto; min-width: 40px; height: 20px; margin: 0; accent-color: var(--accent); }
+.lp-light .lp-range:disabled { opacity: 0.4; }
+.lp-unit { flex: none; font-size: 10.5px; color: var(--op-ink-dim, var(--text-muted)); white-space: nowrap; }
+.lp-hint { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; color: var(--op-ink-dim, var(--text-muted)); }
+/* The presets fill their row, each as wide as its name needs and no less. */
+.lp-chips { flex: 1 1 auto; display: flex; min-width: 0; }
+.lp-chip { flex: 1 1 auto; padding: 0 4px; font: 11.5px var(--op-mono, ui-monospace, monospace); }
 
-   The row is a size container: its height is the room there is, known before
-   its children lay out, so the image box can be given that height less what
-   sits under it (in cqh) and take its width from its aspect — which is what
-   lets the caption and the display panel sit at the frame's own width with
-   no script measuring anything. For that, what sits under the frame has a
-   fixed height per pane (--op-bar-h, --op-display-h), and the aspect ratio
-   is on the box itself (setCamAr in operate.js puts --cam-ar on the box,
-   which the fit inherits). */
-.op-pane-row {
-    grid-template-columns: minmax(0, 1fr);
-    --op-bar-h: 16px;        /* the caption line under the frame */
-    --op-display-h: 112px;   /* the stacked display panel */
-}
-/* The Bottom cam's caption is a sentence that wraps at the frame's width,
-   and an alignment line can join it. Two lines of room. */
-#op-pane-bottom { --op-bar-h: 32px; }
-.op-pane-row .op-view-row {
-    flex: 1 1 auto;
-    min-height: 0;
-    display: flex;
-    align-items: stretch;
-    gap: var(--op-3);
-    container-type: size;
-    container-name: stage;
-}
-.op-pane-row .op-stage-col {
-    /* Under the frame: the caption line, the display panel, two gaps. */
-    --op-under: calc(var(--op-bar-h) + var(--op-display-h) + 2 * var(--op-2));
-    flex: 0 1 auto;
-    min-width: 0;
-    /* The rail keeps at least its old width; a tall, narrow window shrinks
-       the image instead, which then letterboxes inside its box. */
-    max-width: calc(100% - 260px - var(--op-3));
-    display: flex;
-    flex-direction: column;
-    gap: var(--op-2);
-}
-.op-pane-row .op-cam {
-    flex: 0 0 auto;
-    height: calc(100cqh - var(--op-under));
-    aspect-ratio: var(--cam-ar, 1 / 1);
-    max-width: 100%;
-}
-.op-pane-row .op-bar {
-    flex: 0 0 auto;
-    height: var(--op-bar-h);
-    overflow: hidden;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    row-gap: 0;
-}
-.op-pane-row .op-block-display { flex: 0 0 auto; height: var(--op-display-h); box-sizing: border-box; }
-.op-pane-row .op-block-marking { flex: 0 0 auto; }
-.op-pane-row .op-inst {
-    grid-column: auto;
-    grid-row: auto;
-    flex: 1 1 260px;
-    min-width: 260px;
-    display: grid;
-    /* 240 px is what a panel had in the old rail (260 less its gutter), so
-       a laptop window gets two columns where 250 would have left it one. */
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    align-content: start;
-    /* Each panel keeps its own height rather than stretching to its row's
-       tallest neighbour: a 100 px panel drawn 260 px tall reads as empty. */
-    align-items: start;
-}
-@container operate (max-width: 900px) {
-    .op-pane-row .op-view-row { flex-direction: column; container-type: normal; }
-    .op-pane-row .op-stage-col { max-width: none; }
-    .op-pane-row .op-cam { width: 100%; height: auto; }
-    .op-pane-row .op-bar { height: auto; }
-    .op-pane-row .op-block-display { height: auto; }
-    .op-pane-row .op-inst { display: flex; flex-direction: column; min-width: 0; }
-}
-
-/* ── Light panel: the laser as its lines ──────────────────────────────────
-   One row per line the rig has: a swatch in the line's colour that glows while
-   that line is emitting, the wavelength, its power. A line the preset does not
-   route is dimmed, slider off: the row says what the preset did to its line. */
+/* One row per line the rig has: a swatch in the line's colour that glows
+   while that line is emitting, the wavelength, its power. A line the preset
+   does not route is drawn quieter; its power can still be set. */
 .lp-lines { display: flex; flex-direction: column; gap: 2px; }
-.lp-line { display: flex; align-items: center; gap: 6px; min-height: 24px; }
-.lp-line:not(.is-routed) { opacity: 0.5; }
 .lp-swatch {
     flex: 0 0 auto;
     width: 10px;
     height: 10px;
+    margin-left: 2px;
     border-radius: 50%;
     background: var(--wl);
-    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+    opacity: 0.35;
 }
-.lp-line.is-lit .lp-swatch { box-shadow: 0 0 6px 1px var(--wl); }
-.lp-wl { flex: 0 0 30px; font-family: var(--op-mono); font-size: 0.72rem; color: var(--text); }
-.lp-line .lp-lim { white-space: nowrap; }
-.lp-beam .lp-seg { margin-right: 4px; }
+.lp-line.is-routed .lp-swatch { opacity: 1; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25); }
+.lp-line.is-lit .lp-swatch { box-shadow: 0 0 7px 2px var(--wl); }
+.lp-wl { flex: 0 0 28px; font-family: var(--op-mono); font-size: 12px; color: var(--op-ink-dim, var(--text-muted)); }
+.lp-line.is-routed .lp-wl { color: var(--op-ink, var(--text)); font-weight: 600; }
+.lp-light .lp-lim { flex: 0 0 34px; font: 10px var(--op-mono); color: var(--op-ink-dim, var(--text-muted)); white-space: nowrap; }
+
+/* The one line that says what is emitting. Always there; its shape changes
+   with its meaning as well as its colour: a ring is dark or unknown, a
+   filled disc is light on the sample. */
+.lp-stat {
+    margin-top: 4px;
+    min-height: 22px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 8px;
+    border: 1px dashed var(--op-rule2, var(--border));
+    border-radius: 3px;
+    font-size: 11.5px;
+    color: var(--op-ink-dim, var(--text-muted));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.lp-stat::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    box-sizing: border-box;
+    border: 1.5px solid currentColor;
+    border-radius: 50%;
+}
+.lp-stat.is-emit {
+    border: 1px solid var(--accent-red);
+    background: var(--accent-red);
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+.lp-stat.is-emit::before { background: #fff; border-color: #fff; }
+.lp-stat.is-warn {
+    border: 1px solid var(--accent-amber);
+    background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+    color: var(--accent-amber);
+}
+.lp-stat.is-warn::before { border-radius: 1px; transform: rotate(45deg); }
+.lp-stat.is-led { border-style: solid; color: var(--op-ink, var(--text)); }
+.lp-stat.is-led::before { background: currentColor; }
+.lp-stat.is-note { border-style: solid; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Scope — the workspace (2026-11-13)
+
+   Three zones in one row: the dish (the rail, left), what the rig sees (the
+   frame, middle), the instrument (right). The frame takes the height there
+   is and its width from its aspect; the instrument takes the width that is
+   left, in two columns when there is room for two; the rail is 280 px.
+   Nothing reflows when the camera changes, because the camera's own things
+   are the only things that change. docs/workspace/README.md has the why.
+
+   The pane is a size container: its height is the room there is, known
+   before its children lay out, so the image box can be given that height
+   less what sits above and below it (in cqh) and take its width from its
+   aspect, which is what lets the caption and the display panel sit at the
+   frame's own width with no script measuring anything. For that, what sits
+   above and below the frame has a fixed height (the --op-*-h below), and the
+   aspect ratio is on the box itself (setCamAr in operate.js puts --cam-ar on
+   the box, which the fit inherits).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── the page: one row of chrome above the workspace ─────────────────────── */
+.devices-container[data-view="operate"] { padding: 8px 10px; gap: 8px; overflow-x: hidden; }
+/* In a window too narrow for the row, the readings and HALT take a second
+   line rather than leave by the right edge: a stop that has scrolled out of
+   the window is not a stop. */
+.devices-header-bar { min-height: 30px; flex-wrap: wrap; row-gap: 4px; }
+.devices-header-left { align-items: center; gap: 0.6rem; flex-wrap: wrap; row-gap: 4px; }
+.devices-header-bar .devices-status { margin-left: auto; }
+.devices-tb-rule { flex: none; width: 1px; height: 18px; background: var(--border); }
+/* What is live and what is emitting, said once, in the toolbar. */
+.devices-status .op-subnav-meta {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+}
+/* Laser light on the sample: said in the hazard's colour and weight, with a
+   mark, so it is not the same grey as "the camera is live". */
+.devices-status .op-subnav-meta .is-emitting { color: var(--accent-red); font-weight: 700; }
+.devices-status .op-subnav-meta .is-emitting::before { content: '● '; }
+/* One HALT, on every view of this tab, where the hand learns to find it. */
+.devices-halt {
+    flex: none;
+    height: 26px;
+    padding: 0 16px;
+    margin-left: 4px;
+    border: 0;
+    border-radius: 4px;
+    background: var(--accent-red);
+    color: #fff;
+    font: 700 12px 'Inter Tight', system-ui, sans-serif;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+}
+.devices-halt:hover { filter: brightness(1.1); }
+.devices-halt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The header's strip says the run and the roster, which this tab's toolbar
+   and the status bar under it already say; here its row goes to the picture. */
+body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none; }
+
+/* ── the panel: a box with its name on its top edge ──────────────────────── */
+.operate {
+    --op-field: #0b0f14;        /* where a value is typed or chosen */
+    --op-rule2: #36404d;        /* the edge of a control, a step up from a panel's */
+    --op-on-accent: #06101f;    /* ink on the accent */
+}
+[data-theme="light"] .operate {
+    --op-field: #ffffff;
+    --op-rule2: #c6ced8;
+    --op-on-accent: #ffffff;
+}
+.op-panel {
+    position: relative;
+    min-width: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: var(--op-panel);
+    padding: 12px 9px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+/* The name sits on the box's top edge. A shared panel draws its own head
+   (.lp-head: a title, and what it has to say beside it); mounted in a box,
+   that head is the name.
+
+   Descendant selectors and class names only, on purpose: these rules set
+   text-transform, and tests/test_units_not_uppercased.py resolves every such
+   rule against the templates to keep a µ from being uppercased into an M. It
+   can only follow selectors of this plain shape. */
+.op-panel-name,
+.op-panel .lp-head {
+    position: absolute;
+    top: -7px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+    margin: 0;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    background: var(--op-panel);
+    border-radius: 2px;
+    font: 600 10px/13px var(--op-ui);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--op-ink-dim);
+    white-space: nowrap;
+    overflow: hidden;
+}
+.op-panel-name em,
+.op-panel .lp-head .lp-age,
+.op-panel .lp-head .mk-busy {
+    font: 500 10px/13px var(--op-ui);
+    font-style: normal;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--op-ink-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.op-panel .lp-head .lp-title { font: inherit; letter-spacing: inherit; color: inherit; }
+.op-panel-name em.op-num { font-family: var(--op-mono); color: var(--op-ink); }
+/* A folding card's name is in its head row, with the Show/Hide. */
+.op-panel > .op-disc-head > .op-panel-name { position: static; padding: 0; background: none; max-width: none; }
+.op-panel[data-disclose] { padding-top: 6px; }
+
+/* Rows: 22 px, a 46 px label, the value, its unit. */
+.op-panel .op-row { justify-content: flex-start; gap: 6px; min-height: 22px; }
+.op-panel .op-label { flex: 0 0 46px; font-size: 10px; letter-spacing: 0.06em; white-space: nowrap; }
+.op-panel .op-btn { padding: 0 8px; height: 22px; font-size: 12px; border-radius: 3px; white-space: nowrap; }
+.op-panel .op-nbtn { height: 22px; padding: 0 6px; font-size: 11px; border-radius: 3px; white-space: nowrap; }
+.op-panel .op-range { height: 20px; min-width: 40px; }
+.op-panel .op-ext { font-size: 10px; }
+.op-panel .op-unit { font-size: 10.5px; margin-left: 0; white-space: nowrap; }
+.op-btn-quiet { background: transparent; color: var(--op-ink-dim); }
+
+/* A number that can be typed (panels/numrow.js). A draft is drawn as one. */
+.op-numbox {
+    flex: none;
+    box-sizing: border-box;
+    width: 54px;
+    height: 20px;
+    padding: 0 5px;
+    font: 12px var(--op-mono, ui-monospace, monospace);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--op-ink, var(--text));
+    background: var(--op-field, var(--bg-card));
+    border: 1px solid var(--op-rule2, var(--border));
+    border-radius: 3px;
+}
+.op-numbox-wide { width: 84px; }
+.op-numbox::placeholder { color: var(--op-ink-dim, var(--text-muted)); opacity: 0.8; font-size: 10.5px; }
+.op-numbox:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.op-numbox.is-draft { color: var(--accent); font-style: italic; }
+.op-numbox.is-clamped { animation: op-clamped 0.5s; }
+@keyframes op-clamped {
+    30% { background: color-mix(in srgb, var(--accent-amber) 16%, transparent); border-color: var(--accent-amber); }
+}
+.op-numbox:disabled { opacity: 0.45; }
+@media (prefers-reduced-motion: reduce) { .op-numbox.is-clamped { animation: none; } }
+
+/* ── the dish (the rail) ─────────────────────────────────────────────────── */
+.op-body { gap: 10px; }
+.op-embryos {
+    flex: 0 0 280px;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    /* Room for the first box's name, which sits on its top edge. */
+    padding: 8px 0 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+/* Finding and the overview frames are about the bottom camera's picture:
+   on Calibration, which has no picture, they step aside. */
+.op-body[data-pane="cal"] [data-surface="scope"] { display: none; }
+.op-rail-box { padding: 12px 4px 4px; flex: 0 0 auto; }
+/* The embryos keep the room — there are more of them, and they are selected
+   from — and the fields take what they need up to a cap, each list scrolling
+   on its own. The fields' box is as tall as its list and the cap is on the
+   list: a box that could shrink sized its list a fraction of a pixel short
+   of two wrapped lines, which was enough to raise a scrollbar, which
+   narrowed the text to three lines and hid the button under it. */
+.op-rail-embryos { flex: 1 1 auto; min-height: 96px; }
+.op-rail-fields { flex: 0 0 auto; }
+.op-rail-box .op-erail-list { padding: 0; gap: 1px; scrollbar-width: thin; }
+.op-rail-box .op-frail-list { flex: 0 0 auto; max-height: 220px; }
+.op-embryos .op-block-overview { flex: 0 0 auto; }
+.op-embryos .op-block-overview .op-field { min-height: 22px; }
+
+/* Finding, in a 280 px column: the chain on a line, a setting to a line, then
+   the verb. The module's markup is unchanged; its two groups dissolve
+   (display: contents) so their parts can be put in this order. */
+.op-embryos .op-block-marking { flex: 0 0 auto; }
+.op-embryos .op-block-marking .lp { gap: 6px; }
+.op-embryos .mk-config { gap: 5px 6px; }
+.op-embryos .mk-pipe,
+.op-embryos .mk-opts { display: contents; }
+.op-embryos .mk-opt { order: 2; flex: 1 0 100%; justify-content: space-between; min-height: 22px; }
+.op-embryos .mk-opt .mk-select { flex: 0 1 172px; min-width: 0; height: 22px; }
+.op-embryos .mk-detect { order: 3; margin-left: 0; height: 22px; padding: 0 12px; }
+.op-embryos .mk-detect::before { display: none; }
+.op-embryos .mk-opt.mk-opt-check { order: 4; flex: 1 1 auto; justify-content: flex-start; }
+.op-embryos .mk-foot { gap: 5px 8px; }
+.op-embryos .mk-note { margin: 0; }
+
+/* ── the pane: the frame's column, then the instrument ───────────────────── */
+.op-pane-scope {
+    --op-viewbar-h: 28px;    /* the camera strip above the frame */
+    --op-bar-h: 18px;        /* the caption line under it */
+    --op-display-h: 112px;   /* the display panel */
+    --op-view-gap: 6px;
+    --op-inst-min: 300px;    /* the instrument is never narrower than this */
+    --op-col-gap: 10px;
+    grid-template-columns: auto minmax(var(--op-inst-min), 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: var(--op-col-gap);
+    /* The columns scroll when they must; the pane does not. */
+    overflow: hidden;
+    container-type: size;
+    container-name: scope;
+}
+.op-view {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-view-gap);
+}
+/* The strip: which camera, its live view, its exposure. It may make the
+   column wider than a narrow frame; it is never clipped. */
+.op-viewbar {
+    flex: 0 0 var(--op-viewbar-h);
+    height: var(--op-viewbar-h);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.op-source {
+    flex: none;
+    display: inline-flex;
+    border: 1px solid var(--op-rule2);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.op-srcb {
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-left: 1px solid var(--op-rule2);
+    background: var(--op-field);
+    color: var(--op-ink-dim);
+    font: 12px var(--op-ui);
+    white-space: nowrap;
+    cursor: pointer;
+}
+.op-srcb:first-child { border-left: 0; }
+.op-srcb:hover { color: var(--op-ink); }
+.op-srcb.is-on { background: var(--accent); color: var(--op-on-accent); font-weight: 600; }
+.op-srcb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.op-viewbar .op-btn-toggle { flex: none; height: 24px; padding: 0 10px; font-size: 12px; border-radius: 4px; white-space: nowrap; }
+.op-viewbar-exp { flex: none; }
+.op-viewbar-exp .lp { flex-direction: row; }
+.op-viewbar-exp .lp-row { min-height: 0; gap: 5px; }
+.op-viewbar-exp .lp-label { flex: none; font-size: 10px; letter-spacing: 0.06em; }
+.op-viewbar-exp .lp-num {
+    flex: 0 0 54px;
+    width: 54px;
+    height: 22px;
+    box-sizing: border-box;
+    padding: 0 4px;
+    font: 12px var(--op-mono);
+    text-align: right;
+    color: var(--op-ink);
+    background: var(--op-field);
+    border: 1px solid var(--op-rule2);
+    border-radius: 3px;
+}
+.op-viewbar-exp .lp-val { min-width: 0; font-size: 10.5px; color: var(--op-ink-dim); white-space: nowrap; }
+
+.op-pane-scope .op-cam {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    height: calc(100cqh - var(--op-viewbar-h) - var(--op-bar-h) - var(--op-display-h) - 3 * var(--op-view-gap));
+    aspect-ratio: var(--cam-ar, 1 / 1);
+    /* A tall, narrow window shrinks the frame's box instead of the
+       instrument, and the frame then letterboxes inside its box. */
+    max-width: calc(100cqw - var(--op-inst-min) - var(--op-col-gap));
+}
+.op-pane-scope .op-cam-fit { border-radius: 4px; }
+/* Under the frame, at the column's width whatever they hold: neither may
+   widen the column (contain), which the frame and the strip decide. */
+.op-pane-scope .op-bar {
+    flex: 0 0 var(--op-bar-h);
+    height: var(--op-bar-h);
+    contain: inline-size;
+    flex-wrap: nowrap;
+    gap: 10px;
+    overflow: hidden;
+    white-space: nowrap;
+}
+.op-bar-says { flex: 1 1 auto; min-width: 0; display: flex; gap: 10px; overflow: hidden; }
+.op-pane-scope .op-bar .op-cap { overflow: hidden; text-overflow: ellipsis; line-height: var(--op-bar-h); }
+.op-pane-scope .op-bar .op-align-line { flex: none; }
+/* Frames a second reaching the page, and the sensor's size. */
+.op-view-meta {
+    flex: none;
+    margin-left: auto;
+    font: 11px/var(--op-bar-h) var(--op-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--op-ink-dim);
+    white-space: nowrap;
+}
+.op-pane-scope .op-block-display {
+    flex: 0 0 var(--op-display-h);
+    height: var(--op-display-h);
+    contain: inline-size;
+    padding: 8px 9px;
+}
+
+/* ── the instrument: two columns whose order never changes ───────────────── */
+.op-pane-scope .op-inst {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-flow: row wrap;
+    align-content: flex-start;
+    gap: 12px 10px;
+    min-width: 0;
+    min-height: 0;
+    /* Room for the first boxes' names, which sit on their top edges. */
+    padding: 8px 0 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: auto;
+    scrollbar-width: thin;
+}
+.op-inst-col {
+    flex: 1 1 300px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+/* The sheet's two lines. */
+.op-pane-scope .op-axis .op-label { flex: 0 0 46px; }
+#op-sheet .op-cap { margin-top: 2px; }
+
+/* ── a Z axis, lying along its panel ─────────────────────────────────────── */
+.op-gauge-h {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+.op-gauge-h .op-gauge-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 8px;
+}
+.op-gauge-h .op-gauge-read b { font-size: 16px; font-weight: 500; }
+.op-gauge-h .op-gauge-read i { font-size: 10.5px; }
+.op-gauge-floor { font-size: 10.5px; color: var(--op-ink-dim); white-space: nowrap; }
+.op-gauge.is-near-floor .op-gauge-floor,
+.op-gauge.is-near-floor .op-gauge-floor .op-num { color: var(--op-warn); }
+.op-gauge-h .op-gauge-body {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: auto;
+    /* The tick labels hang under the line. */
+    padding-bottom: 13px;
+}
+.op-gauge-h .op-gauge-track {
+    flex: 1 1 auto;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(to right,
+        color-mix(in srgb, var(--op-warn) 30%, transparent) 0%,
+        transparent 30%);
+}
+.op-gauge-h .op-gauge-mark {
+    top: -4px;
+    bottom: -4px;
+    left: 0;
+    right: auto;
+    width: 3px;
+    height: auto;
+    margin-left: -1px;
+    transition: left 0.18s ease;
+}
+.op-gauge-h .op-gauge-ticks span {
+    left: 0;
+    top: 100%;
+    transform: translateX(-50%);
+    margin: 4px 0 0;
+    font-size: 9px;
+}
+.op-gauge-h .op-gauge-ticks span::before {
+    right: auto;
+    left: 50%;
+    top: auto;
+    bottom: 100%;
+    width: 1px;
+    height: 4px;
+    margin-bottom: 1px;
+}
+.op-gauge-end { flex: none; font-size: 9.5px; font-weight: 400; color: var(--op-ink-dim); }
+.op-gauge-steps { display: flex; align-items: center; gap: 6px; }
+.op-gauge-steps .op-gauge-nudge { flex: 1 1 auto; }
+.op-gauge-h .op-gauge-nudge { gap: 3px; }
+.op-gauge-go { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-height: 22px; }
+.op-gauge-go .op-label { flex: 0 0 46px; }
+.op-gauge-h .op-gauge-verbs { order: 0; flex: 0 0 auto; margin-left: auto; display: inline-flex; gap: 4px; }
+.op-gauge-h .op-btn-raise { margin-right: 0; }
+.op-gauge-h .op-gauge-foot { min-height: 12px; font-size: 10.5px; }
+
+/* The bottom objective's focus: a gauge on one line inside the Stage panel. */
+.op-gauge-sub {
+    border: 0;
+    border-top: 1px dashed var(--op-rule);
+    border-radius: 0;
+    background: none;
+    padding: 6px 0 0;
+    margin-top: 2px;
+    gap: 0;
+}
+.op-gauge-sub .op-gauge-head { align-items: center; gap: 6px; }
+.op-gauge-sub .op-gauge-name { flex: 0 0 46px; }
+.op-gauge-sub .op-gauge-read { flex: none; }
+.op-gauge-sub .op-gauge-read b { font-size: 13px; }
+.op-gauge-sub .op-gauge-body { flex: 1 1 auto; min-width: 60px; padding-bottom: 0; }
+.op-gauge-sub .op-gauge-nudge { flex: none; }
+.op-gauge-sub .op-gauge-foot:empty { display: none; }
+
+/* What "centre" means, one quiet line. */
+.op-centre { border-top: 1px dashed var(--op-rule); padding-top: 6px; margin-top: 2px; }
+.op-centre .op-cap { flex: 1 1 auto; white-space: nowrap; }
+.op-centre-verbs { display: inline-flex; gap: 4px; margin-left: auto; }
+#op-stage-panel .al-history { margin-top: 2px; }
+
+/* ── a small window: one column, and the page scrolls ────────────────────────
+   Below about 1060 px of room there is no place for three zones side by
+   side. The frame comes first at the width there is, then the instrument (as
+   many columns as fit), then the dish. Nothing is squeezed and nothing hides:
+   the workspace scrolls, and its scrollbar says so. */
+@container operate (max-width: 1060px) {
+    .op-body { flex-direction: column; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+    .op-panearea { order: 1; flex: 0 0 auto; }
+    .op-embryos { order: 2; flex: 0 0 auto; overflow: visible; }
+    .op-rail-embryos { min-height: 150px; max-height: 320px; }
+    .op-pane-scope {
+        display: flex;
+        flex-direction: column;
+        flex: 0 0 auto;
+        overflow: visible;
+        container-type: inline-size;
+    }
+    .op-viewbar { height: auto; flex: 0 0 auto; flex-wrap: wrap; row-gap: 4px; }
+    .op-pane-scope .op-cam { height: auto; width: min(100%, calc(100vh - 150px)); max-width: none; }
+    .op-pane-scope .op-bar,
+    .op-pane-scope .op-block-display { width: min(100%, calc(100vh - 150px)); }
+    .op-pane-scope .op-bar { height: auto; flex: 0 0 auto; white-space: normal; }
+    .op-pane-scope .op-inst { flex: 0 0 auto; overflow: visible; }
+}

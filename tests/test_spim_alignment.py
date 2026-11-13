@@ -212,29 +212,30 @@ def test_centring_in_the_pane_goes_through_it() -> None:
 
 
 def test_the_control_lives_where_centring_does() -> None:
-    """On the bottom camera, behind Advanced.
+    """In the Stage panel, once.
 
-    The offset governs what "centre on this embryo" means on THIS pane, so the
-    control belongs beside it rather than on the SPIM head. Behind a
-    disclosure because it is an instrument fact that changes when someone
-    re-seats the head — rarely, and never by accident.
+    The offset governs what "centre on this embryo" means, and centring is an
+    XY move, so the control sits with the stage. It was on the bottom camera's
+    pane behind an Advanced disclosure, with a rule that no second copy went
+    on the SPIM head; the two cameras share one workspace now and the Stage
+    panel is beside both. A quiet row, because it is an instrument fact that
+    changes when someone re-seats the head — rarely, and never by accident.
     """
     html = (GENTLY / "ui" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
-    bottom = html[html.index('id="op-pane-bottom"') : html.index('id="op-pane-spim"')]
-    assert 'id="op-align-set"' in bottom, "the SPIM-centre control left the bottom camera pane"
-    assert 'id="op-adv"' in bottom, "it is no longer behind the Advanced disclosure"
-
-    spim = html[html.index('id="op-pane-spim"') :]
-    assert 'id="op-align-set"' not in spim, "a second copy of the control is on the SPIM pane"
+    assert html.count('id="op-align-set"') == 1, "there is more than one SPIM-centre control"
+    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-cal"')]
+    stage = scope[scope.index('id="op-stage-panel"') :]
+    assert 'id="op-align-set"' in stage, "the SPIM-centre control left the Stage panel"
+    assert 'id="op-align-value"' in stage and 'id="op-align-history"' in stage
 
 
 def test_the_offset_in_effect_is_never_hidden_behind_the_disclosure() -> None:
     """A correction nobody can see is how people chase ghosts."""
     html = (GENTLY / "ui" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
-    bottom = html[html.index('id="op-pane-bottom"') : html.index('id="op-pane-spim"')]
-    line_at = bottom.index('id="op-align-line"')
-    adv_at = bottom.index('id="op-adv"')
-    assert line_at < adv_at, (
-        "the always-visible offset line moved inside the Advanced block, so an "
+    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-cal"')]
+    view = scope[scope.index('class="op-view"') : scope.index('<aside class="op-inst"')]
+    assert 'id="op-align-line"' in view, (
+        "the always-visible offset line left the frame's caption, so an "
         "operator could be running a correction they cannot see"
     )
+    assert "data-disclose" not in scope, "something on Scope folds, and could fold this away"

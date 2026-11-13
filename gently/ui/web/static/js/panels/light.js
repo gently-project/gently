@@ -1,21 +1,15 @@
 /**
  * Light — the standard control panel for illumination.
  *
- * LED, beam, routed lines and per-line power. Exposure is a camera
- * property, not a light one, and lives in panels/camera.js — the bottom
- * camera needs it without needing any of this.
+ * The LED, the laser's routed lines and each line's power, the beam on each
+ * side, and one line that says what is emitting. Exposure is a camera
+ * property, not a light one, and lives in panels/camera.js.
  *
  * The first panel built to docs/architecture/PANELS.md. Mount it anywhere that
  * needs light control; every mount shows the same state because the state
  * lives in SharedState, not in the panel.
  *
  *     LightPanel.mount('op-light-host');
- *     LightPanel.mount('op-led-host', { only: 'led' });
- *
- * `only: 'led'` draws the LED's state and brightness and nothing of the laser —
- * for the bottom camera, which is lit by the LED and has no use for lines or
- * a beam. Same panel, same state: it is a narrower window, not a second
- * control.
  *
  * WHY THIS EXISTS
  *
@@ -42,18 +36,35 @@
  * Any of the three can be wrong on its own, so the panel shows all three and
  * computes "emitting" from them rather than believing a flag.
  *
- * MODE IS THE ROOT
+ * THE SHAPE IT HAS NOW (2026-11-13)
  *
- * Above those three sits one question: LED or laser. They are not settings that
- * happen to be adjacent — they are the two ways this instrument illuminates a
- * sample, and the workflow alternates between them (LED to find embryos, laser
- * to calibrate and acquire). So the panel opens with a mode, and each mode's
- * own controls are disclosed beneath it.
+ * Every control has one place and is always there:
  *
- * Nothing in the hardware enforces the choice: they are two independent
- * Micro-Manager config groups and both can be open at once. `mode()` therefore
- * reports `both` rather than the panel making it unrepresentable — see #106,
- * which is that exact state going unnoticed.
+ *   LED     Closed | Open, and its brightness
+ *   Laser   the presets of the Laser config group, as buttons
+ *   lines   one row per line the rig has: its power, set by dragging or by
+ *           typing, routed or not
+ *   Beam    A | B, each side its own switch
+ *   status  one line, always present: dark, what is emitting, or what stands
+ *           in the way of it
+ *
+ * Until then the panel opened with a mode (LED | Laser | Off) and disclosed
+ * that mode's controls beneath it. That kept a dark panel short, and it cost
+ * three things on the rig: the controls moved as the mode changed, so nothing
+ * could be found by place; a line's power could not be seen or set until the
+ * line was routed, which is the moment it starts to matter; and the facts
+ * about emission arrived as separate notes that came and went. "Need to
+ * redesign the light panel", and "the adjustable parameters like laser power
+ * can also have a way to enter numbers into a text box".
+ *
+ * ONE SOURCE AT A TIME IS A POLICY
+ *
+ * LED and Laser are two independent Micro-Manager config groups; nothing in
+ * the hardware stops both being open, and #106 is that state going unnoticed.
+ * The panel's own presses keep to one: opening the LED gates the lasers
+ * first, and routing a line closes the LED first. What the rig is actually in
+ * is read back and said, both open included — `mode()` reports `both` rather
+ * than the panel making it unrepresentable.
  *
  * Everything rendered here is read back from hardware. A value that was sent is
  * not a value that is true; a value not yet read is an em dash, never a
@@ -62,7 +73,11 @@
 const LightPanel = (() => {
     'use strict';
 
-    const hosts = new Map();   // hostId -> { only }
+    const hosts = new Set();
+    // The slider-and-number rows of each mount, so a read-back does not redraw
+    // the panel under a drag or a half-typed number (panels/numrow.js).
+    const rows = new Map();          // hostId -> [NumRow binding]
+    const waiting = new Set();       // hostIds whose redraw is held for an edit
 
     // Bounds and preset names come from the server (PANELS.md rule 4). 488 is
     // limited to 2-6%, so a control hardcoded 0-100 would offer settings the
@@ -70,20 +85,18 @@ const LightPanel = (() => {
     let limits = null;
     let configs = [];
 
-    // RIG-NOTE: the device layer already logs "Property read slow: 2.4s" every
-    // 15s on this scope, so polling here is deliberately gentle and only runs
-    // while a panel is on screen. Raise it if the readout feels stale, but
-    // watch the device-layer log before you do.
+    // RIG-NOTE: polling here is deliberately gentle and only runs while a
+    // panel is on screen. Raise it if the readout feels stale, but watch the
+    // device-layer log before you do.
     const POLL_MS = 10000;
     let timer = null;
 
-    // Which branch is disclosed. UI scope, not device state: the operator can
-    // open the laser branch on a dark rig in order to configure it. The mode
-    // READOUT is always derived from hardware — this only decides what is on
-    // screen, and the derived mode wins whenever it is unambiguous.
-    let branch = null;
-
     const state = () => SharedState.get('light') || {};
+
+    /** Every line the rig has, in order. */
+    const knownLines = () => (limits
+        ? Object.keys(limits).map(Number).sort((a, b) => a - b)
+        : [405, 488, 561, 637]);
 
     /* ── reading ─────────────────────────────────────────────────────────── */
 
@@ -93,28 +106,6 @@ const LightPanel = (() => {
         ledPct: d && d.intensity_pct != null ? Number(d.intensity_pct) : null,
         ledLim: (d && d.intensity_limits_pct) || null,
     });
-
-    /**
-     * Just the LED, for when that is all anyone is looking at.
-     *
-     * The bottom camera's card shows no beam, config or power, and reading them
-     * every poll to show none of them is traffic this device layer cannot
-     * spare. Stamped `ledReadAt`, not `readAt`: the full panel's age must not
-     * be refreshed by a read that skipped everything else it displays.
-     */
-    async function readLed() {
-        let d = null;
-        try {
-            const r = await fetch('/api/devices/led/status');
-            if (r.ok) d = await r.json();
-        } catch (_) { /* unread is an em dash */ }
-        // Merged into the state as it is NOW: a full read may have landed while
-        // this one was in flight, and its beam and config must survive.
-        SharedState.set('light', { ...state(), ...ledOf(d), ledReadAt: Date.now() });
-    }
-
-    /** Read what the asking surface shows, and no more. */
-    const read = scope => (scope === 'led' ? readLed() : readAll());
 
     async function readAll() {
         const next = { ...state() };
@@ -144,9 +135,12 @@ const LightPanel = (() => {
                 d => (d && d.current && d.current !== 'unknown') ? d.current : null),
         ]);
 
-        // Power is per wavelength, and only the routed lines are interesting.
+        // Power is per line, and every line's is read: a line's power is set
+        // before the line is routed, so it is shown before then too. One
+        // after another, not all at once: four small reads every ten seconds
+        // is nothing, four at the same instant is a queue.
         next.power = {};
-        for (const wl of wavelengthsOf(next.config)) {
+        for (const wl of knownLines()) {
             try {
                 const r = await fetch(`/api/devices/laser/power?wavelength=${wl}`);
                 const d = r.ok ? await r.json() : null;
@@ -158,13 +152,23 @@ const LightPanel = (() => {
         SharedState.set('light', next);
     }
 
-    /** Wavelengths named by a config, e.g. "488 and 561" → [488, 561]. */
+    /**
+     * Wavelengths a config may route, e.g. "488 and 561" → [488, 561].
+     *
+     * The safe answer when it cannot be told: an unread config, or a preset
+     * whose name carries no wavelength and is not an "off", may route any
+     * line, and a line that may be routed is not a line that is dark. "ALL
+     * ON" is such a name. It used to come out as nothing routed, because the
+     * rule was "no digits, no lines", which made all four lines on, armed and
+     * powered read as not emitting.
+     */
     function wavelengthsOf(config) {
-        const known = limits ? Object.keys(limits).map(Number) : [405, 488, 561, 637];
+        const known = knownLines();
         if (!config) return known;
-        const found = String(config).match(/\d{3}/g);
-        if (!found) return [];                       // e.g. "ALL OFF" — nothing routed
-        return found.map(Number).filter(w => known.includes(w));
+        const name = String(config);
+        const found = name.match(/\d{3}/g);
+        if (found) return found.map(Number).filter(w => known.includes(w));
+        return /\boff\b/i.test(name) ? [] : known;   // "ALL OFF" gates every line
     }
 
     /**
@@ -197,8 +201,8 @@ const LightPanel = (() => {
      * DIC-like image.
      *
      * So `both` is a state this returns, not a state the panel makes
-     * unreachable. A mode selector that could not express the fault would hide
-     * the only bug it was built for.
+     * unreachable. A panel that could not express the fault would hide the
+     * only bug it was built for.
      */
     function mode(s) {
         const ledOn = s.led == null ? null : s.led === 'Open';
@@ -208,6 +212,127 @@ const LightPanel = (() => {
         if (ledOn) return 'led';
         if (routed) return 'laser';
         return 'off';
+    }
+
+    /**
+     * The lines this config actually routes, for DISPLAY.
+     *
+     * Deliberately not `wavelengthsOf`, which answers "which lines could be
+     * involved" and returns all of them for an unknown config — correct for
+     * `emitting()`, because an unread config with unread power must come out
+     * unknown rather than safe. A row is drawn as routed only when it is
+     * KNOWN to be.
+     */
+    function routedLines(s) {
+        return s.config ? wavelengthsOf(s.config) : [];
+    }
+
+    /**
+     * The panel's one line: what is emitting, or what stands in the way.
+     *
+     * Always present, and the same line every time, so "is anything on" is
+     * answered by looking at one place. The states used to be separate notes
+     * (an EMITTING bar, a both-open warning, a routed-but-beam-off warning,
+     * an armed-but-nothing-routed note) that appeared and went, and two of
+     * them lived inside a branch that could be closed. Hiding the detail
+     * must never hide the fact.
+     *
+     * In order of what matters: emitting; not known; both sources open;
+     * routed but will not emit; armed with nothing routed (safe, surprising,
+     * and the state the rig is left in); the LED alone; dark.
+     */
+    function status(s) {
+        const em = emitting(s);
+        const lines = routedLines(s);
+        const sides = s.beam
+            ? Object.keys(s.beam).filter(k => s.beam[k] === true).map(k => k.toUpperCase())
+            : [];
+        const ledOpen = s.led === 'Open';
+        const ledSays = `LED open${s.ledPct != null ? ` at ${s.ledPct} %` : ''}`;
+
+        if (em === true) {
+            const lit = lines.filter(w => (s.power || {})[w] > 0);
+            return {
+                kind: 'emit',
+                text: `EMITTING · ${lit.join(' + ')} nm · side ${sides.join(' + ')}${ledOpen ? ' · LED open too' : ''}`,
+                title: 'A beam is armed, a line is routed and its power is above zero. All three are read from the hardware.',
+            };
+        }
+        if (em === null || mode(s) === null) {
+            return {
+                kind: 'unknown',
+                text: 'Emission state unknown',
+                title: 'Not everything in the light path could be read. Unread is not the same as dark.',
+            };
+        }
+        if (lines.length && ledOpen) {
+            return {
+                kind: 'warn',
+                text: `LED open and ${lines.join(', ')} nm routed — choose one`,
+                title: 'Both sources are open: fluorescence would sit on top of brightfield. Close the LED, or choose Off.',
+            };
+        }
+        if (lines.length && !sides.length) {
+            return {
+                kind: 'warn',
+                text: 'Lines routed, beam off — will not emit',
+                title: 'Every volume acquisition leaves BeamEnabled at No. Arm the beam on the side in view.',
+            };
+        }
+        if (lines.length) {
+            return {
+                kind: 'warn',
+                text: 'Lines routed at 0 % — nothing emits',
+                title: 'The beam is armed and lines are routed, but every routed line is at zero power.',
+            };
+        }
+        if (sides.length) {
+            return {
+                kind: ledOpen ? 'led' : 'note',
+                text: `${ledOpen ? `${ledSays} · beam` : 'Beam'} armed, nothing routed — nothing emits`,
+                title: 'Safe, and the state the rig is left in: the beam is armed, and the Laser preset routes no line.',
+            };
+        }
+        if (ledOpen) return { kind: 'led', text: ledSays, title: 'Brightfield: the LED is the only source open.' };
+        return { kind: 'dark', text: 'Dark — nothing emits', title: 'The LED is closed, no line is routed and no beam is armed.' };
+    }
+
+    /* ── the presets, as buttons ─────────────────────────────────────────── */
+
+    /** What a preset is called on its button: "488 and 561" → "488+561". */
+    function presetLabel(config) {
+        const name = String(config);
+        const lines = name.match(/\d{3}/g);
+        if (lines) return lines.join('+');
+        if (/\boff\b/i.test(name)) return 'Off';
+        if (/\ball\b/i.test(name)) return 'All';
+        return name.trim();
+    }
+
+    /** Off first, then one line, two lines, …, and "all" (or a name unread) last. */
+    function presetRank(config) {
+        const name = String(config);
+        const lines = name.match(/\d{3}/g);
+        if (lines) return [lines.length, Number(lines[0])];
+        return /\boff\b/i.test(name) ? [0, 0] : [99, 0];
+    }
+
+    /**
+     * The preset list, always including whatever is actually set.
+     *
+     * The list comes from `/api/devices/laser/configs`, which 503s with the
+     * device layer down. The read-back config is a fact whether or not the
+     * catalogue of presets is available, and a row of buttons with none of
+     * them lit, over lines drawn as routed, would be the panel contradicting
+     * itself.
+     */
+    function presetList(current) {
+        const list = configs.slice();
+        if (current && !list.includes(current)) list.push(current);
+        return list.sort((a, b) => {
+            const [a0, a1] = presetRank(a), [b0, b1] = presetRank(b);
+            return a0 - b0 || a1 - b1 || String(a).localeCompare(String(b));
+        });
     }
 
     /* ── writing ─────────────────────────────────────────────────────────── */
@@ -232,251 +357,165 @@ const LightPanel = (() => {
 
     // Always re-read after a write. The response is not evidence: that is the
     // assumption that produced #106.
-    async function act(fn, scope) {
+    async function act(fn) {
         try { await fn(); } catch (_) { /* toasted in send() */ }
-        await read(scope);
+        await readAll();
     }
 
     /**
-     * Switch modes. Closing the OTHER source is the point — that is what makes
-     * this a mode selector rather than two switches side by side.
-     *
-     * Entering laser mode deliberately does NOT route a line. Picking a
-     * wavelength is an emission decision and stays an explicit act; all this
-     * does is close the LED and open the branch. `ALL OFF` gates outputs 5-8 at
-     * the PLogic, which is the documented brightfield-safe state (spec §2.7),
-     * so it is what "off" and "led" both assert.
+     * The LED's switch. Opening the LED is entering brightfield, so the
+     * lasers are gated first — unconditionally, not only when a line is
+     * known to be routed: what the laser is doing may be unread, and unknown
+     * is not safe (#106). `ALL OFF` gates outputs 5-8 at the PLogic, the
+     * documented brightfield-safe state (spec §2.7), and costs nothing when
+     * it already holds. Closing touches only the LED.
      *
      * BeamEnabled is left alone throughout. Setting it No here would recreate
      * the #106 state that nothing sets back.
-     */
-    async function enter(to) {
-        const s = state();
-        const routed = routedLines(s).length > 0;
-        if (to === 'led' || to === 'off') {
-            if (routed) await send('/api/devices/laser/config', { config: 'ALL OFF' });
-        }
-        await send('/api/devices/led/set', { state: to === 'led' ? 'Open' : 'Closed' });
-    }
-
-    /**
-     * The LED card's switch. Opening the LED is entering brightfield, so the
-     * lasers are gated first — unconditionally, not only when a line is
-     * known to be routed: this card reads only the LED, so what the laser is
-     * doing is unknown here, and unknown is not safe (#106). `ALL OFF` is
-     * the documented brightfield-safe state (spec §2.7) and costs nothing
-     * when it already holds. Closing touches only the LED.
      */
     async function ledSwitch(open) {
         if (open) await send('/api/devices/laser/config', { config: 'ALL OFF' });
         await send('/api/devices/led/set', { state: open ? 'Open' : 'Closed' });
     }
 
+    /**
+     * Route a preset of the Laser config group. A preset that routes a line
+     * closes the LED first, unless the LED is read as closed already: a line
+     * over an open LED is fluorescence on top of brightfield, and an LED not
+     * read is not an LED known to be closed. A preset that routes nothing
+     * ("ALL OFF") touches only the laser. BeamEnabled is left alone: choosing
+     * a line is not arming the beam, and the status line says so.
+     */
+    async function route(config) {
+        if (wavelengthsOf(config).length && state().led !== 'Closed') {
+            await send('/api/devices/led/set', { state: 'Closed' });
+        }
+        await send('/api/devices/laser/config', { config });
+    }
+
     /* ── rendering ───────────────────────────────────────────────────────── */
 
-    const dash = v => (v == null ? '—' : v);
-
-    function render() {
-        const s = state();
-        const em = emitting(s);
-        hosts.forEach((opts, host) => {
-            const el = document.getElementById(host);
-            if (!el) return;
-            el.innerHTML = opts.only === 'led' ? ledCard(s, opts.titled) : markup(s, em);
-            wire(el, opts.only === 'led' ? 'led' : undefined);
-        });
-    }
-
-    /**
-     * The lines this config actually routes, for DISPLAY.
-     *
-     * Deliberately not `wavelengthsOf`, which answers "which lines could be
-     * involved" and returns all of them for an unknown config — correct for
-     * `emitting()`, because an unread config with unread power must come out
-     * unknown rather than safe. But rendering four disabled sliders reading an
-     * em dash is maximum clutter for zero information, so the panel asks a
-     * narrower question: which lines do we KNOW are routed.
-     */
-    /**
-     * The preset list, always including whatever is actually set.
-     *
-     * The list comes from `/api/devices/laser/configs`, which 503s with the
-     * device layer down — so the select would read an em dash while the detail
-     * below it showed routed lines and live power sliders. The read-back config
-     * is a fact whether or not the catalogue of presets is available, and the
-     * two halves of the panel must not contradict each other.
-     */
-    function configOptions(current) {
-        const opts = configs.slice();
-        if (current && !opts.includes(current)) opts.unshift(current);
-        if (!opts.length) return '<option>—</option>';
-        return opts.map(c =>
-            `<option value="${c}" ${c === current ? 'selected' : ''}>${c}</option>`).join('');
-    }
-
-    function routedLines(s) {
-        return s.config ? wavelengthsOf(s.config) : [];
-    }
-
-    /** The three modes, plus the fault, as a segmented control. */
-    function modeRow(m, show) {
-        const label = { led: 'LED', laser: 'Laser', off: 'Off' };
-        const btns = ['led', 'laser', 'off'].map(k => {
-            const on = m === k || (m === 'both' && k !== 'off');
-            const open = show === k;
-            return `<button class="lp-mbtn ${on ? 'is-on' : ''} ${open ? 'is-open' : ''}"
-                            data-mode="${k}" aria-pressed="${on}">${label[k]}</button>`;
-        }).join('');
-        // No text readout: the buttons ARE the readout, filled when the device
-        // says that source is open. A word beside them had nowhere to go in a
-        // 246 px panel and got clipped, and the two states words would have
-        // added — both open, and nothing read — each say so on their own line.
-        return `
-          <div class="lp-row lp-mode">
-            <span class="lp-label">Mode</span>
-            <span class="lp-seg">${btns}</span>
-          </div>
-          ${m == null ? '<p class="lp-note">Nothing read from the light path yet.</p>' : ''}`;
-    }
+    const esc = t => String(t).replace(/[&<>"]/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
     const ageOf = t => (t ? `${Math.round((Date.now() - t) / 1000)}s ago` : 'never');
 
-    /**
-     * The LED on its own, for a surface the laser has no part in.
-     *
-     * No mode selector: this card cannot see the laser, so it must not offer
-     * to choose between the two. It reports the LED and sets its brightness.
-     */
-    function ledCard(s, titled) {
-        // The switch says what pressing it does, and what it does follows
-        // from the read-back state: an unread LED is offered "Open", since
-        // the one thing the operator cannot do with it is see.
-        const open = s.led === 'Open';
-        // Untitled when the card it sits in already says "LED" (the Bottom
-        // cam rail's folding card); the age stays, it is the read-back's.
-        return `
-          <div class="lp">
-            <div class="lp-head">
-              ${titled === false ? '<span></span>' : '<span class="lp-title">LED</span>'}
-              <span class="lp-age" title="Values are read from the hardware, not remembered">read ${ageOf(s.ledReadAt)}</span>
-            </div>
-            <div class="lp-row">
-              <button class="lp-btn ${open ? 'is-armed' : ''}" data-led-switch="${open ? 'Closed' : 'Open'}"
-                      aria-pressed="${open}" title="${open ? 'Close the LED shutter' : 'Gate the lasers off and open the LED'}">
-                ${open ? 'Close LED' : 'Open LED'}</button>
-            </div>
-            ${ledRows(s)}
-          </div>`;
+    function render() {
+        const s = state();
+        hosts.forEach(host => {
+            const el = document.getElementById(host);
+            if (!el) return;
+            // A drag in progress, or a number half typed, is the operator's.
+            // The read-back waits for it and is drawn when it is done.
+            if ((rows.get(host) || []).some(r => r.editing())) { waiting.add(host); return; }
+            waiting.delete(host);
+            // Whatever had the keyboard keeps it across the redraw, by name.
+            const at = el.contains(document.activeElement) ? document.activeElement.dataset.k : null;
+            el.innerHTML = markup(s);
+            wire(el, host);
+            if (at) {
+                const again = el.querySelector(`[data-k="${at}"]`);
+                if (again && !again.disabled) {
+                    again.focus({ preventScroll: true });
+                    if (again.select) again.select();
+                }
+            }
+        });
     }
 
-    function markup(s, em) {
-        const armed = s.beam ? Object.values(s.beam).some(v => v === true) : null;
-        const age = ageOf(s.readAt);
-        const lines = routedLines(s);
-        const m = mode(s);
-        // The fault outranks the cursor: if both sources are open, the laser
-        // branch is shown whatever the operator last clicked, because that is
-        // where the contradiction can be resolved.
-        const show = m === 'both' ? 'laser' : (branch || m);
-
+    function markup(s) {
+        const st = status(s);
         return `
-          <div class="lp">
+          <div class="lp lp-light">
             <div class="lp-head">
               <span class="lp-title">Light</span>
-              <span class="lp-age" title="Values are read from the hardware, not remembered">read ${age}</span>
+              <span class="lp-age" title="Values are read from the hardware, not remembered">read ${ageOf(s.readAt)}</span>
             </div>
-
-            ${modeRow(m, show)}
-            ${m === 'both' ? bothWarn(s) : ''}
-            ${idleBeamNote(s, armed, lines)}
-
-            ${show === 'led' ? ledDetail(s) : ''}
-            ${show === 'laser' ? laserBranch(s, armed, lines) : ''}
-
-            ${em === true
-                ? `<div class="lp-emit" role="status">EMITTING · ${s.config || 'lines unknown'}</div>`
-                : em === null
-                    ? '<div class="lp-emit lp-emit-unknown" role="status">Emission state unknown</div>'
-                    : ''}
+            ${ledRow(s)}
+            ${presetRow(s)}
+            <div class="lp-lines">${lineRows(s)}</div>
+            ${beamRow(s)}
+            <div class="lp-stat is-${st.kind}" role="status" title="${esc(st.title || '')}">${esc(st.text)}</div>
           </div>`;
     }
 
     /**
-     * LED mode: the shutter's state, and its brightness.
+     * The LED: its shutter, and its brightness.
      *
      * The brightness is the ASI Tiger adapter's own `LED Intensity(%)`
      * property. The adapter only sends it to the controller while the LED is
-     * open, so on a closed LED the slider sets what the next open will use —
-     * which the note says, because a slider that moves with no change in the
-     * image otherwise reads as broken.
+     * open, so on a closed LED the number is what the next open will use —
+     * which the unit says ("% when open"), because a slider that moves with
+     * no change in the image otherwise reads as broken.
      */
-    function ledDetail(s) {
-        return `
-          <div class="lp-sub">
-            ${ledRows(s)}
-            <p class="lp-note">Brightfield. Good for finding embryos; nuclei are
-               not visible, so calibration and acquisition need the laser.</p>
-          </div>`;
-    }
-
-    /** State and brightness — the rows every LED mount shares. */
-    function ledRows(s) {
+    function ledRow(s) {
         const lim = s.ledLim || { min: 1, max: 100 };
         const val = s.ledPct;
+        const seg = ['Closed', 'Open'].map(v => {
+            const on = s.led === v;
+            const look = on ? (v === 'Open' ? 'is-on' : 'is-rest') : '';
+            const tip = v === 'Open' ? 'Gate the lasers off and open the LED' : 'Close the LED shutter';
+            return `<button class="lp-mbtn ${look}" type="button" data-led-switch="${v}" data-k="led-${v}"
+                            aria-pressed="${on}" title="${tip}">${v}</button>`;
+        }).join('');
         return `
-            <div class="lp-row">
-              <span class="lp-label">State</span>
-              <span class="lp-val">${dash(s.led)}</span>
-            </div>
-            <div class="lp-row">
-              <span class="lp-label" title="LED Intensity(%) on the ASI Tiger LED — the Micro-Manager property name">Intensity</span>
+            <div class="lp-row lp-led">
+              <span class="lp-label" title="The transmitted-light LED: brightfield. Its state and LED Intensity(%) are the ASI Tiger's own.">LED</span>
+              <span class="lp-seg" role="group" aria-label="LED shutter">${seg}</span>
               <input class="lp-range" type="range" data-led-pct
                      min="${lim.min}" max="${lim.max}" step="1"
                      value="${val == null ? lim.min : val}"
                      ${val == null ? 'disabled' : ''}
                      title="${lim.min}–${lim.max} %"
                      aria-label="LED intensity percent">
-              <span class="lp-val">${val == null ? '—' : val} %</span>
-            </div>
-            ${s.led === 'Closed' && val != null
-                ? '<p class="lp-note">The LED is closed — this is the brightness it will open at.</p>'
-                : ''}`;
+              <input class="op-numbox lp-numbox" type="text" inputmode="numeric" autocomplete="off"
+                     data-led-num data-k="led-pct" data-decimals="0"
+                     value="${val == null ? '—' : val}"
+                     ${val == null ? 'disabled' : ''}
+                     aria-label="LED intensity percent, typed">
+              <span class="lp-unit" ${s.led === 'Closed' && val != null ? 'title="The LED is closed — this is the brightness it will open at."' : ''}
+                >${s.led === 'Closed' && val != null ? '% when open' : '%'}</span>
+            </div>`;
     }
 
-    /** The config select, then the laser's own settings once a line is routed. */
+    /**
+     * Routing: the Laser config group's presets, one button each (the PLogic
+     * offers those combinations and no others). The one the device reports is
+     * the one lit; a press is a request, and what is lit after it is what the
+     * device then says.
+     */
+    function presetRow(s) {
+        const list = presetList(s.config);
+        const chips = list.map(c => {
+            const on = c === s.config;
+            const routes = wavelengthsOf(c).length > 0;
+            const look = on ? (routes ? 'is-on' : 'is-rest') : '';
+            return `<button class="lp-mbtn lp-chip ${look}" type="button" data-config="${esc(c)}" data-k="cfg-${esc(c)}"
+                            aria-pressed="${on}" title="Laser preset “${esc(String(c).trim())}”${routes ? ' — closes the LED first' : ''}">${esc(presetLabel(c))}</button>`;
+        }).join('');
+        return `
+            <div class="lp-row lp-presets">
+              <span class="lp-label" title="Which lines the PLogic routes to the sheet — a preset of the Laser config group">Laser</span>
+              ${list.length
+                ? `<span class="lp-seg lp-chips" role="group" aria-label="Laser lines routed">${chips}</span>`
+                : '<span class="lp-val">—</span>'}
+            </div>`;
+    }
+
     const LINE_COLOUR = { 405: '#8b5cf6', 488: '#38bdf8', 561: '#a3e635', 637: '#ef4444' };
 
     /**
      * The laser as its lines: every line the rig has, one row each — a swatch
      * in the line's colour that glows while that line is emitting, the
-     * wavelength, its power. Routing is still the Micro-Manager preset (the
-     * PLogic offers those combinations and no others), chosen above the rows;
-     * a row says what the preset did to its line, and a line not routed is
-     * dimmed with its slider off. The beam is per side, A and B, each the
-     * state the scanner card reports, since the live view keeps the beam on
-     * the side it shows.
+     * wavelength, its power as a line to drag and a number to type. A line
+     * the preset does not route is drawn quieter, and its power can still be
+     * set: that is when it should be. The limits are each line's own, from
+     * the server.
      */
-    function laserBranch(s, armed, lines) {
-        return `
-          <div class="lp-sub">
-            <div class="lp-row">
-              <span class="lp-label" title="Which lines the PLogic routes to the sheet — a preset of the Laser config group">Routed</span>
-              <select class="lp-select" data-config aria-label="Laser lines routed">
-                ${configOptions(s.config)}
-              </select>
-            </div>
-            ${s.config != null ? laserDetail(s, armed, lines) : ''}
-          </div>`;
-    }
-
-    /**
-     * The lines and the beam, once the routing is known. An unknown config
-     * is not "nothing routed": with it unread, every row would dim as if the
-     * rig were dark, so the detail waits for the read.
-     */
-    function laserDetail(s, armed, lines) {
-        const known = limits ? Object.keys(limits).map(Number) : [405, 488, 561, 637];
-        const rows = known.map(wl => {
+    function lineRows(s) {
+        const lines = routedLines(s);
+        const armed = s.beam ? Object.values(s.beam).some(v => v === true) : null;
+        return knownLines().map(wl => {
             const routed = lines.includes(wl);
             const lim = (limits && limits[wl]) || { min: 0, max: 100 };
             const val = (s.power || {})[wl];
@@ -491,94 +530,79 @@ const LightPanel = (() => {
                        value="${val == null ? lim.min : val}"
                        ${val == null ? 'disabled' : ''}
                        aria-label="${wl} nm power percent">
-                <span class="lp-val">${val == null ? '—' : Number(val).toFixed(1)} %</span>
-                <span class="lp-lim">${lim.min}–${lim.max}</span>
+                <input class="op-numbox lp-numbox" type="text" inputmode="decimal" autocomplete="off"
+                       data-power-num="${wl}" data-k="p${wl}" data-decimals="1"
+                       value="${val == null ? '—' : Number(val).toFixed(1)}"
+                       ${val == null ? 'disabled' : ''}
+                       aria-label="${wl} nm power percent, typed">
+                <span class="lp-unit">%</span>
+                <span class="lp-lim" title="The limits ${wl} nm is held to on this rig">${lim.min}–${lim.max}</span>
               </div>`;
         }).join('');
-        const contradicts = lines.length && armed === false;
-        return `
-            <div class="lp-lines">${rows}</div>
-            <div class="lp-row lp-beam">
-              <span class="lp-label" title="BeamEnabled on each side's scanner card: the mirror unparked, so a routed line reaches the sample from that arm. The live view keeps the beam on the side it shows.">Beam</span>
-              ${beamSides(s.beam)}
-              ${armed ? '<button class="lp-btn is-armed" data-beam="off" title="Disarm both sides">Off</button>' : ''}
-            </div>
-            ${contradicts
-                ? `<p class="lp-warn">Lines are routed but the beam is off — this
-                   configuration will not emit. Every volume acquisition leaves
-                   BeamEnabled at No.</p>`
-                : ''}`;
     }
 
-    /** One toggle per side, each the state the hardware reports, never remembered. */
-    function beamSides(beam) {
+    /** One switch per side, each the state the hardware reports, never remembered. */
+    function beamRow(s) {
+        const beam = s.beam;
         const sides = beam && Object.keys(beam).length ? Object.keys(beam) : ['a', 'b'];
         const btns = sides.map(k => {
             const v = beam ? beam[k] : null;
             const on = v === true;
-            return `<button class="lp-mbtn ${on ? 'is-on' : ''}" data-beam-side="${k}" data-beam-on="${on}"
+            return `<button class="lp-mbtn ${on ? 'is-on' : ''}" type="button" data-beam-side="${k}" data-beam-on="${on}" data-k="beam-${k}"
                             aria-pressed="${on}" title="Side ${k.toUpperCase()}: ${v == null ? 'not read' : on ? 'armed' : 'off'}">${k.toUpperCase()} ${v == null ? '?' : on ? 'on' : 'off'}</button>`;
         }).join('');
-        return `<span class="lp-seg" role="group" aria-label="Beam per side">${btns}</span>`;
+        return `
+            <div class="lp-row lp-beam">
+              <span class="lp-label" title="BeamEnabled on each side's scanner card: the mirror unparked, so a routed line reaches the sample from that arm.">Beam</span>
+              <span class="lp-seg" role="group" aria-label="Beam per side">${btns}</span>
+              <span class="lp-hint" title="The live view keeps an armed beam on the side it shows: two sheets on at once light each camera with the other's, edge-on.">follows the view while armed</span>
+            </div>`;
     }
 
-    /**
-     * Both sources open. Safe, and the reason vision-guided calibration was
-     * looking for nuclei in a DIC-like image for weeks (#106).
-     */
-    function bothWarn(s) {
-        return `<p class="lp-warn">The LED is open and the laser is routing
-                ${routedLines(s).join(', ')} nm — fluorescence sits on top of
-                brightfield. Pick a mode.</p>`;
-    }
-
-    /**
-     * An armed beam with nothing routed is safe but surprising, and it is the
-     * state the rig is left in.
-     *
-     * At the PANEL ROOT, not inside the laser branch — `mode()` calls this
-     * state `off`, so the laser branch is closed and a note living inside it
-     * would be invisible in the one state it is about. Hiding the detail must
-     * never hide the fact, or the disclosure would have made the panel less
-     * honest than the flat version it replaced.
-     */
-    function idleBeamNote(s, armed, lines) {
-        if (lines.length || armed !== true) return '';
-        return '<p class="lp-note">Beam is armed, but no lines are routed — nothing emits.</p>';
-    }
-
-    function wire(el, scope) {
-        const beam = el.querySelector('[data-beam]');
-        if (beam) beam.onclick = () => act(() =>
-            send('/api/devices/beam', { enabled: beam.dataset.beam === 'on' }));
-        // A side's toggle arms or disarms that side alone.
+    function wire(el, host) {
+        // A side's switch arms or disarms that side alone.
         el.querySelectorAll('[data-beam-side]').forEach(b => {
             b.onclick = () => act(() => send('/api/devices/beam',
                 { enabled: b.dataset.beamOn !== 'true', side: b.dataset.beamSide }));
         });
 
-        const cfg = el.querySelector('[data-config]');
-        if (cfg) cfg.onchange = () => act(() =>
-            send('/api/devices/laser/config', { config: cfg.value }));
-
-        el.querySelectorAll('[data-mode]').forEach(b => {
-            b.onclick = () => { branch = b.dataset.mode; act(() => enter(b.dataset.mode)); };
+        el.querySelectorAll('[data-config]').forEach(b => {
+            b.onclick = () => act(() => route(b.dataset.config));
         });
 
-        el.querySelectorAll('[data-power]').forEach(r => {
-            // On release, not on drag: every input event would be a hardware write.
-            r.onchange = () => act(() => send('/api/devices/laser/power',
-                { wavelength: Number(r.dataset.power), pct: Number(r.value) }));
+        el.querySelectorAll('[data-led-switch]').forEach(b => {
+            b.onclick = () => act(() => ledSwitch(b.dataset.ledSwitch === 'Open'));
         });
+
+        // The numbers. Each is a line to drag and a box to type in, bound as
+        // one control; a value is sent when it is meant — on release, on
+        // Enter, on leaving the box — never while it is being dragged or
+        // typed, since every one of those would be a hardware write.
+        const bound = [];
+        const settled = () => { if (waiting.has(host)) render(); };
+        const pair = (range, box, onCommit) => {
+            if (!range || !box || range.disabled || typeof NumRow === 'undefined') {
+                // No number box to bind (or nothing read to bind it to): the
+                // line alone still writes on release.
+                if (range && !range.disabled) range.onchange = () => onCommit(Number(range.value));
+                return;
+            }
+            bound.push(NumRow.bind(range, box, { onCommit }));
+            // An edit abandoned (Esc, or a blur with nothing changed) leaves
+            // a held read-back to draw.
+            box.addEventListener('blur', () => setTimeout(settled, 0));
+        };
 
         const ledPct = el.querySelector('[data-led-pct]');
-        // On release, for the same reason as the power sliders.
-        if (ledPct) ledPct.onchange = () => act(() =>
-            send('/api/devices/led/intensity', { pct: Number(ledPct.value) }), scope);
+        pair(ledPct, el.querySelector('[data-led-num]'),
+            pct => act(() => send('/api/devices/led/intensity', { pct })));
 
-        const sw = el.querySelector('[data-led-switch]');
-        if (sw) sw.onclick = () => act(() => ledSwitch(sw.dataset.ledSwitch === 'Open'), scope);
-
+        el.querySelectorAll('[data-power]').forEach(r => {
+            const wl = Number(r.dataset.power);
+            pair(r, el.querySelector(`[data-power-num="${wl}"]`),
+                pct => act(() => send('/api/devices/laser/power', { wavelength: wl, pct })));
+        });
+        rows.set(host, bound);
     }
 
     /* ── lifecycle ───────────────────────────────────────────────────────── */
@@ -595,46 +619,55 @@ const LightPanel = (() => {
                 const d = await r.json();
                 configs = d.configs || d.available_configs || [];
             }
-        } catch (_) { /* select shows an em dash */ }
+        } catch (_) { /* the row shows what is read back, or an em dash */ }
     }
 
-    async function mount(hostId, opts) {
-        const only = opts && opts.only === 'led' ? 'led' : null;
-        hosts.set(hostId, { only, titled: !(opts && opts.titled === false) });
+    async function mount(hostId) {
+        hosts.add(hostId);
         if (hosts.size === 1) {
             SharedState.on('light', render);
-            timer = setInterval(() => {
-                const scope = visible();
-                if (scope) read(scope);
-            }, POLL_MS);
+            timer = setInterval(() => { if (visible()) refresh(); }, POLL_MS);
         }
-        // Limits and presets are the laser's; an LED card has no use for them.
-        if (!only) await loadStatics();
+        await loadStatics();
         render();
-        await read(only);
+        await readAll();
     }
 
-    /**
-     * What is on screen: 'all' if a full panel is, 'led' if only LED cards
-     * are, null if nothing is. The poll reads no more than that.
-     */
+    /** Re-read everything; the presets and limits too, if they never arrived. */
+    async function refresh() {
+        await loadStatics();
+        await readAll();
+    }
+
+    /** Is a mount on screen? The poll reads nothing for a panel nobody sees. */
     function visible() {
-        let scope = null;
-        for (const [h, opts] of hosts) {
+        for (const h of hosts) {
             const el = document.getElementById(h);
-            if (!el || el.offsetParent === null) continue;
-            if (!opts.only) return 'all';
-            scope = 'led';
+            if (el && el.offsetParent !== null) return true;
         }
-        return scope;
+        return false;
     }
 
     function unmount(hostId) {
         hosts.delete(hostId);
+        rows.delete(hostId);
+        waiting.delete(hostId);
         if (!hosts.size && timer) { clearInterval(timer); timer = null; }
     }
 
-    return { mount, unmount, refresh: readAll, emitting, mode, wavelengthsOf, _state: state };
+    // The device layer coming up is when the first read, and the presets and
+    // limits, become possible: a panel mounted before it drew em dashes and a
+    // row with no presets until the next visit.
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', () => { if (hosts.size) refresh(); });
+    }
+
+    return {
+        mount, unmount, refresh, emitting, mode, status, wavelengthsOf,
+        presetLabel, presetList, _state: state,
+        // For tests: the server's limits and presets, without a server.
+        _seed: (lim, cfgs) => { limits = lim || null; configs = cfgs || []; },
+    };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = LightPanel;

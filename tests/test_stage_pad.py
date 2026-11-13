@@ -3,8 +3,10 @@
 "one more feature i want in the bottom cam view - there is no way to move
 the xy stage..."
 
-The jog route kept the last piece of the XY lock: it refused whenever the
-SPIM head was within 1000 µm of its floor, and the rig images at about 85.
+It was a card on the Bottom cam pane. It is the Stage panel of the workspace
+now, on screen with either camera, which is also where the last piece of the
+XY lock showed itself: the jog refused whenever the SPIM head was within
+1000 µm of its floor, and the rig images at about 85.
 """
 
 from __future__ import annotations
@@ -125,8 +127,11 @@ class TestTheJog:
 
 
 class TestThePad:
-    def test_the_bottom_camera_pane_has_a_stage_block_named_by_axis(self):
+    def test_the_stage_panel_has_a_pad_named_by_axis(self):
         assert 'id="op-stage-host"' in INDEX and "panels/stage-pad.js" in INDEX
+        scope = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-cal"')]
+        panel = scope[scope.index('id="op-stage-panel"') :]
+        assert 'id="op-stage-host"' in panel, "the pad is not in the Stage panel"
         assert "StagePad.mount('op-stage-host')" in OPERATE
         for needle in (
             "▲ +Y",
@@ -140,3 +145,11 @@ class TestThePad:
             assert needle in PAD, needle
         # The pad never claims a screen direction it cannot know.
         assert "Named by stage axis" in PAD
+
+    def test_a_press_keeps_the_keyboard_on_the_pad(self):
+        """Each press redraws the pad. Redrawn, it used to drop the focus, so
+        the arrow keys moved the stage once and then scrolled the page."""
+        fn = PAD[PAD.index("    function render() {") :]
+        fn = fn[: fn.index("\n    }")]
+        assert "const hadFocus = host.contains(document.activeElement);" in fn
+        assert "if (hadFocus)" in fn and "pad.focus({ preventScroll: true })" in fn

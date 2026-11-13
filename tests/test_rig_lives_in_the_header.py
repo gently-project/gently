@@ -92,9 +92,10 @@ def test_the_rail_collapses_and_does_not_offer_the_agent_twice() -> None:
     )
     assert 'id="v2-rail-collapse"' in index, "the rail lost its collapse control"
     assert "rail-collapsed" in shell, "shell.js no longer applies the collapsed state"
-    assert re.search(r"localStorage\.setItem\(\s*COLLAPSE_KEY", shell), (
+    assert re.search(r"localStorage\.setItem\(\s*keyFor\(currentTab\(\)\)", shell), (
         "the rail no longer remembers the choice"
     )
+    assert "const COLLAPSE_KEY = 'gently.rail.collapsed';" in shell
     # Collapsed, the rail is icons only — so every destination needs one.
     items = re.findall(r'class="v2-nav-item"[^>]*>(.*?)</button>', index, re.S)
     assert len(items) >= 10, f"expected the ten destinations, found {len(items)}"
@@ -122,13 +123,16 @@ def test_the_display_range_sits_under_the_frame_at_its_width() -> None:
         "the stacked histogram is no longer 48 px"
     )
     assert re.search(
-        r"\.op-pane-row \.op-block-display\s*\{[^}]*height:\s*var\(--op-display-h\)", css, re.S
+        r"\.op-pane-scope \.op-block-display\s*\{[^}]*height:\s*var\(--op-display-h\)", css, re.S
     ), "the display panel's height is no longer the variable the frame's height is computed from"
+    cam = re.search(r"\.op-pane-scope \.op-cam\s*\{([^}]*)\}", css, re.S)
+    assert cam and "100cqh" in cam.group(1) and "var(--op-display-h)" in cam.group(1), (
+        "the frame's height is no longer the room there is less what sits around it"
+    )
+    scope = index[index.index('id="op-pane-scope"') : index.index('id="op-pane-cal"')]
+    view = scope[scope.index('class="op-view"') : scope.index('<aside class="op-inst"')]
     for host in ("op-display-bottom", "op-display-spim"):
-        at = index.index(f'id="{host}"')
-        col = index.rfind('class="op-stage-col"', 0, at)
-        aside = index.rfind('<aside class="op-inst">', 0, at)
-        assert col > aside, f"{host} is not in the frame's column"
+        assert f'id="{host}"' in view, f"{host} is not in the frame's column"
     # The parts must still be there, and the numbers that the strip never had.
     for part in (
         "data-hist",

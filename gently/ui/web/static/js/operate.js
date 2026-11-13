@@ -1,17 +1,28 @@
 /**
- * Operate — three independent instrument surfaces.
+ * Operate — one workspace, and two surfaces beside it.
  *
- *   Bottom cam   see the dish, focus the bottom objective, find embryos
- *   SPIM head    bring the objectives to height over the sample
+ *   Scope        the dish, what the rig sees and the instrument, on one
+ *                screen: find embryos on the bottom camera, bring the head
+ *                down, look through either light-sheet camera
+ *   Calibration  the piezo–galvo fit for an embryo
  *   Acquisition  the embryo roster and what to run on it
  *
- * There are no steps, no phases and no progress ladder. Every pane is fully
- * live whenever it is visible.
+ * Scope shows one frame at a time, from the camera chosen in the strip above
+ * it: the bottom camera, or the light sheet from side A, side B or both.
+ * `_pane` still names the camera surface ('bottom' or 'spim'), because the
+ * cameras contend for MMCore and one may stream at a time. What changed on
+ * 2026-11-13 is that the two are one section of the page, with one rail and
+ * the same instrument panels in the same places (index.html, "SCOPE"). They
+ * used to be two panes, each assembling its own rail around its own frame.
+ *
+ * There are no steps, no phases and no progress ladder. Every surface is
+ * fully live whenever it is visible.
  *
  * THE INVARIANT: no control anywhere reads `_pane`. It is consulted by exactly
- * two things — render dispatch, and which camera stream owns MMCore. If a
- * `disabled`, `hidden` or early-return ever starts keying off `_pane`, the step
- * model has grown back and this rewrite has been undone.
+ * two things — render dispatch (which section is on screen, and inside Scope
+ * which camera's frame, caption, verbs and display panel), and which camera
+ * stream owns MMCore. If a `disabled` or an early-return ever starts keying
+ * off `_pane`, the step model has grown back and this rewrite has been undone.
  *
  * Gating comes from live hardware state only: the F-drive floor
  * (OperateMath.stepAllowed). Selection is a cursor — it parameterises requests
@@ -48,6 +59,9 @@ const OperateManager = (function () {
 
     // ── navigation: the ONLY navigation state in this file ──────────────────
     let _pane = 'bottom';
+    // The camera surface Scope last showed: "Scope" in the toolbar comes back
+    // to it from Calibration or Acquisition.
+    let _scope = 'bottom';
 
     // ── session facts (owned by the bus, mirrored here) ─────────────────────
     let _embryos = [];
@@ -264,8 +278,12 @@ const OperateManager = (function () {
     // bottom objective has a ~200 µm throw, the F-drive runs 30→25000 µm onto a
     // sample sitting at ~50 — so the F-drive gets position-banded steps and a
     // log track, and the bottom axis a fixed ladder on a linear one.
+    //
+    // The track lies along the panel, its low end at the left. It stood
+    // upright, 84 px for the whole of the F-drive's travel, which gave the
+    // last few hundred µm (where the head is driven by hand) about 20 px.
     function makeZAxis(cfg) {
-        const st = { pos: null, min: null, max: null, floor: null, status: 'unknown' };
+        const st = { pos: null, min: null, max: null, floor: null, status: 'unknown', said: {} };
         let busy = false;
 
         const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
@@ -277,8 +295,10 @@ const OperateManager = (function () {
             if (num(d.max) != null) st.max = num(d.max);
             if (num(d.distance_to_floor) != null) st.floor = num(d.distance_to_floor);
             else if (st.pos != null && st.min != null) st.floor = st.pos - st.min;
+            if (num(d.goto_min) != null) st.said.goto_min = num(d.goto_min);
             if (st.pos != null) st.status = 'ok';
             render();
+            if (cfg.onRead) cfg.onRead(st);
         }
         // 1 Hz position stream. Without this the gauge goes stale the moment
         // someone drives the axis at the controller box instead of from here.
@@ -341,7 +361,7 @@ const OperateManager = (function () {
                 .filter(t => t > st.min && t < st.max)
                 .map(t => {
                     const f = M ? M.gaugeFraction(t, st.min, st.max, cfg.scale) : null;
-                    return f == null ? '' : `<span style="bottom:${(f * 100).toFixed(2)}%">${t}</span>`;
+                    return f == null ? '' : `<span style="left:${(f * 100).toFixed(2)}%">${t}</span>`;
                 }).join('');
         }
 
@@ -349,8 +369,12 @@ const OperateManager = (function () {
             const g = $(cfg.gauge);
             if (g) {
                 g.dataset.status = st.status;
-                g.classList.toggle('is-near-floor',
-                    st.status === 'ok' && st.floor != null && st.floor < 100);
+                // Only an axis whose floor is something to hit says so. The
+                // bottom objective's lower limit is the far end of its focus
+                // travel, and it used to wear the same amber mark whenever it
+                // was within 100 µm of it, which was most of the time.
+                g.classList.toggle('is-near-floor', cfg.warnBelow != null
+                    && st.status === 'ok' && st.floor != null && st.floor < cfg.warnBelow);
                 // In flight: the nudges going pale said nothing (#109). Now the
                 // gauge says so, and the caption below it names the state.
                 g.classList.toggle('is-moving', busy);
@@ -368,7 +392,7 @@ const OperateManager = (function () {
                 ? M.gaugeFraction(st.pos, st.min, st.max, cfg.scale) : null;
             if (mark) {
                 if (frac == null) mark.style.display = 'none';
-                else { mark.style.display = 'block'; mark.style.bottom = `${(frac * 100).toFixed(2)}%`; }
+                else { mark.style.display = 'block'; mark.style.left = `${(frac * 100).toFixed(2)}%`; }
             }
             const lo = $(cfg.root + '-min'), hi = $(cfg.root + '-max');
             if (lo) lo.textContent = st.min == null ? '—' : Math.round(st.min);
@@ -441,6 +465,9 @@ const OperateManager = (function () {
             wire, refresh, absorb, absorbTelemetry, render, nudge,
             floor: () => st.floor,
             status: () => st.status,
+            max: () => st.max,
+            // What the read said besides the position (a typed go-to's floor).
+            said: key => st.said[key],
         };
     }
 
@@ -456,6 +483,9 @@ const OperateManager = (function () {
         nudge: '/api/devices/spim/fdrive/nudge',
         bands: true, scale: 'log', ticks: [100, 1000, 10000],
         steps: [50, 10, 5],
+        // The sample: within this of the F-drive's floor the panel says so.
+        warnBelow: 100,
+        onRead: () => renderGoto(),
     });
 
     /**
@@ -466,19 +496,65 @@ const OperateManager = (function () {
      * The SPIM head to a height, by name: "To 1000 µm". A long move from the
      * load height, so the button says it is travelling and HALT stays live.
      */
-    async function headTo(um) {
-        const b = $('op-fd-to');
+    async function headTo(um, b) {
+        const was = b ? b.textContent : '';
         if (b) { b.disabled = true; b.textContent = 'Going…'; }
         try {
             const r = await postJSON('/api/devices/spim/fdrive/goto', { position: um });
             const at = r && r.position != null ? Math.round(r.position) : null;
             toast(at != null ? `SPIM head at ${at} µm` : `SPIM head sent to ${um} µm`);
+            return true;
         } catch (e) {
             toastFail(`Move to ${um} µm failed (${why(e)})`);
+            return false;
         } finally {
-            if (b) { b.disabled = false; b.textContent = `To ${um} µm`; }
+            if (b) { b.disabled = false; b.textContent = was; }
             fd.refresh();
         }
+    }
+    /**
+     * The SPIM head to a height that was typed. The box takes a height from
+     * the typed floor up to the F-drive's top, both as the server gave them
+     * (the floor comes with the F-drive read, `goto_min`): below the floor
+     * the head is brought down by the steps, watching the picture, so a
+     * slipped digit cannot put it on the sample. A height outside that is
+     * refused here, in words, and the server refuses it as well.
+     */
+    function gotoLimits() {
+        const lo = fd.said('goto_min'), hi = fd.max();
+        return { lo: Number.isFinite(lo) ? lo : null, hi: Number.isFinite(hi) ? hi : null };
+    }
+    function renderGoto() {
+        const box = $('op-fd-goto');
+        if (!box) return;
+        const { lo, hi } = gotoLimits();
+        box.placeholder = lo != null && hi != null ? `${Math.round(lo)}–${Math.round(hi)}`
+            : lo != null ? `${Math.round(lo)} or more` : 'height';
+        box.title = lo != null
+            ? `A height from ${Math.round(lo)} µm up. Below ${Math.round(lo)} µm the head comes down by the steps.`
+            : 'A height in µm';
+    }
+    async function goHeadTyped() {
+        const box = $('op-fd-goto');
+        if (!box) return;
+        const um = typeof NumRow !== 'undefined' ? NumRow.parse(box.value) : Number(box.value);
+        if (um == null || !Number.isFinite(um)) {
+            if (String(box.value).trim()) toastFail('That is not a height: type a number of µm');
+            box.focus();
+            return;
+        }
+        const { lo, hi } = gotoLimits();
+        if (lo != null && um < lo) {
+            toastFail(`A typed height stops at ${Math.round(lo)} µm. Below that, bring the head down with the steps.`);
+            box.select();
+            return;
+        }
+        if (hi != null && um > hi) {
+            toastFail(`The head's top is ${Math.round(hi)} µm`);
+            box.select();
+            return;
+        }
+        if (await headTo(um, $('op-fd-go'))) box.value = '';
     }
     async function raiseHead() {
         const b = $('op-fd-raise');
@@ -521,6 +597,43 @@ const OperateManager = (function () {
         }
     }
     // ══ VIEWPORT ════════════════════════════════════════════════════════════
+    // ── what is arriving ────────────────────────────────────────────────────
+    // Frames a second reaching this page, counted from the arrivals of the
+    // last few seconds, and the frame's size. In the bar above the frame, so
+    // "is the view slow, or is it the exposure" has a number. Written at most
+    // once a second: a per-frame text change is one more thing for the page
+    // (and the session recorder) to do on every frame.
+    const ARRIVAL_WINDOW_MS = 4000;
+    const _arrivals = { bottom: [], spim: [] };
+    // The sensor's size as the pixel fetch states it (showFrame). The frame
+    // event carries only the preview's size and its downsample, whose product
+    // overstates a sensor the downsample does not divide (2050 for 2048).
+    const _frameDims = { bottom: null, spim: null };
+    let _viewMetaAt = 0;
+    function noteFrame(pane) {
+        const now = performance.now();
+        const a = _arrivals[pane];
+        a.push(now);
+        while (a.length && now - a[0] > ARRIVAL_WINDOW_MS) a.shift();
+        if (now - _viewMetaAt >= 1000) renderViewMeta();
+    }
+    function renderViewMeta() {
+        const el = $('op-view-meta');
+        if (!el) return;
+        _viewMetaAt = performance.now();
+        const pane = _pane === 'spim' ? 'spim' : 'bottom';
+        const on = pane === 'spim' ? _spimOn : _bottomOn;
+        const a = _arrivals[pane];
+        const bits = [];
+        if (on && a.length >= 2) {
+            const span = (a[a.length - 1] - a[0]) / 1000;
+            if (span > 0) bits.push(`${((a.length - 1) / span).toFixed(1)} fps`);
+        }
+        if (_frameDims[pane]) bits.push(_frameDims[pane]);
+        const text = bits.join(' · ');
+        if (el.textContent !== text) el.textContent = text;
+    }
+
     function frameOf(p) {
         if (!p || !Array.isArray(p.shape)) return null;
         return { w: p.shape[1], h: p.shape[0], downsample: p.downsample || 1 };
@@ -548,8 +661,8 @@ const OperateManager = (function () {
         else img.addEventListener('load', () => setCamAspect(img), { once: true });
     }
     // The frame's aspect, on the fit box and on the viewport box around it:
-    // the fit draws its chrome to it, and the SPIM pane's row sizes the box
-    // from it (operate.css, "SPIM head"); the fit inherits what the box has.
+    // the fit draws its chrome to it, and Scope sizes the box from it
+    // (operate.css, "Scope"); the fit inherits what the box has.
     function setCamAr(fit, ar) {
         fit.style.setProperty('--cam-ar', ar);
         const box = fit.closest('.op-cam');
@@ -606,6 +719,7 @@ const OperateManager = (function () {
             const fit = fitOf(pane), ph = $(phId);
             fit.classList.add('has-pixels');
             setCamAr(fit, `${meta.width} / ${meta.height}`);
+            if (meta.sourceWidth && meta.sourceHeight) _frameDims[pane] = `${meta.sourceWidth}×${meta.sourceHeight}`;
             if (ph) ph.style.display = 'none';
             if (typeof ImageView !== 'undefined' && ImageView.frameArrived) ImageView.frameArrived(box);
         } catch (_) {
@@ -1090,8 +1204,9 @@ const OperateManager = (function () {
         _bottomOn = on;
         const b = $('op-cam-toggle');
         if (b) { b.textContent = on ? 'Stop camera' : 'Start camera'; b.classList.toggle('is-on', on); }
-        if (!on) freezeImg('op-img-bottom', 'op-ph-bottom', 'Camera off');
+        if (!on) { freezeImg('op-img-bottom', 'op-ph-bottom', 'Camera off'); _arrivals.bottom.length = 0; }
         renderSubnavMeta();
+        renderViewMeta();
     }
 
     // Name the stages that are actually running: "blobs" and "blobs + Claude +
@@ -1125,6 +1240,9 @@ const OperateManager = (function () {
         if (typeof cfg.use_sam === 'boolean') tune.use_sam = cfg.use_sam;
         if (typeof cfg.min_relative_peak === 'number') tune.min_relative_peak = cfg.min_relative_peak;
         if (cfg.method === 'dark' || cfg.method === 'bright') tune.method = cfg.method;
+        // Finding is in the rail beside whichever camera is up, and what it
+        // finds is drawn on the bottom camera's frame: that frame comes up.
+        showPane('bottom');
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;
@@ -1236,7 +1354,7 @@ const OperateManager = (function () {
             const n = (d.registered || []).length;
             _markers = [];
             drawMarkers(); renderMarkCount();
-            setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — they're in the roster and on the SPIM head.`);
+            setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — ${n === 1 ? 'it is' : 'they are'} in the list below.`);
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
         } catch (e) {
             toastFail(`Register failed (${why(e)})`);
@@ -1263,8 +1381,9 @@ const OperateManager = (function () {
         _spimOn = on;
         const b = $('op-spim-toggle');
         if (b) { b.textContent = on ? 'Stop view' : 'Start view'; b.classList.toggle('is-on', on); }
-        if (!on) freezeImg('op-img-spim', 'op-ph-spim', 'View off');
+        if (!on) { freezeImg('op-img-spim', 'op-ph-spim', 'View off'); _arrivals.spim.length = 0; }
         renderSubnavMeta();
+        renderViewMeta();
     }
 
     let _lsTimer = null;
@@ -1279,20 +1398,45 @@ const OperateManager = (function () {
             postJSON('/api/devices/lightsheet/live/params', body).catch(() => {});
         }, 120);
     }
+    // Whose sheet the Sheet panel's two lines move, said in its heading.
+    const SIDE_SAYS = {
+        A: 'side A · scanner AB · piezo P',
+        B: 'side B · scanner CD · piezo Q',
+        Multi: 'no side chosen',
+    };
     function renderPose() {
         const multi = _side === 'Multi';
         const p = _pose[multi ? 'A' : _side];
         const r = _range[multi ? 'A' : _side] || RANGE_DEFAULT;
-        renderAxis('op-gv', r.galvo, p.galvo, 2, multi);
-        renderAxis('op-pz', r.piezo, p.piezo, 1, multi);
+        renderAxis('op-gv', _axisRow.galvo, r.galvo, p.galvo, multi);
+        renderAxis('op-pz', _axisRow.piezo, r.piezo, p.piezo, multi);
         const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
-        document.querySelectorAll('#op-spim-side [data-side]').forEach(b => {
-            const on = b.dataset.side === _side;
-            b.classList.toggle('is-on', on);
-            b.setAttribute('aria-pressed', on ? 'true' : 'false');
-        });
+        const says = $('op-sheet-side'); if (says) says.textContent = SIDE_SAYS[_side] || '';
+        renderSource();
         const img = $('op-img-spim');
         if (img) img.alt = multi ? 'Light-sheet view, both sides: A red, B green' : `Light-sheet view, side ${_side}`;
+    }
+
+    // ── which camera is on screen ───────────────────────────────────────────
+    // The strip above the frame. The bottom camera is its own surface; the
+    // three light-sheet choices are the SPIM surface on a side.
+    function renderSource() {
+        const on = _pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : null;
+        document.querySelectorAll('#op-source [data-source]').forEach(b => {
+            const is = b.dataset.source === on;
+            b.classList.toggle('is-on', is);
+            b.setAttribute('aria-pressed', is ? 'true' : 'false');
+        });
+    }
+    function chooseSource(src) {
+        if (src === 'bottom') { showPane('bottom'); return; }
+        // A side pressed is the side wanted. It is told to the device layer
+        // BEFORE the surface is entered, so the read on entering finds this
+        // page's own switch a moment old and leaves it be (adoptLsParams).
+        // The same side as before is not re-sent: entering reads what the
+        // device layer is on, and the strip shows that.
+        if (src !== _side) setSpimSide(src);
+        showPane('spim');
     }
     function setSpimSide(side) {
         if (side !== 'A' && side !== 'B' && side !== 'Multi') return;
@@ -1306,15 +1450,21 @@ const OperateManager = (function () {
         postLsParams();
     }
     // One axis row: the line's ends are the extent, its knob the pose, the
-    // readout the number. Multi has no sheet of its own: the line is off and
-    // the readout blank.
-    function renderAxis(id, ext, v, digits, off) {
-        const inp = $(id + '-in');
-        if (inp) { inp.min = ext[0]; inp.max = ext[1]; inp.value = v; inp.disabled = off; }
+    // box the same number, typed (panels/numrow.js: the two are one control,
+    // and a pose read back does not land under a drag or a half-typed
+    // number). Multi has no sheet of its own: the line is off and the box
+    // blank.
+    const _axisRow = { galvo: null, piezo: null };
+    function renderAxis(id, row, ext, v, off) {
+        const inp = $(id + '-in'), box = $(id);
+        if (inp) { inp.min = ext[0]; inp.max = ext[1]; inp.disabled = off; }
+        if (box) box.disabled = off;
         const lo = $(id + '-min'), hi = $(id + '-max');
         if (lo) lo.textContent = fmtExt(ext[0]);
         if (hi) hi.textContent = fmtExt(ext[1]);
-        const out = $(id); if (out) out.textContent = off ? '—' : v.toFixed(digits);
+        if (row) row.show(v);
+        else if (inp) inp.value = v;
+        if (off && box) box.value = '—';
     }
     const fmtExt = x => (x > 0 ? '+' : x < 0 ? '−' : '') + String(Number(Math.abs(x).toFixed(2)));
     // The extents, from the controller, once per side: the micro-mirror card's
@@ -1349,6 +1499,10 @@ const OperateManager = (function () {
             try {
                 if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;
                 const r = await getJSON('/api/devices/lightsheet/live/params');
+                // Asked again after the wait: a side pressed while this read
+                // was in flight is newer than its answer, which would put the
+                // strip back on the side just left.
+                if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;
                 const p = r && r.params;
                 if (!p || (p.side !== 'A' && p.side !== 'B' && p.side !== 'Multi')) return;
                 if (p.side !== 'Multi') {
@@ -2328,8 +2482,8 @@ const OperateManager = (function () {
     // The Adaptive pane is a form for one object (acquisition-plan.js). Every
     // input re-reads it and re-says it; Start sends exactly what was said.
     // The fields of view the overview is taken from, [{x, y}] in stage µm:
-    // one, or several when the embryos do not all fit in one frame. Built on
-    // the Bottom cam pane (panels/fields.js), kept in the session
+    // one, or several when the embryos do not all fit in one frame. Built in
+    // the rail on Scope (panels/fields.js), kept in the session
     // (/api/brightfield/fields), read by the plan as "taken from the fields".
     let _bfPins = [];
     let _laserPresetsLoaded = false;
@@ -2813,12 +2967,13 @@ const OperateManager = (function () {
             // the frames move tonight.
             const later = _runBusy ? ' A change here applies at the next Start, not to the run going now.' : '';
             pin.textContent = !here ? ''
-                : n === 0 ? 'No fields yet — add them on Bottom cam, beside the picture, or from the list on the left.'
+                : n === 0 ? 'No fields yet — add them on Scope, beside the picture, or from the list on the left.'
                     : (n === 1 ? 'One frame each round, from field 1.' : `${n} frames each round, one from each field.`)
-                        + ' Add or drop fields in the list on the left, or on Bottom cam.' + later;
+                        + ' Add or drop fields in the list on the left, or on Scope.' + later;
         }
         // How the frame is lit and exposed, and whether its dark and flat
-        // exist, are set on Bottom cam; said back here with the way there.
+        // exist, are set on Scope (the rail's Overview frames box, beside
+        // the bottom camera's picture); said back here with the way there.
         const setup = $('op-plan-bf-setup');
         const ovSummary = $('op-ov-summary');
         if (setup || ovSummary) {
@@ -2829,13 +2984,13 @@ const OperateManager = (function () {
             const refTxt = !refs ? '' : refs.have ? ' · dark and flat taken'
                 : ' · <span class="op-cap-warn">no dark and flat yet</span>';
             const said = `${escapeHtml(lit)} · ${escapeHtml(exp)}${refTxt}`;
-            // The same fact in both places: the Bottom cam block's closed
-            // state, and the Acquisition pane's line with the way there.
+            // The same fact in both places: the Overview frames box's
+            // closed state, and the Acquisition pane's line with the way there.
             if (ovSummary) ovSummary.innerHTML = said;
             if (setup) {
                 setup.innerHTML = `${said} — `
                     + '<button type="button" class="op-btn op-btn-quiet" data-goto-pane="bottom" '
-                    + 'title="The light, exposure, dark and flat are set beside the live view">Change on Bottom cam →</button>';
+                    + 'title="The light, exposure, dark and flat are set beside the live view">Change on Scope →</button>';
             }
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
@@ -3183,22 +3338,36 @@ const OperateManager = (function () {
     // contend for MMCore, and the client swaps .src per frame with no throttle,
     // so two live decoders is the condition that risks a Video-TDR freeze. "The
     // camera is live while you are looking at it" guarantees at most one.
-    // Workflow order, and the single list. It used to be spelled out in
-    // showPane and again in showPaneInitial, so adding a pane meant remembering
-    // both.
-    const PANE_ORDER = ['bottom', 'spim', 'cal', 'acquire'];
+    // Workflow order, and the single list: each surface, and the section of
+    // the page it is drawn in. The two camera surfaces are one section,
+    // Scope, and which camera's frame it shows is `[data-src]` (paintPane).
+    // The list used to be spelled out in showPane and again in
+    // showPaneInitial, so adding a pane meant remembering both.
+    const PANE_SECTION = { bottom: 'scope', spim: 'scope', cal: 'cal', acquire: 'acquire' };
+    const SECTIONS = [...new Set(Object.values(PANE_SECTION))];
+    const inScope = name => PANE_SECTION[name] === 'scope';
+    // The instrument panels are on screen with either camera, so either
+    // camera's surface draws all of them.
+    function renderScope() {
+        renderMarkCount(); drawMarkers(); renderSpimTarget();
+        bz.render(); fd.render(); renderGoto();
+    }
 
     const PANES = {
         bottom: {
             // Leaving turns the camera off; coming back does not turn it on.
             onEnter() { drawMarkers(); },
             onLeave() { if (_bottomOn) stopBottom(); },
-            render() { renderMarkCount(); drawMarkers(); bz.render(); },
+            render() { renderScope(); },
         },
         spim: {
             onEnter() { adoptLsParams(); },
-            onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
-            render() { renderSpimTarget(); fd.render(); },
+            // To the bottom camera the LED stays as it is: it lights that
+            // camera too, and the Light panel beside the frame goes on
+            // saying what it is. Leaving Scope closes it, as leaving the
+            // SPIM head always has.
+            onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to)) forceLedOff(); },
+            render() { renderScope(); },
         },
         cal: {
             // Calibration takes its own frames; it never read the live view,
@@ -3227,8 +3396,6 @@ const OperateManager = (function () {
         applySpim(false);
     }
 
-    // The Light panel is shared, so Operate only says where to draw it — see
-    // docs/architecture/PANELS.md. Mounted once; SharedState keeps it current.
     // Zoom/pan on the camera surfaces. Attached once each; the transform is
     // view state, not instrument state, so it stays local rather than going
     // into SharedState — two people looking at one scope still want their own
@@ -3239,6 +3406,10 @@ const OperateManager = (function () {
         ImageView.attach('op-cam-spim', { controlsHost: 'op-display-spim', display: 'stacked' });
     }
 
+    // The Light panel is shared, so Operate only says where to draw it — see
+    // docs/architecture/PANELS.md. Mounted once, with the other panels;
+    // SharedState keeps it current. The whole panel beside either camera: the
+    // bottom camera used to get a card showing the LED alone, mounted apart.
     let _lightMounted = false;
     function mountLightPanel() {
         if (_lightMounted || typeof LightPanel === 'undefined') return;
@@ -3248,8 +3419,8 @@ const OperateManager = (function () {
     }
 
     // The dark/flat references for the overview frames sit under the plan's
-    // light, LED and exposure fields in the Bottom cam pane's Overview frames
-    // block, and read them (panels/brightfield-refs.js). When a reference
+    // light, LED and exposure fields in the rail's Overview frames box, and
+    // read them (panels/brightfield-refs.js). When a reference
     // lands, the Acquisition pane's summary line says so.
     let _bfRefsMounted = false;
     function mountBrightfieldRefs() {
@@ -3312,12 +3483,7 @@ const OperateManager = (function () {
             }
         }
         mountFieldsPanels();
-        // The bottom camera's LED card. Here rather than in mountLightPanel:
-        // that one waits for the SPIM pane, and this is the pane we start on.
-        if (typeof LightPanel !== 'undefined' && $('op-led-host')) {
-            // Untitled: the folding card above it draws the "LED" heading.
-            LightPanel.mount('op-led-host', { only: 'led', titled: false });
-        }
+        mountLightPanel();
         if (typeof CameraPanel !== 'undefined') {
             if ($('op-cam-panel-bottom')) {
                 CameraPanel.mount('op-cam-panel-bottom', { camera: 'bottom', titled: false });
@@ -3328,10 +3494,15 @@ const OperateManager = (function () {
         }
     }
 
-    // ══ THE RAIL'S FOLDING CARDS ═══════════════════════════════════════════
-    // Every card on the Bottom cam rail folds to its head row. One rule for all
-    // of them: `data-disclose` names the card, the head row and anything
-    // marked `.op-disc-keep` stay, the other direct children fold.
+    // ══ THE FOLDING CARDS ══════════════════════════════════════════════════
+    // A card that folds to its head row. One rule for all of them:
+    // `data-disclose` names the card, the head row and anything marked
+    // `.op-disc-keep` stay, the other direct children fold.
+    //
+    // On the old Bottom cam rail every card folded, because the rail was a
+    // 260 px strip that scrolled and folding was how it was made to fit. In
+    // the workspace the instrument panels have fixed places and do not fold;
+    // what still does is what is set once a night (the overview frames).
     //
     // The choice is the RIG's, not this browser's, and it is kept as it is
     // pressed: read from
@@ -3348,7 +3519,7 @@ const OperateManager = (function () {
     }
 
     function applyAllDisclosures() {
-        document.querySelectorAll('#op-pane-bottom [data-disclose]').forEach(block => {
+        document.querySelectorAll('#devices-view-operate [data-disclose]').forEach(block => {
             applyDisclosure(block, discloseState(block.dataset.disclose));
         });
     }
@@ -3385,7 +3556,7 @@ const OperateManager = (function () {
     }
 
     function wireDisclosures() {
-        document.querySelectorAll('#op-pane-bottom [data-disclose]').forEach(block => {
+        document.querySelectorAll('#devices-view-operate [data-disclose]').forEach(block => {
             const key = block.dataset.disclose;
             applyDisclosure(block, discloseState(key));
             const btn = block.querySelector('[data-disclose-toggle]');
@@ -3407,22 +3578,41 @@ const OperateManager = (function () {
     }
 
     function showPane(name) {
+        // "Scope" is the workspace; the camera it shows is the one it last did.
+        if (name === 'scope') name = _scope;
         if (!PANES[name] || name === _pane) return;
         const prev = _pane;
         _pane = name;
-        if (PANES[prev]) PANES[prev].onLeave();
-        PANE_ORDER.forEach(p => {
-            const el = $(`op-pane-${p}`);
-            if (el) el.hidden = p !== name;
-        });
-        // Drives the CSS that hides the shared rail on Acquisition (its own
-        // roster is richer) while keeping it on Bottom / SPIM.
-        const body = $('op-body'); if (body) body.dataset.pane = name;
-        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', name);
-        if (name === 'spim') mountLightPanel();
+        if (inScope(name)) _scope = name;
+        if (PANES[prev]) PANES[prev].onLeave(name);
+        paintPane();
         PANES[name].onEnter();
         PANES[name].render();
         publishRoster();
+    }
+
+    // What is on screen for the surface `_pane` names: its section of the
+    // page, and inside Scope the chosen camera's frame, caption, verbs and
+    // display panel (`[data-src]`). Render dispatch, in one place for
+    // showPane and showPaneInitial both.
+    function paintPane() {
+        const section = PANE_SECTION[_pane];
+        SECTIONS.forEach(s => {
+            const el = $(`op-pane-${s}`);
+            if (el) el.hidden = s !== section;
+        });
+        if (inScope(_pane)) {
+            document.querySelectorAll('#op-pane-scope [data-src]').forEach(el => {
+                el.hidden = el.dataset.src !== _pane;
+            });
+        }
+        // Drives the CSS that hides the shared rail on Acquisition (its own
+        // roster is richer) and, on Calibration, the rail's two panels that
+        // are about the bottom camera's picture.
+        const body = $('op-body'); if (body) body.dataset.pane = _pane;
+        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', section);
+        renderSource();
+        renderViewMeta();
     }
 
     function renderSubnavMeta() {
@@ -3432,8 +3622,25 @@ const OperateManager = (function () {
         if (_bottomOn) bits.push('BOTTOM ● LIVE');
         if (_spimOn) bits.push('SPIM ● LIVE');
         if (ledIsOpen()) bits.push('LED EMITTING');
-        if (_acquiring) bits.push('LASER EMITTING');
+        // Derived by the Light panel from what the hardware says (a beam
+        // armed, a line routed, its power above zero), so it is true with
+        // the live view as well as during a run. It used to be said only
+        // while this page had itself started an acquisition.
+        const light = SharedState.get('light');
+        const lasing = typeof LightPanel !== 'undefined' && light ? LightPanel.emitting(light) === true : false;
+        // The laser's word alone wears the hazard's colour: "the camera is
+        // live" beside it is not a hazard and must not look like one.
+        const key = bits.join('|') + (lasing || _acquiring ? '|LASER' : '');
+        if (el.dataset.says === key) return;
+        el.dataset.says = key;
         el.textContent = bits.join('  ·  ');
+        if (lasing || _acquiring) {
+            if (bits.length) el.append('  ·  ');
+            const hot = document.createElement('span');
+            hot.className = 'is-emitting';
+            hot.textContent = 'LASER EMITTING';
+            el.append(hot);
+        }
     }
 
     /**
@@ -3569,6 +3776,7 @@ const OperateManager = (function () {
         // frame behind whatever is on screen and races for stream ownership.
         if (!_active || _pane !== 'bottom' || !p || !p.jpeg_b64) return;
         _lastBottom = p;
+        noteFrame('bottom');
         showFrame('bottom', p);
         drawMarkers();
     }
@@ -3581,6 +3789,7 @@ const OperateManager = (function () {
             if (Date.now() - _sideChangedAt > SIDE_SWITCH_MS) adoptLsParams();
             return;
         }
+        noteFrame('spim');
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
@@ -3637,7 +3846,13 @@ const OperateManager = (function () {
             // app.js handles the keypress first and moves state.tab, so the
             // guard then correctly refuses. Three peer surfaces are fine to
             // click between; a shortcut would need a modifier to be honest.
-            initViewSwitcher('operate-subtab-switcher', showPane);
+            initViewSwitcher('operate-subtab-switcher', name => {
+                // The surfaces share the Devices toolbar with Map, Details,
+                // 3D and Manual. Pressed from one of those, the press comes
+                // back to Operate first, then goes to the surface.
+                if (!_active && typeof DevicesManager !== 'undefined') DevicesManager.switchView('operate');
+                showPane(name);
+            });
         }
 
         bz.wire(); fd.wire();
@@ -3693,13 +3908,24 @@ const OperateManager = (function () {
         if (anyway) anyway.addEventListener('click', () => calibrateSelected({ anyway: true }));
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
-        const gvIn = $('op-gv-in');
-        if (gvIn) gvIn.addEventListener('input', () => setAxis('galvo', Number(gvIn.value)));
-        const pzIn = $('op-pz-in');
-        if (pzIn) pzIn.addEventListener('input', () => setAxis('piezo', Number(pzIn.value)));
+        // The sheet's two axes: a line to drag and the same number to type.
+        // The line moves the sheet as it is dragged (the view is how the
+        // pose is judged); a typed number moves it on Enter.
+        const bindAxis = (key, line, box, decimals) => {
+            if (!line) return;
+            if (box && typeof NumRow !== 'undefined') {
+                _axisRow[key] = NumRow.bind(line, box, {
+                    decimals, onInput: v => setAxis(key, v), onCommit: v => setAxis(key, v),
+                });
+            } else {
+                line.addEventListener('input', () => setAxis(key, Number(line.value)));
+            }
+        };
+        bindAxis('galvo', $('op-gv-in'), $('op-gv'), 2);
+        bindAxis('piezo', $('op-pz-in'), $('op-pz'), 1);
         adoptLsParams();
-        document.querySelectorAll('#op-spim-side [data-side]').forEach(b =>
-            b.addEventListener('click', () => setSpimSide(b.dataset.side)));
+        document.querySelectorAll('#op-source [data-source]').forEach(b =>
+            b.addEventListener('click', () => chooseSource(b.dataset.source)));
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
         const keptStrip = $('op-cal-kept-strip');
@@ -3710,7 +3936,14 @@ const OperateManager = (function () {
         const keptOpen = $('op-cal-kept-open');
         if (keptOpen) keptOpen.addEventListener('click', openCalFolder);
         const to = $('op-fd-to');
-        if (to) to.addEventListener('click', () => headTo(Number(to.dataset.fdTo)));
+        if (to) to.addEventListener('click', () => headTo(Number(to.dataset.fdTo), to));
+        const go = $('op-fd-go');
+        if (go) go.addEventListener('click', goHeadTyped);
+        const goBox = $('op-fd-goto');
+        if (goBox) goBox.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); goHeadTyped(); }
+        });
+        renderGoto();
         const raise = $('op-fd-raise');
         if (raise) raise.addEventListener('click', raiseHead);
 
@@ -3750,7 +3983,7 @@ const OperateManager = (function () {
             });
             renderPlan();
         }
-        // The plan's overview fields live on the Bottom cam pane, beside the
+        // The plan's overview fields live in the rail on Scope, beside the
         // live view; a change there re-says the plan like one on Acquisition.
         const ov = $('op-overview-host');
         if (ov) {
@@ -3814,6 +4047,8 @@ const OperateManager = (function () {
             // caption would still read "stage is elsewhere" after the move landed.
             renderSpimTarget();
         });
+        // What the Light panel reads back is what the toolbar says of it.
+        SharedState.on('light', () => renderSubnavMeta());
         SharedState.on('selectedEmbryoId', id => {
             if (id === _selected) return;      // our own publish, already applied
             _selected = id;
@@ -3863,12 +4098,11 @@ const OperateManager = (function () {
         if (_active) return;
         _active = true;
         showPaneInitial();
-        if (_pane === 'spim') mountLightPanel();
         try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) {}
         // The session's fields, then the session's last plan — in that
         // order, so a list the session holds outranks the run's positions.
         // The plan is restored HERE, not only on entering Acquisition: the
-        // plan's light, exposure and fields are on the Bottom cam pane now,
+        // plan's light, exposure and fields are on Scope now,
         // and the first thing typed there must not be what stops the rest
         // of the plan (cadence, ending) coming back.
         await loadFields();
@@ -3926,11 +4160,7 @@ const OperateManager = (function () {
     window.addEventListener('gently:setup-item', e => applySetupItem(e.detail));
 
     function showPaneInitial() {
-        PANE_ORDER.forEach(p => {
-            const el = $(`op-pane-${p}`);
-            if (el) el.hidden = p !== _pane;
-        });
-        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', _pane);
+        paintPane();
         if (PANES[_pane]) { PANES[_pane].onEnter(); PANES[_pane].render(); }
         const handed = takeSetupItem();
         if (handed) applySetupItem(handed);
@@ -3943,6 +4173,9 @@ const OperateManager = (function () {
         if (_bottomOn) stopBottom();
         if (_spimOn) stopSpim();
         forceLedOff();
+        // The surfaces' buttons sit in the Devices toolbar beside Map and the
+        // rest: with another of those up, none of these is the one on screen.
+        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', '');
     }
 
     // redraw: a CSS transform on an ancestor fires neither `resize` nor

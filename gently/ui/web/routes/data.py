@@ -276,6 +276,14 @@ def _registry_category_label(category_id: str) -> str:
     return next((c["label"] for c in CATEGORIES if c["id"] == category_id), category_id)
 
 
+# An absolute SPIM-head height asked for from the page stops here. Below it
+# the head is brought down by the steps, each checked against the floor while
+# the operator watches the picture: the rig images about 85 µm above the
+# F-drive's floor, so a typed 100 for 1000 would put the objectives on the
+# sample in one move. The page reads this with the F-drive (`goto_min`).
+FDRIVE_GOTO_MIN_UM = 1000.0
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -2624,10 +2632,15 @@ def create_router(server) -> APIRouter:
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
-            return await client.get_fdrive()
+            state = await client.get_fdrive()
         except Exception as exc:
             logger.debug("fdrive read failed: %s", exc)
             raise HTTPException(status_code=502, detail=f"fdrive read failed: {exc}") from exc
+        # The floor for a typed height travels with the read, so the page
+        # shows the server's number and keeps none of its own.
+        if isinstance(state, dict):
+            state = {**state, "goto_min": FDRIVE_GOTO_MIN_UM}
+        return state
 
     @router.get("/api/devices/stage/envelope")
     async def stage_envelope_get():
@@ -2861,15 +2874,24 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/spim/fdrive/goto", dependencies=[Depends(require_control)])
     async def goto_fdrive(payload: dict = Body(...)):  # noqa: B008
-        """The SPIM head to an absolute height {position} µm, fenced by the
-        device layer to the F-drive's own limits. The pane's one number is
-        1000 µm: the clean stop on the way down from the load height."""
+        """The SPIM head to an absolute height {position} µm: 1000 µm by its
+        button (the clean stop on the way down from the load height), or a
+        height typed into the Head panel. Fenced by the device layer to the
+        F-drive's own limits, and here to FDRIVE_GOTO_MIN_UM from below."""
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         position = _num(payload.get("position"))
         if position is None:
             raise HTTPException(status_code=400, detail="position required")
+        if position < FDRIVE_GOTO_MIN_UM:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"a typed height stops at {FDRIVE_GOTO_MIN_UM:.0f} µm; "
+                    "below that, bring the head down with the steps"
+                ),
+            )
         try:
             return await client.goto_fdrive(position)
         except Exception as exc:

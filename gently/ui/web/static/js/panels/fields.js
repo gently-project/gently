@@ -125,7 +125,7 @@ const FieldsPanel = (() => {
             ? 'the overview is taken from the embryos’ centroid'
             : 'the overview is taken from wherever the stage is';
         return `<div class="rp-empty fp-empty">No fields yet — ${fallback}.${
-    opts.compact ? ' Drive to a view and add it.' : ' Add them on Bottom cam, beside the picture, or from where the stage is now.'}</div>`;
+    opts.compact ? ' Drive to a view and add it.' : ' Add them on Scope, beside the picture, or from where the stage is now.'}</div>`;
     }
 
     /** The one verb that makes a field: from where the stage is, now. */

@@ -9,6 +9,10 @@ on screen, because the next step was a button in the corner of the step before.
 His own description of the order is the pane order: "you find the embryos on
 the bottom camera, you find them with the SPIM head, you calibrate it, and then
 you set up your acquisition parameters."
+
+The first two of those are one surface now (Scope, 2026-11-13: both cameras
+in one workspace). Calibration is still the step after them and before
+Acquisition, and still a surface of its own.
 """
 
 from __future__ import annotations
@@ -21,40 +25,46 @@ OPERATE = ROOT / "gently" / "ui" / "web" / "static" / "js" / "operate.js"
 INDEX = ROOT / "gently" / "ui" / "web" / "templates" / "index.html"
 
 
-def test_the_pane_order_is_the_workflow_order() -> None:
+def test_the_surface_order_is_the_workflow_order() -> None:
+    """One list: each surface, in workflow order, and the section it is drawn in."""
     src = OPERATE.read_text(encoding="utf-8")
-    m = re.search(r"const PANE_ORDER = \[([^\]]+)\]", src)
-    assert m, "PANE_ORDER is gone — the pane list is spelled out in two places again"
-    order = [p.strip().strip("'\"") for p in m.group(1).split(",")]
-    assert order == ["bottom", "spim", "cal", "acquire"], order
+    m = re.search(r"const PANE_SECTION = \{([^}]+)\}", src)
+    assert m, "PANE_SECTION is gone — the surface list is spelled out in two places again"
+    pairs = re.findall(r"(\w+): '(\w+)'", m.group(1))
+    assert pairs == [
+        ("bottom", "scope"),
+        ("spim", "scope"),
+        ("cal", "cal"),
+        ("acquire", "acquire"),
+    ], pairs
 
 
 def test_one_pane_list_not_two() -> None:
     """It used to be written out in showPane and again in showPaneInitial."""
     src = OPERATE.read_text(encoding="utf-8")
     assert "['bottom', 'spim', 'acquire']" not in src
-    assert src.count("PANE_ORDER.forEach") >= 2, (
-        "a caller stopped using PANE_ORDER — adding a pane now means remembering two places again"
-    )
+    assert src.count("SECTIONS.forEach") == 1, "the sections are walked in more than one place"
+    for caller in ("    function showPane(name) {", "    function showPaneInitial() {"):
+        body = src[src.index(caller) :]
+        body = body[: body.index("\n    }")]
+        assert "paintPane();" in body, (
+            f"{caller.strip()} paints the surface itself — adding one now means "
+            "remembering two places again"
+        )
 
 
-def test_the_subtab_sits_between_spim_and_acquisition() -> None:
+def test_calibration_sits_between_the_scope_and_acquisition() -> None:
     html = INDEX.read_text(encoding="utf-8")
-    views = re.findall(r'#?operate|data-view="(bottom|spim|cal|acquire)"', html)
-    seen = [v for v in views if v]
-    # first occurrence of each, which is the switcher
-    order: list[str] = []
-    for v in seen:
-        if v not in order:
-            order.append(v)
-    assert order[:4] == ["bottom", "spim", "cal", "acquire"], order
+    bar = html[html.index('id="operate-subtab-switcher"') :]
+    bar = bar[: bar.index("</div>")]
+    assert re.findall(r'data-view="(\w+)"', bar) == ["scope", "cal", "acquire"]
 
 
 def test_calibrate_left_the_spim_bar() -> None:
     """Its result appeared in another tab; the control belonged with the result."""
     html = INDEX.read_text(encoding="utf-8")
-    spim = html[html.index('id="op-pane-spim"') : html.index('id="op-pane-cal"')]
-    assert 'id="op-calibrate"' not in spim, "Calibrate is back in the SPIM head bar"
+    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-cal"')]
+    assert 'id="op-calibrate"' not in scope, "Calibrate is back beside the light-sheet view"
     cal = html[html.index('id="op-pane-cal"') : html.index('id="op-pane-acquire"')]
     assert 'id="op-calibrate"' in cal
     assert 'id="op-cal-result"' in cal, "the fit readout should sit with the button"

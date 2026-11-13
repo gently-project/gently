@@ -1,10 +1,17 @@
-"""Every card on the Bottom cam rail folds to its head row.
+"""A card that folds, folds to its head row, and the rig keeps the choice.
 
 After the Overview frames block got a Show button, every other card on the
-rail wanted one (2026-10-09). One rule for all of
-them (operate.js wireDisclosures): `data-disclose` names the card, the head
+Bottom cam rail wanted one (2026-10-09), and got it: the rail was a 260 px
+strip that scrolled, and folding was how it was made to fit. One rule for all
+of them (operate.js wireDisclosures): `data-disclose` names the card, the head
 row and `.op-disc-keep` stay, the other direct children fold, and the choice
-is remembered per card. CI runs no browser, so the markup and the wiring are
+is the rig's, kept as it is pressed.
+
+In the workspace (2026-11-13) the instrument panels have fixed places and all
+of them fit, so they no longer fold: a panel that can be folded away is a
+panel that is somewhere else the next time. What still folds is what is set
+once a night, the Overview frames box in the rail. The rule and the rig-wide
+memory are unchanged. CI runs no browser, so the markup and the wiring are
 pinned as source.
 """
 
@@ -16,24 +23,29 @@ from pathlib import Path
 WEB = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web"
 HTML = (WEB / "templates" / "index.html").read_text(encoding="utf-8")
 OPERATE = (WEB / "static" / "js" / "operate.js").read_text(encoding="utf-8")
-LIGHT = (WEB / "static" / "js" / "panels" / "light.js").read_text(encoding="utf-8")
 CSS = (WEB / "static" / "css" / "operate.css").read_text(encoding="utf-8")
 
-RAIL = HTML[HTML.index('<aside class="op-inst">') : HTML.index('id="op-pane-spim"')]
+VIEW = HTML[HTML.index('id="devices-view-operate"') : HTML.index('id="devices-view-map"')]
+SCOPE = HTML[HTML.index('id="op-pane-scope"') : HTML.index('id="op-pane-cal"')]
+RAIL = HTML[HTML.index('id="op-erail"') : HTML.index('class="op-panearea"')]
 
 
-def test_every_card_on_the_rail_folds():
-    cards = re.findall(r'data-disclose="([a-z]+)"', RAIL)
-    assert cards == ["camera", "stage", "led", "focus", "overview", "advanced"], cards
-    # Each has its toggle in a head row that stays.
-    for key in cards:
-        block = RAIL[RAIL.index(f'data-disclose="{key}"') :]
-        head = block[: block.index("data-disclose-toggle")]
-        assert 'class="op-disc-head"' in head or 'class="op-gauge-head"' in head, key
+def test_what_folds_is_what_is_set_once_a_night():
+    cards = re.findall(r'data-disclose="([a-z]+)"', VIEW)
+    assert cards == ["overview"], cards
+    block = RAIL[RAIL.index('data-disclose="overview"') :]
+    head = block[: block.index("data-disclose-toggle")]
+    assert 'class="op-disc-head"' in head
 
 
-def test_the_verb_this_pane_cannot_do_without_stays_out_when_folded():
-    assert 'class="op-btn op-btn-toggle op-disc-keep" id="op-cam-toggle"' in RAIL
+def test_the_instrument_panels_do_not_fold():
+    """Light, Sheet, Head and Stage are always where they are."""
+    assert "data-disclose" not in SCOPE
+    for panel in ('id="op-light-host"', 'id="op-sheet"', 'id="op-gauge-fd"', 'id="op-stage-panel"'):
+        assert panel in SCOPE, panel
+
+
+def test_a_folded_card_still_says_what_is_set():
     assert 'class="op-cap op-disc-keep" id="op-ov-summary"' in RAIL
 
 
@@ -43,7 +55,11 @@ def test_one_rule_wired_once_and_kept_by_the_rig():
     assert "wireDisclosures();" in wire
     fn = OPERATE[OPERATE.index("function wireDisclosures()") :]
     fn = fn[: fn.index("\n    }")]
-    assert "'#op-pane-bottom [data-disclose]'" in fn
+    # Any card in the Operate view, wherever it sits: the rail is not inside
+    # a pane any more.
+    assert "'#devices-view-operate [data-disclose]'" in fn
+    every = OPERATE[OPERATE.index("function applyAllDisclosures()") :]
+    assert "'#devices-view-operate [data-disclose]'" in every[: every.index("\n    }")]
     # The choice is the rig's (tests/test_rail_cards_rig_wide.py), not this browser's.
     assert "saveRailCard(key, open)" in fn and "localStorage" not in fn
     assert (
@@ -57,12 +73,6 @@ def test_the_head_row_and_the_kept_children_stay():
     fn = fn[: fn.index("\n    }")]
     assert "':scope > .op-disc-head, :scope > .op-gauge-head'" in fn
     assert "ch.classList.contains('op-disc-keep')" in fn
-
-
-def test_the_led_card_draws_the_heading_and_the_panel_is_mounted_untitled():
-    assert "LightPanel.mount('op-led-host', { only: 'led', titled: false })" in OPERATE
-    assert "function ledCard(s, titled)" in LIGHT
-    assert "titled === false ? '<span></span>' : '<span class=\"lp-title\">LED</span>'" in LIGHT
 
 
 def test_hidden_actually_hides_the_folded_body():

@@ -2414,9 +2414,16 @@ const DevicesManager = (function () {
             const el = document.getElementById(`devices-view-${v}`);
             if (el) el.style.display = (v === viewName) ? '' : 'none';
         }
+        // Operate has no button of its own in this strip: its three surfaces
+        // sit beside it in the toolbar and mark themselves (operate.js), so
+        // with Operate up nothing here is lit.
         if (typeof updateViewButtons === 'function') {
             updateViewButtons('devices-view-switcher', viewName);
         }
+        // The page's padding is the view's to set: the Operate workspace
+        // takes the room to its edges (operate.css).
+        const box = document.querySelector('#devices-content .devices-container');
+        if (box) box.dataset.view = viewName;
         // The 3D optical-space view owns its own WebGL module. Build it lazily
         // on first activation (the panel was display:none, so its container had
         // no size until now); init() is idempotent and resizes on re-entry.

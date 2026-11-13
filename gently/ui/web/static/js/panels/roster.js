@@ -219,7 +219,7 @@ const RosterPanel = (() => {
         // pane you were already on described the fix without offering it.
         // Every mount can now offer the way forward.
         const cta = opts.emptyAction === 'bottom'
-            ? '<button class="rp-cta" type="button" data-goto="bottom">Go to Bottom cam</button>'
+            ? '<button class="rp-cta" type="button" data-goto="bottom">Go to Scope</button>'
             : '';
         return `<div class="rp-empty">No embryos yet — detect on the bottom camera,
                 then register.${cta}</div>`;

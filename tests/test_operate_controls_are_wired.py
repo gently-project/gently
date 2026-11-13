@@ -55,8 +55,16 @@ CONTROLS = {
     "op-target-scope": "$('op-target-scope')",
     "op-gv-in": "$('op-gv-in')",
     "op-pz-in": "$('op-pz-in')",
+    # The same two numbers, typed (panels/numrow.js binds each to its line).
+    "op-gv": "$('op-gv')",
+    "op-pz": "$('op-pz')",
+    # The head, to a typed height.
+    "op-fd-go": "$('op-fd-go')",
+    "op-fd-goto": "$('op-fd-goto')",
     "[data-mode]": "[data-mode]",
     "[data-lib]": "[data-lib]",
+    # Which camera is on screen: the strip above the frame.
+    "[data-source]": "#op-source [data-source]",
 }
 
 
@@ -138,3 +146,23 @@ def test_the_view_takes_its_side_from_the_device_layer() -> None:
     assert "if (Date.now() - _sideChangedAt > SIDE_SWITCH_MS) adoptLsParams();" in src, (
         "a stream on another side is dropped for good instead of followed"
     )
+
+
+def test_a_side_pressed_outranks_a_read_that_was_already_in_flight() -> None:
+    """The read of the device layer's side takes a moment. A side pressed in
+    that moment is newer than the answer on its way; without asking again
+    after the wait, the answer put the strip back on the side just left. The
+    strip made this easy to hit: it enters the surface and chooses the side
+    in one press."""
+    src = OPERATE.read_text(encoding="utf-8")
+    fn = src[src.index("    function adoptLsParams() {") :]
+    fn = fn[: fn.index("\n    }")]
+    guard = "if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;"
+    assert fn.count(guard) == 2, "the switch window is not asked about again after the read"
+    first = fn.index(guard)
+    read = fn.index("await getJSON('/api/devices/lightsheet/live/params')")
+    assert first < read < fn.index(guard, first + 1)
+    # And the strip tells the device layer before it enters the surface.
+    choose = src[src.index("    function chooseSource(src) {") :]
+    choose = choose[: choose.index("\n    }")]
+    assert choose.index("setSpimSide(src)") < choose.index("showPane('spim')")

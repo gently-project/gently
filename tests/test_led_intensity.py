@@ -299,120 +299,117 @@ def _fn(name: str) -> str:
     return body[: body.index("\n    }")]
 
 
-def _led_detail() -> str:
-    """The rows every LED mount draws, the full panel and the LED card alike."""
-    return _fn("ledRows")
+def _led_row() -> str:
+    """The LED's row: its switch and its brightness."""
+    return _fn("ledRow")
 
 
 class TestThePanel:
-    def test_the_slider_writes_to_the_route_that_exists(self):
-        assert "send('/api/devices/led/intensity', { pct: Number(ledPct.value) })" in LIGHT_JS
+    def test_the_brightness_writes_to_the_route_that_exists(self):
+        assert "send('/api/devices/led/intensity', { pct })" in _fn("wire")
 
-    def test_it_writes_on_release_not_on_drag(self):
-        """Every input event would be a serial write to the controller."""
-        assert "ledPct.onchange" in LIGHT_JS
-        assert "ledPct.oninput" not in LIGHT_JS
+    def test_it_writes_when_the_value_is_meant_not_while_it_is_dragged_or_typed(self):
+        """Every input event would be a serial write to the controller, and a
+        number half typed is not the number meant."""
+        wire = _fn("wire")
+        assert "NumRow.bind(range, box, { onCommit })" in wire
+        assert "onInput" not in LIGHT_JS and "oninput" not in LIGHT_JS
+
+    def test_the_brightness_can_be_dragged_or_typed(self):
+        row = _led_row()
+        assert 'type="range" data-led-pct' in row
+        assert "data-led-num" in row and 'class="op-numbox lp-numbox"' in row
+        assert "pair(ledPct, el.querySelector('[data-led-num]')," in _fn("wire")
 
     def test_the_brightness_is_read_from_the_status_the_panel_already_asks_for(self):
         """One request answers both: the device layer is slow to read."""
         assert "d.intensity_pct" in LIGHT_JS
-        # Once in the full read and once in the LED-only one, and never a
-        # second request beside either.
-        assert LIGHT_JS.count("'/api/devices/led/status'") == 2
+        assert LIGHT_JS.count("'/api/devices/led/status'") == 1
         assert _fn("readAll").count("/api/devices/led/") == 1
-        assert _fn("readLed").count("/api/devices/led/") == 1
 
     def test_an_unread_brightness_is_a_dash_and_a_dead_slider(self):
-        body = _led_detail()
-        assert "val == null ? 'disabled' : ''" in body
-        assert "val == null ? '—' : val" in body
+        row = _led_row()
+        assert row.count("${val == null ? 'disabled' : ''}") == 2, "the line or its number is live"
+        assert "${val == null ? '—' : val}" in row
 
     def test_the_bounds_come_from_the_server(self):
-        assert "s.ledLim ||" in _led_detail()
+        row = _led_row()
+        assert "s.ledLim ||" in row
+        assert 'min="${lim.min}" max="${lim.max}" step="1"' in row
 
     def test_a_closed_led_says_why_the_image_did_not_change(self):
-        assert "s.led === 'Closed'" in _led_detail()
+        """The adapter holds a brightness set while closed and applies it on
+        the next open, so the slider moves and the picture does not. The unit
+        says so; it was a sentence under the slider."""
+        row = _led_row()
+        assert "s.led === 'Closed' && val != null ? '% when open' : '%'" in row
+        assert "this is the brightness it will open at" in row
 
     def test_the_panel_no_longer_says_there_is_no_control(self):
         assert "no intensity control" not in LIGHT_JS
 
 
 # ---------------------------------------------------------------------------
-# The bottom camera's LED card
+# The LED, beside either camera
 # ---------------------------------------------------------------------------
 
 WEB = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web"
 OPERATE_JS = (WEB / "static" / "js" / "operate.js").read_text(encoding="utf-8")
 INDEX = (WEB / "templates" / "index.html").read_text(encoding="utf-8")
+SCOPE = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-cal"')]
 
 
-def _pane(name: str) -> str:
-    start = INDEX.index(f'id="op-pane-{name}"')
-    return INDEX[start : INDEX.index("</section>", start)]
-
-
-class TestTheBottomCameraCard:
+class TestTheLedBesideEitherCamera:
     """The bottom camera is lit by the LED, and had no way to dim it.
 
-    It is the Light panel mounted a second time, not a second control: one
-    subject, one panel, one state (docs/architecture/PANELS.md rules 1 and 2).
+    So it got a card: the Light panel mounted a second time, showing the LED
+    alone (`only: 'led'`), on the Bottom cam pane. The pane and the SPIM head
+    are one workspace now, with the whole Light panel beside whichever camera
+    is on screen, and the card and the narrower window are gone: one subject,
+    one panel, one mount (docs/architecture/PANELS.md rules 1 and 2).
     """
 
-    def test_the_host_is_on_the_bottom_pane_and_nowhere_else(self):
-        assert 'id="op-led-host"' in _pane("bottom")
-        assert INDEX.count('id="op-led-host"') == 1
+    def test_there_is_one_light_panel_and_it_is_on_scope(self):
+        assert 'id="op-light-host"' in SCOPE
+        assert INDEX.count('id="op-light-host"') == 1
+        assert 'id="op-led-host"' not in INDEX
+        assert "only: 'led'" not in OPERATE_JS and "opts.only" not in LIGHT_JS
 
-    def test_operate_mounts_the_shared_panel_into_it(self):
-        assert "LightPanel.mount('op-led-host', { only: 'led', titled: false })" in OPERATE_JS
-
-    def test_it_is_mounted_with_the_pane_it_starts_on(self):
-        """`mountLightPanel` waits for the SPIM pane; the bottom pane is first."""
+    def test_it_is_mounted_with_the_panels_not_on_entering_a_surface(self):
+        """`mountLightPanel` used to wait for the SPIM pane, so on the pane the
+        page starts on there was nothing to read the LED with."""
         body = OPERATE_JS[OPERATE_JS.index("function mountPanels()") :]
         body = body[: body.index("\n    }")]
-        assert "op-led-host" in body
+        assert "mountLightPanel();" in body
+        show = OPERATE_JS[OPERATE_JS.index("    function showPane(name) {") :]
+        assert "mountLightPanel" not in show[: show.index("\n    }")]
 
-    def test_the_card_draws_the_same_rows_as_the_full_panel(self):
-        assert "${ledRows(s)}" in _fn("ledCard")
-        assert "${ledRows(s)}" in _fn("ledDetail")
-
-    def test_the_card_offers_nothing_of_the_laser(self):
-        card = _fn("ledCard")
-        for laser in ("modeRow", "laserBranch", "data-config", "data-beam", "lp-emit"):
-            assert laser not in card, f"the LED card draws {laser}"
-
-    def test_the_card_has_a_switch_and_the_full_panel_keeps_its_mode_control(self):
-        """On the bottom pane the LED was read-only: it read Closed after any
-        visit to the SPIM pane (leaving closes it) and nothing there could
-        open it. The switch is the card's; the full panel switches the LED
-        through its mode row, and one control per surface is the rule."""
-        card = _fn("ledCard")
-        assert "data-led-switch=\"${open ? 'Closed' : 'Open'}\"" in card
-        assert "data-led-switch" not in _fn("ledRows")
-        assert "data-led-switch" not in _fn("ledDetail")
-        assert "sw.dataset.ledSwitch === 'Open'" in _fn("wire")
+    def test_the_led_has_a_switch_that_shows_what_was_read(self):
+        """On the bottom pane the LED was once read-only: it read Closed after
+        any visit to the SPIM pane (leaving closed it) and nothing there could
+        open it."""
+        row = _led_row()
+        assert "['Closed', 'Open'].map(v =>" in row
+        assert "const on = s.led === v;" in row
+        assert 'data-led-switch="${v}"' in row
+        assert "act(() => ledSwitch(b.dataset.ledSwitch === 'Open'))" in _fn("wire")
 
     def test_opening_the_led_gates_the_lasers_first_whatever_they_were_doing(self):
-        """This card reads only the LED, so whether a line is routed is
-        unknown here — and unknown is what #106 was made of."""
+        """What the laser is doing may be unread, and unknown is what #106
+        was made of."""
         body = _fn("ledSwitch")
         assert "if (open) await send('/api/devices/laser/config', { config: 'ALL OFF' });" in body
         assert body.index("laser/config") < body.index("led/set")
         assert "state: open ? 'Open' : 'Closed'" in body
 
-    def test_an_led_card_on_screen_reads_only_the_led(self):
-        body = _fn("readLed")
-        assert "/api/devices/led/status" in body
-        for other in ("/api/devices/beam", "/api/devices/laser"):
-            assert other not in body
-
-    def test_an_led_read_does_not_refresh_the_full_panels_age(self):
-        body = _fn("readLed")
-        assert "ledReadAt: Date.now()" in body
-        assert " readAt" not in body and "next.readAt" not in body
-
-    def test_a_full_panel_on_screen_still_reads_everything(self):
-        assert "if (!opts.only) return 'all'" in _fn("visible")
+    def test_a_panel_nobody_is_looking_at_reads_nothing(self):
+        body = LIGHT_JS[LIGHT_JS.index("    async function mount(hostId) {") :]
+        body = body[: body.index("\n    }")]
+        assert "if (visible()) refresh();" in body
+        assert "el.offsetParent !== null" in _fn("visible")
 
     def test_other_callers_refresh_still_reads_everything(self):
         """operate.js calls `LightPanel.refresh()` after it closes the LED."""
-        assert "refresh: readAll," in LIGHT_JS
+        assert "await readAll();" in _fn("refresh")
+        assert "mount, unmount, refresh, emitting, mode, status, wavelengthsOf," in LIGHT_JS
+        assert "LightPanel.refresh()" in OPERATE_JS

@@ -91,16 +91,36 @@ find under pressure.
 
 ### Anatomy
 
-**A card.** Standalone panels sit in `.op-block`: 1px border, 6px radius, panel
-background, consistent padding. Same card as the instrument rail already uses —
-one panel look in the app, not a second one that nearly matches.
+**A box with its name on its top edge.** In the workspace a panel sits in
+`.op-panel`: 1px border, 4px radius, panel background, and its name set into
+the top border the way a group box carries its caption. The name costs no row
+of its own, and a panel reads as one thing from across the room. A shared
+panel's own head (`.lp-head`: its title, and what it has to say beside it,
+such as how old its reading is) becomes that name when the panel is mounted in
+a box. Calibration and Acquisition still use the older card, `.op-block`,
+whose heading is a row inside it.
 
 **A heading.** Small, uppercase, letter-spaced, naming the subject. `.lp-title`
 shares the `.op-block-head` rule rather than defining its own.
 
-**Rows.** `label — control — value`. Labels are fixed-width and muted so the
-values line up down the panel. Values are monospace and tabular, because they
-are read by comparison between glances.
+**Rows.** `label — control — value`, 22 px tall. Labels are fixed-width (46 px
+in a box) and muted so the values line up down the panel. Values are monospace
+and tabular, because they are read by comparison between glances.
+
+**A value that can be set can be typed.** A slider finds a value by looking
+at the picture; a number is how a value is written in a notebook and put back
+the next day. Every adjustable value is both, bound as one control by
+`panels/numrow.js`, with the same rules wherever it appears: the limits are
+the server's (rule 4); a typed value is a draft until Enter or leaving the
+box, and nothing is sent while typing; a value outside the limits is pulled
+inside and the box says so; a value read back never lands under a drag or a
+half-typed number (rule 3 still holds: what is shown at rest is what was
+read).
+
+**Chosen is not the same as on.** A segmented button is filled in the accent
+when the device reports that thing on (a routed line, an open LED, an armed
+beam), and in a neutral tone when what is chosen is rest (Closed, Off). A
+press is a request; what is filled after it is what was read back.
 
 **An em dash for unknown.** Never a plausible default (rule 3). `—` is a
 statement.
@@ -117,19 +137,47 @@ duplication as two controls for one LED, just quieter.
 
 ### Placement
 
-**Panels go where the thing they act on is.** Marking sits under the frame it
-marks, not out in the instrument rail — the marks are on that image. Light and
-Camera sit in the rail beside the surface they drive. The main column is for
-the specimen and the work; the rail is for the state of the instrument.
+**Every panel has one place, and keeps it.** This is the rule the first
+layouts did not have, and its absence was most of what was wrong with them:
+panels flowed into as many columns as fit, each camera's pane assembled its
+own set, and cards folded, so where a control was depended on the window, the
+camera and what had been folded. The Operate workspace (Scope) is three zones
+in one row, and a panel's zone and its position in it do not change
+(`docs/workspace/README.md`):
+
+- **the dish**, left: what is on the coverslip — finding, the embryos, the
+  fields, the overview frames;
+- **what the rig sees**, middle: one frame, the strip that chooses its
+  camera, and the camera's own things (its live view, its exposure, its
+  display range);
+- **the instrument**, right: Light and Sheet, Head and Stage, in two columns
+  whose order is fixed. A narrower window stacks the second column under the
+  first; it does not reorder them.
+
+Only what belongs to one camera changes with the camera. The instrument is
+the same with either, and no control is switched off by which camera is on
+screen.
+
+**Panels go where the thing they act on is.** Exposure is in the strip with
+its camera. The display range is under the frame it applies to. Finding sits
+in the dish, beside the list it fills.
 
 Group by subject, not by widget type. Everything about illumination is in one
 panel; exposure is with its camera and not with the light.
 
+**A panel does not fold.** A panel that can be folded away is somewhere else
+the next time, and the workspace is sized so that at the desktop app's window
+(1440×920) everything is on screen at once. What may fold is a box of
+settings made once a night whose closed state still says what is set (the
+overview frames); the rig keeps that choice (`/api/ui/rail-cards`).
+
 ### Overflow
 
-The rail scrolls, and must show that it does. `scrollbar-gutter: stable` keeps
-a scrollbar appearing from reflowing the rail, and the scrollbar is the signal
-that there is more below.
+At the desktop app's window nothing in the workspace scrolls. In a shorter
+window the instrument column scrolls, and shows that it does; in a window too
+narrow for three zones the workspace becomes one column (the frame, the
+instrument, the dish) and the page scrolls. Nothing is clipped at any size:
+a control that has left the window does not exist, and that includes HALT.
 
 **Nothing may claim vertical space to say nothing.** The temperature strip
 rendered "No temperature data yet" permanently and cost ~60px, which pushed
@@ -142,13 +190,14 @@ constraint.
 
 | Panel | Subject | Mounted in | Notes |
 |---|---|---|---|
-| Light | LED state and brightness, beam, routed lines, per-line power | SPIM head; bottom camera (`only: 'led'`) | read-back; derives EMITTING; the LED-only mount reads only the LED |
-| ImageView | zoom, pan, contrast, brightness | both camera surfaces | view state, stays local |
-| Camera | exposure | both camera surfaces | untitled inside a block that already names the camera |
-| Marking | pending marks vs registered roster, detect/register/clear | bottom camera | renders state, calls operate.js for the verbs |
-| Roster | the embryo list | rail + Acquisition | actions declared per mount; `showFit` reads the gate's field |
-| Fields | the bottom camera's fields of view for the brightfield overview | rail + Acquisition | the other list of places a run goes back to; built on Bottom cam beside the stage pad, kept in the session (`overview_fields.yaml`), read by the plan as "taken from the fields" |
-| BrightfieldRefs | the overview frames' dark and flat | bottom camera (Overview frames block) | reads the plan's light, LED and exposure fields, which sit above it on the same pane; the flat needs the stage driven clear, so it lives where the pad is |
+| Light | the LED and its brightness, the laser presets, every line's power, the beam per side, and one status line | Scope (the instrument) | read-back; derives what is emitting, and says it on a line that is always there; one mount, beside either camera (it had a second, LED-only, on the old Bottom cam pane) |
+| ImageView | zoom, pan, contrast, brightness | each camera's frame | view state, stays local |
+| Camera | exposure | the camera strip above the frame, one per camera | untitled: the strip already names the camera |
+| StagePad | the XY stage: where it is, and a jog by a chosen step | Scope (the Stage panel) | the server keeps the target inside the XY envelope; nothing interlocks it against the head |
+| Marking | pending marks vs registered roster, detect/register/clear | the dish rail | renders state, calls operate.js for the verbs |
+| Roster | the embryo list | the dish rail + Acquisition | actions declared per mount; `showFit` reads the gate's field |
+| Fields | the bottom camera's fields of view for the brightfield overview | the dish rail + Acquisition | the other list of places a run goes back to; kept in the session (`overview_fields.yaml`), read by the plan as "taken from the fields" |
+| BrightfieldRefs | the overview frames' dark and flat | the dish rail (Overview frames box) | reads the plan's light, LED and exposure fields, which sit above it in the same box; the flat needs the stage driven clear, and the pad is on the same screen |
 | CalProgress | the frames a calibration is judging | Calibration | reads the existing image broadcast; owns no run |
 
 The Roster panel is the clearest case of rule 1 paying off: it replaced

@@ -36,7 +36,6 @@ TOGGLED_CLASSES = [
     "cp",
     "cp-strip",
     "cal-adv",
-    "op-adv",
     "al-history",
     "boot-banner",
     "devices-limits",
@@ -76,7 +75,7 @@ def test_every_hideable_class_can_actually_hide() -> None:
 def test_the_guards_are_not_quietly_deleted() -> None:
     """The bug is invisible to anything that asks the DOM, so pin the fix."""
     css = _all_css()
-    for cls in ("rig-progress", "cp", "cal-adv", "op-adv"):
+    for cls in ("rig-progress", "cp", "cal-adv"):
         assert _has_guard(css, cls), f".{cls} lost its [hidden] guard"
 
 
