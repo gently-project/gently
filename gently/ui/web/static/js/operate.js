@@ -1221,7 +1221,7 @@ const OperateManager = (function () {
     }
 
     async function toggleBottomCam() {
-        if (!_bottomOn && !mayTakeFromRun('Starting the bottom camera')) return;
+        if (!_bottomOn && !mayTakeFromRun('A live view from the bottom camera')) return;
         const b = $('op-cam-toggle');
         const done = pending(b, _bottomOn ? 'Stopping…' : 'Starting…');
         try {
@@ -1397,7 +1397,7 @@ const OperateManager = (function () {
 
     // ══ SPIM PANE ═══════════════════════════════════════════════════════════
     async function toggleSpim() {
-        if (!_spimOn && !mayTakeFromRun('Starting the light-sheet view')) return;
+        if (!_spimOn && !mayTakeFromRun('A live view of the light sheet')) return;
         const b = $('op-spim-toggle');
         const done = pending(b, _spimOn ? 'Stopping…' : 'Starting…');
         try {

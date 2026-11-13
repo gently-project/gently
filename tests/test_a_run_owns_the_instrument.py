@@ -102,9 +102,9 @@ def test_the_head_asks_and_the_bottom_focus_does_not() -> None:
 
 def test_starting_a_view_asks_and_stopping_one_never_does() -> None:
     cam = _fn("    async function toggleBottomCam() {")
-    assert "if (!_bottomOn && !mayTakeFromRun('Starting the bottom camera')) return;" in cam
+    assert "if (!_bottomOn && !mayTakeFromRun('A live view from the bottom camera')) return;" in cam
     spim = _fn("    async function toggleSpim() {")
-    assert "if (!_spimOn && !mayTakeFromRun('Starting the light-sheet view')) return;" in spim
+    assert "if (!_spimOn && !mayTakeFromRun('A live view of the light sheet')) return;" in spim
     for stop in ("    function stopBottom() {", "    function stopSpim() {"):
         assert "mayTakeFromRun" not in _fn(stop), stop
 
