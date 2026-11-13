@@ -110,6 +110,12 @@ class DiSPIMMicroscope(Microscope):
         if self._session:
             await self._session.close()
             self._session = None
+        # A client with no session is not connected, and has to say so: the
+        # device-layer watcher reconnects only a client that reports it is
+        # down. Left set, a device layer that stopped and came back found the
+        # app "attached" with no session, and every hardware route answered
+        # 502 with an empty message until the app itself was restarted.
+        self._qs_connected = False
         self._sam_available = False
 
     @property
