@@ -198,6 +198,12 @@ def _write_yaml(path: Path, data: Any) -> None:
         # os.replace is atomic and overwrites on Windows — no unlink gap that
         # a crash/power-loss could leave the target missing.
         os.replace(tmp, path)
+        # What was read of this file before is no longer what it says. The
+        # read memo below goes by the file's time and size, and a file
+        # rewritten at the same size inside one tick of the clock has both
+        # unchanged: a session moved between two projects whose ids are the
+        # same length read back as still in the first, about one run in six.
+        _YAML_MEMO.pop(str(path), None)
     except BaseException:
         # Clean up temp file on failure
         try:
