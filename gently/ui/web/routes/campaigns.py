@@ -821,7 +821,13 @@ def create_router(server) -> APIRouter:
         sessions = cs.get_planned_sessions(campaign_id=campaign.id)
         return {"sessions": [_serialize(s) for s in sessions]}
 
-    @router.patch("/api/campaigns/{campaign_id}/items/{item_id}")
+    # These two were guarded by the mesh's peer check (this machine, or a
+    # paired peer with the campaigns scope). The mesh is gone; what they do
+    # is change what a project holds, so they take the guard every other
+    # route here that does that takes.
+    @router.patch(
+        "/api/campaigns/{campaign_id}/items/{item_id}", dependencies=[Depends(require_control)]
+    )
     async def update_item(campaign_id: str, item_id: str, request: Request):
         """Edit plan-item fields and/or imaging-spec fields inline.
 
@@ -873,7 +879,10 @@ def create_router(server) -> APIRouter:
         updated = cs.get_plan_item(item_id)
         return {"ok": True, "item": _serialize(updated)}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/status")
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/status",
+        dependencies=[Depends(require_control)],
+    )
     async def update_item_status(campaign_id: str, item_id: str, request: Request):
         cs = _get_store()
         _resolve(cs, campaign_id)

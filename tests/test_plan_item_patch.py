@@ -8,7 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def _make_app(context_store):
+def _make_app(context_store, control=True):
+    from gently.ui.web.auth import require_control
     from gently.ui.web.routes.campaigns import create_router
 
     app = FastAPI()
@@ -19,6 +20,10 @@ def _make_app(context_store):
     server = _Server()
     server.context_store = context_store
     app.include_router(create_router(server))
+    # The test client is not this machine as far as the server can tell, so
+    # control is given here; `control=False` leaves the real check in place.
+    if control:
+        app.dependency_overrides[require_control] = lambda: None
     return app
 
 
@@ -94,3 +99,24 @@ class TestPatchItem:
         client = TestClient(_make_app(file_context_store))
         r = client.patch(f"/api/campaigns/{cid}/items/nope", json={"title": "x"})
         assert r.status_code == 404
+
+
+class TestOnlyWhoHasControlEditsAPlan:
+    """The mesh's peer check used to stand on these two routes. With the mesh
+    gone they were open to anyone who could reach the port; they take the
+    control check the rest of the project routes take."""
+
+    def test_an_edit_without_control_is_refused(self, file_context_store):
+        cid, iid = _seed_imaging(file_context_store)
+        client = TestClient(_make_app(file_context_store, control=False))
+        r = client.patch(f"/api/campaigns/{cid}/items/{iid}", json={"title": "not mine to change"})
+        assert r.status_code == 403
+        assert file_context_store.get_plan_item(iid).title == "WT baseline"
+
+    def test_a_status_change_without_control_is_refused(self, file_context_store):
+        cid, iid = _seed_imaging(file_context_store)
+        before = file_context_store.get_plan_item(iid).status
+        client = TestClient(_make_app(file_context_store, control=False))
+        r = client.post(f"/api/campaigns/{cid}/items/{iid}/status", json={"status": "completed"})
+        assert r.status_code == 403
+        assert file_context_store.get_plan_item(iid).status == before
