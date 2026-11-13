@@ -223,7 +223,7 @@ def test_the_control_lives_where_centring_does() -> None:
     """
     html = (GENTLY / "ui" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
     assert html.count('id="op-align-set"') == 1, "there is more than one SPIM-centre control"
-    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-cal"')]
+    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-acquire"')]
     stage = scope[scope.index('id="op-stage-panel"') :]
     assert 'id="op-align-set"' in stage, "the SPIM-centre control left the Stage panel"
     assert 'id="op-align-value"' in stage and 'id="op-align-history"' in stage
@@ -232,7 +232,7 @@ def test_the_control_lives_where_centring_does() -> None:
 def test_the_offset_in_effect_is_never_hidden_behind_the_disclosure() -> None:
     """A correction nobody can see is how people chase ghosts."""
     html = (GENTLY / "ui" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
-    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-cal"')]
+    scope = html[html.index('id="op-pane-scope"') : html.index('id="op-pane-acquire"')]
     view = scope[scope.index('class="op-view"') : scope.index('<aside class="op-inst"')]
     assert 'id="op-align-line"' in view, (
         "the always-visible offset line left the frame's caption, so an "

@@ -68,7 +68,7 @@ def _section(html: str, start: str, end: str) -> str:
 
 # Scope: the rail and the workspace beside it, which is everything on screen
 # with the picture.
-SCOPE = _section(INDEX, 'id="op-erail"', 'id="op-pane-cal"')
+SCOPE = _section(INDEX, 'id="op-erail"', 'id="op-pane-acquire"')
 ACQUIRE = _section(INDEX, 'id="op-pane-acquire"', ".op-panearea -->")
 RAIL = _section(INDEX, 'id="op-erail"', 'class="op-panearea"')
 

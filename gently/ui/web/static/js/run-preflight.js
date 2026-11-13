@@ -234,7 +234,34 @@ const RunPreflight = (() => {
         return { blocked, says: blocked ? `${blocked} ${plural(blocked, 'thing', 'things')} in the way` : '' };
     }
 
-    return { OVERHEAD_S, SLICE_BYTES, estimate, span, size, keptWords, lines, verdict };
+    /**
+     * A calibration was refused with nothing to see. The server cannot tell
+     * an unlit sheet from a raised head from a stage that is somewhere else,
+     * so it advises checking all three. The page can read all three: what it
+     * can see to be wrong, and the panel that puts it right. Nothing it
+     * cannot read is guessed at.
+     *
+     *   emitting   true | false | null   a laser line is emitting (null: not read)
+     *   ledOpen    boolean               the LED is open
+     *   head       {um, gotoMin} | null  as in `lines`
+     *   atEmbryo   true | false | null   the stage is at the selected embryo
+     *
+     * @returns {Array<{panel: 'light'|'head'|'stage', says: string}>}
+     */
+    function calibrationPoints(ctx) {
+        const c = ctx || {};
+        const out = [];
+        if (c.emitting === false) out.push({ panel: 'light', says: 'No laser line is emitting.' });
+        else if (c.ledOpen) out.push({ panel: 'light', says: 'The LED is open.' });
+        const head = c.head;
+        if (head && Number.isFinite(head.um) && Number.isFinite(head.gotoMin) && head.um > head.gotoMin) {
+            out.push({ panel: 'head', says: `The head is at ${count(Math.round(head.um * 10) / 10)} µm, off the sample.` });
+        }
+        if (c.atEmbryo === false) out.push({ panel: 'stage', says: 'The stage is not at this embryo.' });
+        return out;
+    }
+
+    return { OVERHEAD_S, SLICE_BYTES, estimate, span, size, keptWords, lines, verdict, calibrationPoints };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = RunPreflight;

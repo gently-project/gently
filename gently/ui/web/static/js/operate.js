@@ -1423,7 +1423,7 @@ const OperateManager = (function () {
     // The strip above the frame. The bottom camera is its own surface; the
     // three light-sheet choices are the SPIM surface on a side.
     function renderSource() {
-        const on = _pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : null;
+        const on = _pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : _pane === 'cal' ? 'fit' : null;
         document.querySelectorAll('#op-source [data-source]').forEach(b => {
             const is = b.dataset.source === on;
             b.classList.toggle('is-on', is);
@@ -1432,6 +1432,8 @@ const OperateManager = (function () {
     }
     function chooseSource(src) {
         if (src === 'bottom') { showPane('bottom'); return; }
+        // Not a camera: what the selected embryo's calibration looks at.
+        if (src === 'fit') { showPane('cal'); return; }
         // A side pressed is the side wanted. It is told to the device layer
         // BEFORE the surface is entered, so the read on entering finds this
         // page's own switch a moment old and leaves it be (adoptLsParams).
@@ -1670,6 +1672,10 @@ const OperateManager = (function () {
 
     async function calibrateSelected(opts) {
         if (!_selected) { toastFail('Select an embryo first'); return; }
+        // The button is in the Sheet panel, on screen with any camera. The run
+        // takes the light-sheet camera for itself, so whichever view was live
+        // is stopped (its surface's onLeave) and Fit comes up to show the run.
+        if (_pane !== 'cal') showPane('cal');
         hideRefusal();
         const b = $('op-calibrate'), out = $('op-cal-result');
         // A routine that runs for tens of seconds behind a disabled button is
@@ -1772,21 +1778,35 @@ const OperateManager = (function () {
         renderBorrow(emb);
         renderCalibrateAll();
         renderClearFit(emb);
+        renderFitRow();
+        if (emb) renderCalKept(emb);
+    }
+
+    // The Sheet panel's Fit row: whose fit, what it is, and the verb. It is
+    // on screen with any camera, so it is drawn with the instrument
+    // (renderScope) and reads nothing from the server.
+    function renderFitRow() {
+        const emb = _embryos.find(e => e.id === _selected);
         // The verb says which of the two things it does. Running it again over
         // a fit that already exists is a different decision from calibrating
         // something that has none, and the button used to read the same.
         const b = $('op-calibrate');
         if (b && !b.disabled) b.textContent = hasFit(emb) ? 'Recalibrate' : 'Calibrate';
         const out = $('op-cal-result');
-        if (!out || !emb) return;
-        if (hasFit(emb)) {
+        if (!out) return;
+        // While a run goes the line is the run's ("sweeping…"); it is put
+        // back when the run ends and the button with it.
+        if (b && b.disabled) return;
+        let says = 'no embryo selected';
+        if (emb && hasFit(emb)) {
             const r2 = (emb.calibration || {}).r_squared;
-            out.textContent = `${Number(emb.calibration.slope_um_per_deg).toFixed(1)} µm/deg`
+            says = `embryo ${labelFor(emb)} · ${Number(emb.calibration.slope_um_per_deg).toFixed(1)} µm/deg`
                 + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
-        } else {
-            out.textContent = 'not calibrated';
+        } else if (emb) {
+            says = `embryo ${labelFor(emb)} · not calibrated`;
         }
-        renderCalKept(emb);
+        out.textContent = says;
+        out.title = says;
     }
 
     // ── what the calibration looked at ──────────────────────────────────────
@@ -1905,14 +1925,39 @@ const OperateManager = (function () {
         const detail = (err && err.data && err.data.detail) || (err && err.message) || '';
         // First line is the verdict; the rest is per-position detail the
         // filmstrip already shows. Keep the line short and let them look.
-        why_.textContent = String(detail).split(String.fromCharCode(10))[0]
+        const verdict = String(detail).split(String.fromCharCode(10))[0]
             || 'Nothing visible at the expected focus.';
+        // The server cannot tell an unlit sheet from a raised head from a
+        // stage that is somewhere else: its advice is to check all three.
+        // The page can read all three, and they are on screen beside this.
+        const points = pointAtWhatIsWrong();
+        const stop = /[.!?]$/.test(verdict) ? '' : '.';
+        why_.textContent = points.length ? `${verdict}${stop} ${points.map(p => p.says).join(' ')}` : verdict;
         row.hidden = false;
+    }
+
+    const POINTED = { light: 'op-light-host', head: 'op-gauge-fd', stage: 'op-stage-panel' };
+    function pointAtWhatIsWrong() {
+        if (typeof RunPreflight === 'undefined' || !RunPreflight.calibrationPoints) return [];
+        const light = SharedState.get('light');
+        const points = RunPreflight.calibrationPoints({
+            emitting: typeof LightPanel !== 'undefined' && light ? LightPanel.emitting(light) : null,
+            ledOpen: ledIsOpen(),
+            head: fd.pos() != null ? { um: fd.pos(), gotoMin: gotoLimits().lo } : null,
+            atEmbryo: _xy ? atSelected() : null,
+        });
+        unpoint();
+        points.forEach(p => { const el = $(POINTED[p.panel]); if (el) el.classList.add('is-pointed'); });
+        return points;
+    }
+    function unpoint() {
+        Object.values(POINTED).forEach(id => { const el = $(id); if (el) el.classList.remove('is-pointed'); });
     }
 
     function hideRefusal() {
         const row = $('op-cal-refused');
         if (row) row.hidden = true;
+        unpoint();
     }
 
     // ── clearing a fit ──────────────────────────────────────────────────────
@@ -3911,18 +3956,21 @@ const OperateManager = (function () {
     // so two live decoders is the condition that risks a Video-TDR freeze. "The
     // camera is live while you are looking at it" guarantees at most one.
     // Workflow order, and the single list: each surface, and the section of
-    // the page it is drawn in. The two camera surfaces are one section,
-    // Scope, and which camera's frame it shows is `[data-src]` (paintPane).
+    // the page it is drawn in. The two camera surfaces and calibration are
+    // one section, Scope, and which of them its picture shows is `[data-src]`
+    // (paintPane). Calibration was a section of its own; what it needs (the
+    // sheet, the embryo list, the light-sheet camera, the laser) is on Scope
+    // and none of it was on that page.
     // The list used to be spelled out in showPane and again in
     // showPaneInitial, so adding a pane meant remembering both.
-    const PANE_SECTION = { bottom: 'scope', spim: 'scope', cal: 'cal', acquire: 'acquire' };
+    const PANE_SECTION = { bottom: 'scope', spim: 'scope', cal: 'scope', acquire: 'acquire' };
     const SECTIONS = [...new Set(Object.values(PANE_SECTION))];
     const inScope = name => PANE_SECTION[name] === 'scope';
     // The instrument panels are on screen with either camera, so either
     // camera's surface draws all of them.
     function renderScope() {
         renderMarkCount(); drawMarkers(); renderSpimTarget();
-        bz.render(); fd.render(); renderGoto();
+        bz.render(); fd.render(); renderGoto(); renderFitRow();
     }
 
     const PANES = {
@@ -3938,17 +3986,20 @@ const OperateManager = (function () {
             // camera too, and the Light panel beside the frame goes on
             // saying what it is. Leaving Scope closes it, as leaving the
             // SPIM head always has.
-            onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to)) forceLedOff(); },
+            // Fit is in Scope too, and going to it closes the LED as going
+            // to the Calibration page did: under the LED alone a calibration
+            // has no nuclei to find (#106).
+            onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to) || to === 'cal') forceLedOff(); },
             render() { renderScope(); },
         },
         cal: {
             // Calibration takes its own frames; it never read the live view,
-            // and this pane has no image to show one on. Entering used to
+            // and Fit has no image to show one on. Entering used to
             // restart the stream anyway, unseen. Leaving closes the LED — the
             // calibrate path never did (#106).
             onEnter() { renderCalTarget(); },
             onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
-            render() { renderCalTarget(); },
+            render() { renderScope(); renderCalTarget(); },
         },
         acquire: {
             // The run is watched while this pane is open: a poll for the

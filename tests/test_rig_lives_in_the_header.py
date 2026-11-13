@@ -129,7 +129,7 @@ def test_the_display_range_sits_under_the_frame_at_its_width() -> None:
     assert cam and "100cqh" in cam.group(1) and "var(--op-display-h)" in cam.group(1), (
         "the frame's height is no longer the room there is less what sits around it"
     )
-    scope = index[index.index('id="op-pane-scope"') : index.index('id="op-pane-cal"')]
+    scope = index[index.index('id="op-pane-scope"') : index.index('id="op-pane-acquire"')]
     view = scope[scope.index('class="op-view"') : scope.index('<aside class="op-inst"')]
     for host in ("op-display-bottom", "op-display-spim"):
         assert f'id="{host}"' in view, f"{host} is not in the frame's column"

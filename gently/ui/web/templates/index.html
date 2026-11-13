@@ -461,11 +461,12 @@
                 <div class="devices-header-left">
                     <div class="view-switcher op-subviews" id="operate-subtab-switcher" aria-label="Operate surfaces">
                         <button class="view-btn active" data-view="scope" title="The dish, what the rig sees and the instrument, on one screen (o)">Scope</button>
-                        <!-- #108: the step between finding the embryo and setting up the
-                             run, as the operator described it on the 2026-08-07 walkthrough:
-                             find the embryos on the bottom camera, find them with the SPIM
-                             head, calibrate, then set up the acquisition parameters. -->
-                        <button class="view-btn" data-view="cal" title="Calibration">Calibration</button>
+                        {# Calibration was a surface of its own between these two
+                           (#108). It is on Scope now: the Fit entry of the strip
+                           above the picture, and a row in the Sheet panel. The
+                           sheet, the embryo, the light-sheet camera and the laser
+                           a calibration needs are all on Scope and none was on
+                           that page (docs/workspace/calibration-and-acquisition.md). #}
                         <button class="view-btn" data-view="acquire" title="Acquisition setup">Acquisition</button>
                     </div>
                     <span class="devices-tb-rule" aria-hidden="true"></span>
@@ -641,11 +642,15 @@
                            exposure, A red over B green, for alignment. The
                            galvo and piezo lines in the Sheet panel belong to
                            the side chosen here. -->
-                      <span class="op-source" id="op-source" role="radiogroup" aria-label="The camera on screen">
+                      <span class="op-source" id="op-source" role="radiogroup" aria-label="What is on screen">
                         <button class="op-srcb is-on" data-source="bottom" type="button" aria-pressed="true" title="The bottom camera: the dish from below">Bottom cam</button>
                         <button class="op-srcb" data-source="A" type="button" aria-pressed="false" title="Light sheet, side A: scanner AB · piezo P · camera 1">SPIM A</button>
                         <button class="op-srcb" data-source="B" type="button" aria-pressed="false" title="Light sheet, side B: scanner CD · piezo Q · camera 2">SPIM B</button>
                         <button class="op-srcb" data-source="Multi" type="button" aria-pressed="false" title="Both light-sheet cameras in one frame: A red, B green">Multi</button>
+                        {# Not a camera: what a calibration of the selected
+                           embryo looks at, while it looks and afterwards.
+                           The surface is still named `cal` in operate.js. #}
+                        <button class="op-srcb" data-source="fit" type="button" aria-pressed="false" title="The selected embryo's piezo–galvo fit: what its calibration looks at, while it looks and afterwards">Fit</button>
                       </span>
                       {# A live view is on because someone pressed Start, and
                          only while its camera is the one on screen: choosing
@@ -676,6 +681,83 @@
                       </div>
                     </div>
 
+                    {# The Fit view: calibration, on Scope. What the run is
+                       looking at while it looks, why it would not start, and
+                       what the last one kept. It takes its own frames, so no
+                       live view runs here; the box is the bottom camera's
+                       shape so the instrument beside it does not move. #}
+                    <div class="op-cam op-calfit" id="op-cam-cal" data-src="cal" hidden>
+                      <div class="op-calfit-body">
+                        <!-- Declares the method before it runs. Kesavan on the
+                             walkthrough: "when there is a calibrate option, it should
+                             show what is the method it is going to use to calibrate."
+                             Follows the Method select below (#267). -->
+                        <p class="op-cap" id="op-cal-method">
+                          Legacy sweep — a galvo sweep read by the light-sheet
+                          camera, then a piezo focus sweep. Needs the laser: the LED
+                          alone gives a DIC-like image with no nuclei to find.
+                        </p>
+                        <div class="cal-adv" id="cal-adv" hidden>
+                          <div class="op-row op-row-wrap" id="cal-adv-bounds" hidden>
+                            <label class="cal-opt"><span class="op-label">Galvo top</span>
+                              <input type="number" class="cal-num" id="cal-gtop" step="0.01" placeholder="auto"></label>
+                            <label class="cal-opt"><span class="op-label">bottom</span>
+                              <input type="number" class="cal-num" id="cal-gbot" step="0.01" placeholder="auto"></label>
+                          </div>
+                          <div class="op-row op-row-wrap">
+                            <label class="cal-opt"><span class="op-label">Edge step</span>
+                              <input type="number" class="cal-num" id="cal-estep" min="0.001" max="1" step="0.01" value="0.05">
+                              <span class="op-unit">deg</span></label>
+                            <label class="cal-opt"><span class="op-label">Search range</span>
+                              <input type="number" class="cal-num" id="cal-erange" min="0.01" max="5" step="0.05" value="0.5">
+                              <span class="op-unit">deg</span></label>
+                          </div>
+                          <div class="op-row op-row-wrap">
+                            <label class="cal-opt"><span class="op-label">Edge tolerance</span>
+                              <input type="number" class="cal-num" id="cal-etol" min="0" max="2" step="0.01" value="0.2">
+                              <span class="op-unit">deg</span></label>
+                            <label class="cal-opt"><span class="op-label">Inset</span>
+                              <input type="number" class="cal-num" id="cal-inset" min="0" max="0.49" step="0.05" value="0.4">
+                              <span class="op-unit">of range</span></label>
+                          </div>
+                          <p class="op-cap" id="cal-adv-note">
+                            Tolerance widens the detected range; inset moves the two
+                            calibration points in from its ends. Together they set how
+                            far apart the points sit — too close and the two-point
+                            slope fit amplifies noise on small embryos.
+                          </p>
+                          <button type="button" class="op-btn op-btn-quiet" id="cal-reset">Reset to defaults</button>
+                        </div>
+                        <p class="op-cap" id="op-cal-borrow-note" hidden></p>
+                        {# The pre-flight refusal, and the way past it. Appears
+                           only after a calibration has declined to start. #}
+                        <div class="op-row op-row-wrap cal-refused" id="op-cal-refused" hidden>
+                          <span class="op-cap op-cap-warn" id="op-cal-refused-why"></span>
+                          <button class="op-btn op-btn-warn" id="op-cal-anyway" type="button">Calibrate anyway</button>
+                        </div>
+                        {# What the run is looking at, while it looks. Empty —
+                           and takes no room — until frames arrive. #}
+                        <div id="op-cal-progress"></div>
+                        <figure class="op-preview" id="op-preview" hidden>
+                          <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
+                          <figcaption class="op-preview-cap">
+                            <span class="op-preview-title" id="op-preview-title"></span>
+                            <span class="op-preview-meta" id="op-preview-meta"></span>
+                          </figcaption>
+                        </figure>
+                        {# What the calibration looked at, kept with the embryo: the
+                           latest run's plots, and every image behind a click. #}
+                        <div class="op-cal-kept" id="op-cal-kept" hidden>
+                          <div class="op-cal-kept-head">
+                            <span class="op-cap" id="op-cal-kept-say"></span>
+                            <button class="op-nbtn" id="op-cal-kept-open" type="button"
+                                    title="Open this run's folder in the file manager">Open folder</button>
+                          </div>
+                          <div class="op-cal-kept-strip" id="op-cal-kept-strip"></div>
+                        </div>
+                      </div>
+                    </div>
+
                     <!-- One line under the frame, about the frame: on the left
                          what a click does (bottom camera) or which embryo this
                          is (light sheet); on the right what is arriving. -->
@@ -690,6 +772,9 @@
                       <span class="op-bar-says" data-src="spim" hidden>
                         <span class="op-cap" id="op-spim-target">No embryo selected</span>
                       </span>
+                      <span class="op-bar-says" data-src="cal" hidden>
+                        <span class="op-cap" id="op-cal-target">no embryo selected</span>
+                      </span>
                       <span class="op-view-meta" id="op-view-meta" title="Frames a second reaching this page, and the sensor's size in pixels"></span>
                     </div>
 
@@ -697,6 +782,58 @@
                          Nothing sits on the pixels. Each camera keeps its own. -->
                     <div class="op-panel op-block-display" id="op-display-bottom" data-src="bottom"></div>
                     <div class="op-panel op-block-display" id="op-display-spim" data-src="spim" hidden></div>
+                    {# In Display's place while Fit is up: how the selected
+                       embryo is calibrated, and the three verbs that are not
+                       Calibrate. Calibrate itself is in the Sheet panel, where
+                       it can be pressed with any camera on screen. #}
+                    <div class="op-panel op-block-display op-calfit-opts" id="op-display-cal" data-src="cal" hidden>
+                      {# The routine's own parameters, not a fixed recipe. Edge
+                         detection and the z buffer are the two an operator
+                         changes between samples; the rest place the pair of
+                         calibration points inside the detected galvo range and
+                         are wrong to touch without a reason, so they sit behind
+                         a disclosure. Defaults match calibrate_embryo. #}
+                      <div class="op-row op-row-wrap cal-opts">
+                        {# Which routine runs. Legacy is the software sweep; scan is
+                           the hardware-timed one (#267). Both stay until the rig
+                           says which to keep. #}
+                        <label class="cal-opt">
+                          <span class="op-label">Method</span>
+                          <select class="cal-num" id="cal-method">
+                            <option value="legacy" selected>Legacy sweep</option>
+                            <option value="scan">Scan</option>
+                          </select>
+                        </label>
+                        <label class="cal-opt">
+                          <input type="checkbox" id="cal-edges" checked>
+                          <span class="op-label">Find galvo edges</span>
+                        </label>
+                        <label class="cal-opt">
+                          <span class="op-label">Z buffer</span>
+                          <input type="number" class="cal-num" id="cal-zbuf" min="0" max="500" step="1" value="25">
+                          <span class="op-unit">µm</span>
+                        </label>
+                        <button type="button" class="op-btn op-btn-quiet" id="cal-more"
+                                aria-expanded="false" aria-controls="cal-adv">More…</button>
+                      </div>
+                      <div class="op-actions">
+                        {# Borrowing lends another embryo's slope and measures this
+                           embryo's own extent and focus from it: a short scan, not
+                           a free copy (#267). Any embryo with a fit can lend, best
+                           first; hidden entirely when nothing has a fit to lend. #}
+                        <label class="cal-opt" id="op-cal-borrow-row" hidden>
+                          <span class="op-label">From</span>
+                          <select class="cal-num" id="op-cal-borrow-from"></select>
+                        </label>
+                        <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
+                        {# The rest of the slide, in one go. Absent when every
+                           embryo already has a fit — there is nothing to say. #}
+                        <button class="op-btn" id="op-cal-all" type="button" hidden>Calibrate the rest</button>
+                        {# Only where there is a fit to discard. Two clicks:
+                           the numbers it drops cost ~70 exposures to measure. #}
+                        <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- The instrument: one panel per subsystem, in two columns
@@ -738,6 +875,17 @@
                           <span class="op-ext" id="op-pz-max">+100</span>
                           <input class="op-numbox" id="op-pz" type="text" inputmode="decimal" value="0.0" autocomplete="off"
                                  data-decimals="1" aria-label="Piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
+                        {# The selected embryo's piezo–galvo fit and the press
+                           that measures it, with the sheet it is a fit of. Here,
+                           not on a page of its own, because a calibration needs
+                           the laser, the embryo list and the light-sheet camera,
+                           and those are on Scope. Pressing it brings up Fit.
+                           Abort shows only while a calibration runs: it cancels
+                           the routine at its next step and halts every positioner. #}
+                        <div class="op-row op-fitrow"><span class="op-label">Fit</span>
+                          <span class="op-num op-fit-says" id="op-cal-result">—</span>
+                          <button class="op-btn op-btn-warn" id="op-cal-abort" type="button" hidden>Abort</button>
+                          <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button></div>
                         <div class="op-cap" id="op-spim-multi-note" hidden>Multi is both sides in one frame. Choose SPIM A or SPIM B to move a sheet.</div>
                       </div>
                     </div>
@@ -841,140 +989,6 @@
                      up the run. On the walkthrough, after setting up the bottom camera
                      and SPIM head, the operator was not sure what to do next in
                      Gently. This is what came next. -->
-                <section class="op-pane" id="op-pane-cal" data-pane="cal" hidden>
-                  <div class="op-main">
-                    <div class="op-block">
-                      <div class="op-block-head">Calibrate</div>
-                      <!-- Declares the method before it runs. Kesavan on the
-                           walkthrough: "when there is a calibrate option, it should
-                           show what is the method it is going to use to calibrate."
-                           Follows the Method select below (#267). -->
-                      <p class="op-cap" id="op-cal-method">
-                        Legacy sweep — a galvo sweep read by the light-sheet
-                        camera, then a piezo focus sweep. Needs the laser: the LED
-                        alone gives a DIC-like image with no nuclei to find.
-                      </p>
-                      <div class="op-row"><span class="op-label">Selected</span>
-                        <span class="op-num" id="op-cal-target">no embryo selected</span></div>
-                      <div class="op-row"><span class="op-label">Piezo–galvo</span>
-                        <span class="op-num" id="op-cal-result">—</span></div>
-                      {# What the calibration looked at, kept with the embryo: the
-                         latest run's plots, and every image behind a click. #}
-                      <div class="op-cal-kept" id="op-cal-kept" hidden>
-                        <div class="op-cal-kept-head">
-                          <span class="op-cap" id="op-cal-kept-say"></span>
-                          <button class="op-nbtn" id="op-cal-kept-open" type="button"
-                                  title="Open this run's folder in the file manager">Open folder</button>
-                        </div>
-                        <div class="op-cal-kept-strip" id="op-cal-kept-strip"></div>
-                      </div>
-
-                      {# The routine's own parameters, not a fixed recipe. Edge
-                         detection and the z buffer are the two an operator
-                         changes between samples; the rest place the pair of
-                         calibration points inside the detected galvo range and
-                         are wrong to touch without a reason, so they sit behind
-                         a disclosure. Defaults match calibrate_embryo. #}
-                      <div class="op-row op-row-wrap cal-opts">
-                        {# Which routine runs. Legacy is the software sweep; scan is
-                           the hardware-timed one (#267). Both stay until the rig
-                           says which to keep. #}
-                        <label class="cal-opt">
-                          <span class="op-label">Method</span>
-                          <select class="cal-num" id="cal-method">
-                            <option value="legacy" selected>Legacy sweep</option>
-                            <option value="scan">Scan</option>
-                          </select>
-                        </label>
-                        <label class="cal-opt">
-                          <input type="checkbox" id="cal-edges" checked>
-                          <span class="op-label">Find galvo edges</span>
-                        </label>
-                        <label class="cal-opt">
-                          <span class="op-label">Z buffer</span>
-                          <input type="number" class="cal-num" id="cal-zbuf" min="0" max="500" step="1" value="25">
-                          <span class="op-unit">µm</span>
-                        </label>
-                        <button type="button" class="op-btn op-btn-quiet" id="cal-more"
-                                aria-expanded="false" aria-controls="cal-adv">More…</button>
-                      </div>
-
-                      <div class="cal-adv" id="cal-adv" hidden>
-                        <div class="op-row op-row-wrap" id="cal-adv-bounds" hidden>
-                          <label class="cal-opt"><span class="op-label">Galvo top</span>
-                            <input type="number" class="cal-num" id="cal-gtop" step="0.01" placeholder="auto"></label>
-                          <label class="cal-opt"><span class="op-label">bottom</span>
-                            <input type="number" class="cal-num" id="cal-gbot" step="0.01" placeholder="auto"></label>
-                        </div>
-                        <div class="op-row op-row-wrap">
-                          <label class="cal-opt"><span class="op-label">Edge step</span>
-                            <input type="number" class="cal-num" id="cal-estep" min="0.001" max="1" step="0.01" value="0.05">
-                            <span class="op-unit">deg</span></label>
-                          <label class="cal-opt"><span class="op-label">Search range</span>
-                            <input type="number" class="cal-num" id="cal-erange" min="0.01" max="5" step="0.05" value="0.5">
-                            <span class="op-unit">deg</span></label>
-                        </div>
-                        <div class="op-row op-row-wrap">
-                          <label class="cal-opt"><span class="op-label">Edge tolerance</span>
-                            <input type="number" class="cal-num" id="cal-etol" min="0" max="2" step="0.01" value="0.2">
-                            <span class="op-unit">deg</span></label>
-                          <label class="cal-opt"><span class="op-label">Inset</span>
-                            <input type="number" class="cal-num" id="cal-inset" min="0" max="0.49" step="0.05" value="0.4">
-                            <span class="op-unit">of range</span></label>
-                        </div>
-                        <p class="op-cap" id="cal-adv-note">
-                          Tolerance widens the detected range; inset moves the two
-                          calibration points in from its ends. Together they set how
-                          far apart the points sit — too close and the two-point
-                          slope fit amplifies noise on small embryos.
-                        </p>
-                        <button type="button" class="op-btn op-btn-quiet" id="cal-reset">Reset to defaults</button>
-                      </div>
-
-                      <div class="op-actions">
-                        {# Borrowing lends another embryo's slope and measures this
-                           embryo's own extent and focus from it: a short scan, not
-                           a free copy (#267). Any embryo with a fit can lend, best
-                           first; hidden entirely when nothing has a fit to lend. #}
-                        <label class="cal-opt" id="op-cal-borrow-row" hidden>
-                          <span class="op-label">From</span>
-                          <select class="cal-num" id="op-cal-borrow-from"></select>
-                        </label>
-                        <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
-                        {# The rest of the slide, in one go. Absent when every
-                           embryo already has a fit — there is nothing to say. #}
-                        <button class="op-btn" id="op-cal-all" type="button" hidden>Calibrate the rest</button>
-                        {# Only where there is a fit to discard. Two clicks:
-                           the numbers it drops cost ~70 exposures to measure. #}
-                        <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
-                        <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
-                        {# Shown only while a calibration runs. It cancels the
-                           routine at its next step and halts every positioner. #}
-                        <button class="op-btn op-btn-warn" id="op-cal-abort" type="button" hidden>Abort</button>
-                      </div>
-                      <p class="op-cap" id="op-cal-borrow-note" hidden></p>
-
-                      {# The pre-flight refusal, and the way past it. Appears
-                         only after a calibration has declined to start. #}
-                      <div class="op-row op-row-wrap cal-refused" id="op-cal-refused" hidden>
-                        <span class="op-cap op-cap-warn" id="op-cal-refused-why"></span>
-                        <button class="op-btn op-btn-warn" id="op-cal-anyway" type="button">Calibrate anyway</button>
-                      </div>
-
-                      {# What the run is looking at, while it looks. Empty —
-                         and takes no room — until frames arrive. #}
-                      <div id="op-cal-progress"></div>
-                    </div>
-                    <figure class="op-preview" id="op-preview" hidden>
-                      <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
-                      <figcaption class="op-preview-cap">
-                        <span class="op-preview-title" id="op-preview-title"></span>
-                        <span class="op-preview-meta" id="op-preview-meta"></span>
-                      </figcaption>
-                    </figure>
-                  </div>
-                </section>
-
                 {# Acquisition is two jobs that never happen at once, designing a
                    run and watching one, so it is one surface with two states
                    (data-acq), each using the whole page, in the three zones

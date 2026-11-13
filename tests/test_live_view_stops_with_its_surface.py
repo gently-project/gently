@@ -69,10 +69,11 @@ def test_choosing_the_other_camera_stops_this_one_and_starts_nothing():
 def test_the_led_is_left_alone_between_the_cameras_and_closed_on_leaving_scope():
     """It lights the bottom camera too, and the Light panel beside the frame
     goes on saying what it is. Leaving Scope closes it, as leaving the SPIM
-    head always did."""
-    assert "onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to)) forceLedOff(); }" in _pane(
-        "spim"
-    )
+    head always did. So does going to Fit, which is on Scope now: under the
+    LED alone a calibration has no nuclei to find."""
+    assert (
+        "onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to) || to === 'cal') forceLedOff(); }"
+    ) in _pane("spim")
 
 
 def test_leaving_operate_altogether_stops_both():

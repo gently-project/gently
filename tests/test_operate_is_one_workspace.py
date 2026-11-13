@@ -39,7 +39,7 @@ RIG_CSS = (WEB / "static" / "css" / "rig-menu.css").read_text(encoding="utf-8")
 
 VIEW = INDEX[INDEX.index('id="devices-view-operate"') : INDEX.index('id="devices-view-map"')]
 RAIL = INDEX[INDEX.index('id="op-erail"') : INDEX.index('class="op-panearea"')]
-SCOPE = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-cal"')]
+SCOPE = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-acquire"')]
 FRAME = SCOPE[SCOPE.index('class="op-view"') : SCOPE.index('<aside class="op-inst"')]
 INSTRUMENT = SCOPE[SCOPE.index('<aside class="op-inst"') :]
 TOOLBAR = INDEX[
@@ -66,7 +66,9 @@ def test_both_cameras_are_one_section_of_the_page() -> None:
     for cam in ('id="op-cam-bottom"', 'id="op-cam-spim"'):
         assert cam in FRAME, f"{cam} is not in the one frame column"
     sections = re.findall(r'<section class="op-pane[^"]*" id="(op-pane-\w+)"', VIEW)
-    assert sections == ["op-pane-scope", "op-pane-cal", "op-pane-acquire"], sections
+    # Calibration was a section between these two; it is on Scope now
+    # (tests/test_calibration_is_on_scope.py).
+    assert sections == ["op-pane-scope", "op-pane-acquire"], sections
 
 
 def test_the_dish_is_the_rail_and_holds_what_is_on_it() -> None:
@@ -112,10 +114,15 @@ def test_nothing_in_the_instrument_or_the_dish_belongs_to_one_camera() -> None:
             ("op-cam-spim", "spim"),
             ("op-display-bottom", "bottom"),
             ("op-display-spim", "spim"),
+            # Fit, the strip's fifth entry: what a calibration looks at in
+            # the frame's place, how it is done in Display's.
+            ("op-cam-cal", "cal"),
+            ("op-display-cal", "cal"),
         ]
     ), owned
-    # The page starts on the bottom camera: the light sheet's own are hidden.
-    for tag in re.findall(r"<[^>]*data-src=\"spim\"[^>]*>", FRAME):
+    # The page starts on the bottom camera: the light sheet's own are hidden,
+    # and the fit's.
+    for tag in re.findall(r"<[^>]*data-src=\"(?:spim|cal)\"[^>]*>", FRAME):
         assert " hidden" in tag, tag
     for tag in re.findall(r"<[^>]*data-src=\"bottom\"[^>]*>", FRAME):
         assert " hidden" not in tag, tag
@@ -124,16 +131,25 @@ def test_nothing_in_the_instrument_or_the_dish_belongs_to_one_camera() -> None:
 # ── the strip chooses the camera ─────────────────────────────────────────
 
 
-def test_one_strip_names_every_camera() -> None:
+def test_one_strip_names_every_camera_and_the_fit() -> None:
     strip = FRAME[FRAME.index('id="op-source"') :]
     strip = strip[: strip.index("</span>")]
-    assert re.findall(r'data-source="(\w+)"', strip) == ["bottom", "A", "B", "Multi"]
-    assert re.findall(r">([^<>]+)</button>", strip) == ["Bottom cam", "SPIM A", "SPIM B", "Multi"]
+    assert re.findall(r'data-source="(\w+)"', strip) == ["bottom", "A", "B", "Multi", "fit"]
+    assert re.findall(r">([^<>]+)</button>", strip) == [
+        "Bottom cam",
+        "SPIM A",
+        "SPIM B",
+        "Multi",
+        "Fit",
+    ]
 
 
 def test_the_strip_shows_the_surface_and_the_side_as_they_are() -> None:
     fn = _fn(OPERATE, "    function renderSource() {")
-    assert "_pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : null" in fn
+    assert (
+        "_pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : _pane === 'cal' ? 'fit' : null"
+        in fn
+    )
     # It is redrawn whenever either changes: the surface, and the side.
     assert "renderSource();" in _fn(OPERATE, "    function paintPane() {")
     assert "renderSource();" in _fn(OPERATE, "    function renderPose() {")
@@ -224,7 +240,7 @@ def test_the_surfaces_and_the_views_are_one_strip() -> None:
     assert 'class="devices-title"' not in INDEX
     surfaces = TOOLBAR[TOOLBAR.index('id="operate-subtab-switcher"') :]
     surfaces = surfaces[: surfaces.index("</div>")]
-    assert re.findall(r'data-view="(\w+)"', surfaces) == ["scope", "cal", "acquire"]
+    assert re.findall(r'data-view="(\w+)"', surfaces) == ["scope", "acquire"]
     views = TOOLBAR[TOOLBAR.index('id="devices-view-switcher"') :]
     views = views[: views.index("</div>")]
     assert re.findall(r'data-view="(\w+)"', views) == ["map", "details", "optical3d", "manual"]

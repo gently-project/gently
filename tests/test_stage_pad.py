@@ -129,7 +129,7 @@ class TestTheJog:
 class TestThePad:
     def test_the_stage_panel_has_a_pad_named_by_axis(self):
         assert 'id="op-stage-host"' in INDEX and "panels/stage-pad.js" in INDEX
-        scope = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-cal"')]
+        scope = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-acquire"')]
         panel = scope[scope.index('id="op-stage-panel"') :]
         assert 'id="op-stage-host"' in panel, "the pad is not in the Stage panel"
         assert "StagePad.mount('op-stage-host')" in OPERATE

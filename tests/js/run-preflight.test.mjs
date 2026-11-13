@@ -206,3 +206,32 @@ test('lines: the overview with no dark and flat is said, for either kind of run'
     // Nothing about fits, rounds or volumes for a run that takes none.
     assert.equal(find(ls, /fit|round|volumes,/), undefined);
 });
+
+// ── a refused calibration points at what the page can see to be wrong ──────
+
+test('a refusal with the laser dark points at the light', () => {
+    const got = P.calibrationPoints({ emitting: false, ledOpen: false, head: { um: 85, gotoMin: 1000 }, atEmbryo: true });
+    assert.deepEqual(got, [{ panel: 'light', says: 'No laser line is emitting.' }]);
+});
+
+test('an open LED is said when a line is emitting or its state is not read', () => {
+    assert.deepEqual(P.calibrationPoints({ emitting: true, ledOpen: true }), [{ panel: 'light', says: 'The LED is open.' }]);
+    assert.deepEqual(P.calibrationPoints({ emitting: null, ledOpen: true }), [{ panel: 'light', says: 'The LED is open.' }]);
+    // With nothing emitting that is the thing to say, once.
+    assert.deepEqual(P.calibrationPoints({ emitting: false, ledOpen: true }).map(p => p.says), ['No laser line is emitting.']);
+});
+
+test('a raised head and a stage somewhere else are each pointed at', () => {
+    const got = P.calibrationPoints({ emitting: true, ledOpen: false, head: { um: 25000, gotoMin: 1000 }, atEmbryo: false });
+    assert.deepEqual(got, [
+        { panel: 'head', says: 'The head is at 25,000 µm, off the sample.' },
+        { panel: 'stage', says: 'The stage is not at this embryo.' },
+    ]);
+});
+
+test('nothing the page has not read is guessed at', () => {
+    assert.deepEqual(P.calibrationPoints({ emitting: null, ledOpen: false, head: null, atEmbryo: null }), []);
+    assert.deepEqual(P.calibrationPoints({ emitting: true, ledOpen: false, head: { um: 85, gotoMin: 1000 }, atEmbryo: true }), []);
+    assert.deepEqual(P.calibrationPoints({ head: { um: 1000, gotoMin: 1000 } }), []);   // at the height typed to, not above it
+    assert.deepEqual(P.calibrationPoints(undefined), []);
+});

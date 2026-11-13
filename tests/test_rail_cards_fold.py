@@ -26,7 +26,7 @@ OPERATE = (WEB / "static" / "js" / "operate.js").read_text(encoding="utf-8")
 CSS = (WEB / "static" / "css" / "operate.css").read_text(encoding="utf-8")
 
 VIEW = HTML[HTML.index('id="devices-view-operate"') : HTML.index('id="devices-view-map"')]
-SCOPE = HTML[HTML.index('id="op-pane-scope"') : HTML.index('id="op-pane-cal"')]
+SCOPE = HTML[HTML.index('id="op-pane-scope"') : HTML.index('id="op-pane-acquire"')]
 RAIL = HTML[HTML.index('id="op-erail"') : HTML.index('class="op-panearea"')]
 
 

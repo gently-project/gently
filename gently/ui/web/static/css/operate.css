@@ -2089,7 +2089,7 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
     scrollbar-width: thin;
 }
 /* Finding and the overview frames are about the bottom camera's picture:
-   on Calibration, which has no picture, they step aside. */
+   on Fit, which shows a calibration and not that picture, they step aside. */
 .op-body[data-pane="cal"] [data-surface="scope"] { display: none; }
 .op-rail-box { padding: 12px 4px 4px; flex: 0 0 auto; }
 /* The embryos keep the room — there are more of them, and they are selected
@@ -2671,3 +2671,42 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
     .cal-archive { grid-template-columns: 240px minmax(0, 1fr); overflow-y: auto; }
     .cal-arc-side { grid-column: 1 / -1; overflow: visible; }
 }
+
+/* ── Calibration, on Scope ────────────────────────────────────────────────
+   Fit is the strip's fifth entry: in the frame's place, what a calibration
+   of the selected embryo looks at; under it, in Display's place, how it is
+   done. The box is square, the bottom camera's shape, so the instrument
+   beside it keeps its columns when Fit is chosen. */
+.op-pane-scope .op-calfit {
+    aspect-ratio: 1 / 1;
+    border: 1px solid var(--op-rule);
+    border-radius: 4px;
+    background: var(--op-panel);
+    overflow: hidden;
+}
+.op-calfit-body {
+    height: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.op-calfit-body > * { flex: 0 0 auto; margin: 0; }
+.op-calfit-body .op-preview { align-self: flex-start; max-width: 100%; }
+.op-calfit-body .op-preview-img { max-width: 100%; height: auto; display: block; }
+/* The options hold two rows and say what they are by what is in them. */
+.op-pane-scope .op-calfit-opts { gap: 6px; overflow: hidden; }
+.op-calfit-opts .cal-opts, .op-calfit-opts .op-actions { margin: 0; gap: 6px 12px; justify-content: flex-start; }
+/* Whose fit is lent is a name, not a number: the select is as wide as it. */
+.op-calfit-opts #op-cal-borrow-from { width: auto; max-width: 150px; }
+/* The Sheet panel's Fit row: the words give way, the verb does not. The
+   panel gives up four pixels for it: in the desktop app's window the
+   instrument's one column had 25 px to spare and a row is 26. */
+.op-pane-scope #op-sheet { gap: 3px; padding-bottom: 6px; }
+.op-fitrow .op-fit-says { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-fitrow .op-btn { flex: 0 0 auto; height: 22px; padding: 0 9px; font-size: 12px; }
+/* A refused calibration points at the panel that puts it right. */
+.op-panel.is-pointed { border-color: var(--op-warn); box-shadow: 0 0 0 1px var(--op-warn); }

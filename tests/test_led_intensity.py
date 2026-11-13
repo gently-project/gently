@@ -356,7 +356,7 @@ class TestThePanel:
 WEB = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web"
 OPERATE_JS = (WEB / "static" / "js" / "operate.js").read_text(encoding="utf-8")
 INDEX = (WEB / "templates" / "index.html").read_text(encoding="utf-8")
-SCOPE = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-cal"')]
+SCOPE = INDEX[INDEX.index('id="op-pane-scope"') : INDEX.index('id="op-pane-acquire"')]
 
 
 class TestTheLedBesideEitherCamera:
