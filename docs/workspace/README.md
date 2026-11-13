@@ -10,6 +10,8 @@ checked. The two mockups in this folder are the drawings it was built from.
 | `mockup-v2.html` | after the audit below: number boxes, a real small-window layout, both themes |
 | `calibration-and-acquisition.md` | the study of the two surfaces beside Scope, and what is proposed for them. Not built. |
 | `mockup-run-v1.html` | that proposal drawn: calibration on Scope, Acquisition before a run and during one, the Calibration tab as the archive of raw exposures |
+| `sessions.md` | the study of the Sessions tab: what was measured, the loading work that is built, and the redesign that is proposed and not built |
+| `mockup-sessions-v1.html` | that proposal drawn: the sessions as a log-book table, and a session opened in the same three zones as Scope |
 
 Open any of the mockups in a browser. The controls move; nothing reaches a
 microscope.
