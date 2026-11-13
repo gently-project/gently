@@ -8,10 +8,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   /* ── Mockup. Static: the controls move, nothing reaches a microscope. ─────
-     Three drawings, reached from the toolbar and from Start:
+     Four drawings, reached from the toolbar, the left rail and Start:
        Scope, with calibration on it (a Fit row in Sheet, a Fit view in the strip)
        Acquisition before a run   (the dish · the latest volumes · the plan and what stands in its way)
        Acquisition during a run   (the same three zones, watching)
+       Calibration, the left rail's tab, as the archive (every run · one raw exposure large · the run's record)
      The reasoning is in calibration-and-acquisition.md, beside this file.
      Light, Head, Stage and Display are as built and drawn short; Find and
      Overview frames are left out. The numbers are this rig's: its slopes, the
@@ -70,6 +71,11 @@
   body[data-screen="scope"] .ws.scope { display: grid; grid-template-columns: 300px auto minmax(300px, 1fr); container-type: size; }
   body[data-screen="acq"][data-run="idle"] .ws.design { display: grid; grid-template-columns: 300px minmax(0, 1fr) auto; }
   body[data-screen="acq"]:not([data-run="idle"]) .ws.watch { display: grid; grid-template-columns: 300px minmax(0, 1fr) 310px; }
+  body[data-screen="cal"] .ws.archive { display: grid; grid-template-columns: 300px minmax(0, 1fr) 310px; }
+  /* The Calibration tab is not a Devices view: its own title where their tabs are. */
+  .tb .dv { display: contents; } .tb .ca { display: none; font-size: 12.5px; }
+  body[data-screen="cal"] .tb .dv { display: none; } body[data-screen="cal"] .tb .ca { display: inline; }
+  .nav i[data-go] { cursor: pointer; }
 
   /* ── the panel primitive and its rows, as Scope has them ─────────────── */
   .p { position: relative; min-width: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 9px 8px; }
@@ -117,6 +123,7 @@
   .row .xy { font: 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .thead { height: 18px; margin: 0 -3px 2px; border-bottom: 1px solid var(--rule); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
   .d { grid-template-columns: 22px 62px 82px 1fr; } .w { grid-template-columns: 22px 30px 62px 1fr 20px; }
+  .a { grid-template-columns: 22px 44px 1fr; }
   .tag { font: 10px var(--mono); padding: 0 5px; border-radius: 8px; border: 1px solid var(--rule2); color: var(--dim); white-space: nowrap; justify-self: start; }
   .tag.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
   .tag.no { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
@@ -163,6 +170,17 @@
   .fr { flex: 0 0 34px; height: 34px; border-radius: 2px; background: #04070b; position: relative; overflow: hidden; }
   .fr::after { content: ''; position: absolute; left: 30%; top: 30%; width: 40%; height: 40%; border-radius: 50%; background: #dbe9ff; filter: blur(var(--bl, 0px)); opacity: var(--op, 1); }
   .frames .u { margin-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* The archive: one exposure large, as it came off the camera, and the run's
+     whole strip under it in the order taken. */
+  .raw { position: relative; flex: 1 1 auto; min-height: 0; display: grid; place-items: center; background: #04070b; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .raw .spot { height: 16%; aspect-ratio: 1 / 1; border-radius: 50%; background: radial-gradient(circle, #fff 0, #cfe3ff 30%, rgba(180,210,255,.25) 55%, rgba(255,255,255,0) 72%); filter: blur(var(--bl, 0px)); opacity: var(--op, 1); }
+  .raw .rd { position: absolute; left: 8px; bottom: 6px; font: 11px var(--mono); color: #9fb3c8; }
+  .film { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; max-height: 118px; overflow: auto; scrollbar-width: thin; }
+  .film .ph { font-size: 10.5px; color: var(--dim); padding: 0 4px 0 6px; white-space: nowrap; } .film .ph:first-child { padding-left: 0; }
+  .film .fr { flex: 0 0 28px; height: 28px; cursor: pointer; } .frames .fr { cursor: pointer; }
+  .film .fr.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .film .fr b { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--green); z-index: 1; }
 
   /* The volumes: one tile an embryo. */
   /* As many across as makes them largest in the room there is (set by the script). */
@@ -215,13 +233,16 @@
     <span class="avatar">C</span><span class="chip"><span class="dot"></span> Connected ▾</span>
   </header>
 
-  <nav class="nav"><i>Ho</i><i>Op</i><i>Em</i><hr><i>Pr</i><i>Se</i><i>Nb</i><i>Ga</i><hr><i class="on">Dv</i><i>Ca</i><i>Lg</i><i>St</i></nav>
+  <nav class="nav"><i>Ho</i><i>Op</i><i>Em</i><hr><i>Pr</i><i>Se</i><i>Nb</i><i>Ga</i><hr><i class="on" id="nav-dv" data-go="scope" title="Devices">Dv</i><i id="nav-ca" data-go="cal" title="Calibration: every run kept, every exposure">Ca</i><i>Lg</i><i>St</i></nav>
 
   <main>
     <div class="tb">
+      <span class="dv">
       <button class="tab on" data-go="scope">Scope</button><button class="tab" data-go="acq" title="No Calibration entry: it is on Scope, in Sheet and in the picture's strip">Acquisition</button>
       <span class="div"></span>
       <button class="tab">Map</button><button class="tab">Details</button><button class="tab">3D</button><button class="tab">Manual</button>
+      </span>
+      <b class="ca">Calibration</b><span class="ca u" style="margin-left:10px">what every calibration looked at: read from the embryo's folder on disk, so it is still here after a restart</span>
       <span class="sp"></span>
       <span class="runw" id="runw" hidden></span>
       <button class="btn" id="tb-pause" data-run-toggle hidden style="margin-right:12px" title="The run, said and held from every Devices view. It moves no panel.">Pause</button>
@@ -395,12 +416,35 @@
         <p class="note">The form is not on screen while a run is going. Stop brings it back, as it was.</p>
       </div></aside>
     </div>
+
+    <!-- ══ Calibration, the tab in the left navigation: the archive ═══════ -->
+    <div class="ws archive">
+      <aside class="dish">
+        <div class="p embryos"><h3>Runs <em id="n-runs"></em></h3>
+          <div class="thead a"><span>#</span><span>at</span><span>came to</span></div>
+          <div class="list" id="list-runs"></div></div>
+        <p class="note">Every run, the refused and aborted ones too: those are the ones somebody will want to look at. Today this tab shows copies held in memory and is empty after a restart; the runs themselves are on disk.</p>
+      </aside>
+
+      <section class="view">
+        <div class="viewbar"><span class="v grow nw" id="raw-name" style="overflow:hidden;text-overflow:ellipsis"></span><button class="btn q">Show in folder</button><button class="btn q">Open in Fiji</button></div>
+        <div class="raw" id="raw"><div class="spot"></div><span class="rd" id="raw-rd"></span></div>
+        <div class="cap"><span id="raw-cap"></span></div>
+        <div class="p under" style="height:auto"><h3>Every exposure of this run <em>as it came off the camera, in the order taken · the bar is its score · ← → steps</em></h3><div class="film" id="film"></div></div>
+      </section>
+
+      <aside class="side"><div class="col run">
+        <div class="p"><h3>This run</h3><div class="kv" id="run-kv" style="margin-top:0"></div></div>
+        <div class="p"><h3>Its focus curves</h3><div class="curves" id="run-curves" style="grid-template-columns:1fr"></div></div>
+        <div class="foot"><div class="r"><button class="btn q">Open the run's folder</button><button class="btn pri" id="recal" data-go="scope">Recalibrate ▸ Scope</button></div></div>
+      </div></aside>
+    </div>
   </main>
 
   <aside class="agent">✦</aside>
 
   <footer class="sb">
-    <span><b>12</b> embryos</span><span>water <b>20.0°</b> ▸</span><span id="msg">Select embryo 3, arm a laser, press Calibrate. Or go to Acquisition and press Start.</span>
+    <span><b>12</b> embryos</span><span>water <b>20.0°</b> ▸</span><span id="msg">Select embryo 3, arm a laser, press Calibrate. Or go to Acquisition and press Start. Or press Ca in the left rail for the raw calibration images.</span>
     <span class="sp"></span><span class="mock">Mockup — the controls move, nothing reaches the microscope</span>
   </footer>
 
@@ -420,9 +464,28 @@
     { id: 11, xy: '15, −300', fit: null }, { id: 12, xy: '266, 190', fit: f(97.5, 0.99), ref: true },
   ];
   const ENDS = [undefined, 'at hatching', 'at comma stage', 'after 40 timepoints'];
+  // The runs kept this session: one folder each under the embryo, whatever came of it.
+  const RUNS = [
+    { e: 1, at: '11:52', out: 'fit', k: 97.8, r2: 1.00, off: 1.0, n: 44 }, { e: 1, at: '11:40', out: 'refused', why: 'nothing lit', n: 11 },
+    { e: 2, at: '11:58', out: 'fit', k: 96.1, r2: 0.99, off: 0.4, n: 44 }, { e: 4, at: '12:03', out: 'fit', k: 98.4, r2: 0.99, off: 2.2, n: 44 },
+    { e: 5, at: '12:09', out: 'fit', k: 97.2, r2: 0.98, off: -1.1, n: 44 }, { e: 6, at: '12:12', out: 'borrowed', from: 1, k: 97.8, r2: 0.99, off: 3.0, n: 14 },
+    { e: 7, at: '12:18', out: 'fit', k: 95.9, r2: 0.97, off: 0.2, n: 44 }, { e: 9, at: '12:21', out: 'aborted', why: 'by hand at the third step', n: 23 },
+    { e: 9, at: '12:24', out: 'fit', k: 98.0, r2: 0.99, off: 1.6, n: 44 }, { e: 10, at: '12:30', out: 'fit', k: 96.6, r2: 0.98, off: -0.6, n: 44 },
+    { e: 12, at: '12:36', out: 'fit', k: 97.5, r2: 0.99, off: 0.9, n: 44 },
+  ];
+  // A run's exposures, named as the files on disk are: number, kind, galvo, piezo.
+  function framesOf(run) {
+    const F = [{ kind: 'presence check', g: 0, p: 0, score: .5 }];
+    for (let i = 0; i < 13 && F.length < run.n; i++) F.push({ kind: 'edge detection', g: -0.30 + i * 0.05, p: (-0.30 + i * 0.05) * 100, score: Math.max(.05, 1 - Math.abs(i - 6) / 5) });
+    [-0.042, 0.030, 0.102].forEach(g => { for (let i = 0; i < 10 && F.length < run.n; i++) F.push({ kind: 'focus sweep', g, p: 97.8 * g + 1 + (i - 4.5) * 1.5, score: Math.exp(-(((i - 4.5) / 2.2) ** 2)) }); });
+    return F.map((x, i) => ({ ...x, n: i + 1, name: `${String(i + 1).padStart(3, '0')}_${x.kind.replace(' ', '_')}_g${(x.g >= 0 ? '+' : '-') + Math.abs(x.g).toFixed(3)}_p${(x.p >= 0 ? '+' : '-') + Math.abs(x.p).toFixed(1)}.tif` }));
+  }
+  const CURVES = [['−0.04', '−3.3', '0.99'], ['+0.03', '4.2', '0.99'], ['+0.10', '10.8', '1.00']];
+  const curveHtml = (i, wait) => { const c = CURVES[i], pts = [...Array(25)].map((_, j) => `${j * 6.5},${46 - 38 * Math.exp(-(((j - 9 - i * 3) / 4) ** 2)) + ((j * 7 + i * 3) % 5)}`).join(' ');
+    return `<div class="curve ${wait ? 'wait' : ''}"><svg viewBox="0 0 160 54" preserveAspectRatio="none"><polyline points="${pts}"/><line x1="${(9 + i * 3) * 6.5}" y1="2" x2="${(9 + i * 3) * 6.5}" y2="52"/></svg>galvo ${c[0]}° · focus ${c[1]} µm · R² ${c[2]}</div>`; };
   const STEPS = ['extent: one slice-only volume', 'focus at galvo −0.04°', 'focus at galvo +0.03°', 'focus at galvo +0.10°', 'the line through them'];
   const S = { run: 'idle', sel: 3, at: 1, src: 'A', live: true, led: 'closed', preset: '', beam: { A: false, B: false }, power: { 488: 3.1, 561: 4.9 },
-              head: 114.6, out: new Set(), cal: null, round: 1, next: 0 };
+              head: 114.6, out: new Set(), cal: null, round: 1, next: 0, arun: 0, aframe: 28 };
   const sel = () => E.find(e => e.id === S.sel);
   const subjects = () => E.filter(e => !e.ref && !S.out.has(e.id));
   const lines = p => (p || '').split(',').filter(Boolean);
@@ -531,11 +594,10 @@
     $$('.plot .pt').forEach((c, i) => { c.style.display = i < shown ? '' : 'none'; });
     $('#fitline').style.display = (e.fit && !S.cal) ? '' : 'none';
     $('#plot-none').textContent = !e.fit && !S.cal ? `No fit for embryo ${e.id} yet` : '';
-    $('#curves').innerHTML = [['−0.04', '−3.3', '0.99'], ['+0.03', '4.2', '0.99'], ['+0.10', '10.8', '1.00']].map((c, i) => {
-      const pts = [...Array(25)].map((_, j) => `${j * 6.5},${46 - 38 * Math.exp(-(((j - 9 - i * 3) / 4) ** 2)) + ((j * 7 + i * 3) % 5)}`).join(' ');
-      return `<div class="curve ${i < shown ? '' : 'wait'}"><svg viewBox="0 0 160 54" preserveAspectRatio="none"><polyline points="${pts}"/><line x1="${(9 + i * 3) * 6.5}" y1="2" x2="${(9 + i * 3) * 6.5}" y2="52"/></svg>galvo ${c[0]}° · focus ${c[1]} µm · R² ${c[2]}</div>`; }).join('');
-    $('#frames').innerHTML = (shown ? [...Array(Math.min(9, shown * 3))].map((_, j) => `<span class="fr" style="--bl:${Math.abs((j % 3) - 1) * 3}px;--op:${1 - Math.abs((j % 3) - 1) * .3}"></span>`).join('') : '')
-      + `<span class="u">${shown ? 'the frames behind each point, as they land' : 'frames appear here as they are taken'}</span>`;
+    $('#curves').innerHTML = [0, 1, 2].map(i => curveHtml(i, i >= shown)).join('');
+    $('#frames').innerHTML = (shown ? [...Array(Math.min(9, shown * 3))].map((_, j) => `<span class="fr" data-open title="Opens at full size with its counts" style="--bl:${Math.abs((j % 3) - 1) * 3}px;--op:${1 - Math.abs((j % 3) - 1) * .3}"></span>`).join('') : '')
+      + `<span class="u">${shown ? 'the frames behind each point' : 'frames appear here as they are taken'}</span><span class="sp"></span>`
+      + `<button class="btn q" data-go="cal" data-from-fit title="Every run of every embryo, and every exposure as it came off the camera">All runs and exposures ▸ Calibration</button>`;
 
     // ── Light, and what it means for a fit ──
     $$('#led button').forEach(b => { b.className = b.dataset.v === S.led ? 'on' + (b.dataset.v === 'closed' ? ' rest' : '') : ''; });
@@ -565,6 +627,25 @@
       : S.head > 1000 ? [`the head is at ${S.head.toLocaleString('en-US')} µm, off the sample`, '#head'] : null;
     $('#head').textContent = S.head.toLocaleString('en-US'); $('#head-say').textContent = S.head > 1000 ? 'load height' : S.head === 1000 ? 'above the sample' : '85 µm to floor';
     $('#at').textContent = S.at;
+
+    // ── the Calibration tab: every run kept, every exposure ──
+    const scr = document.body.dataset.screen; $('#nav-dv').classList.toggle('on', scr !== 'cal'); $('#nav-ca').classList.toggle('on', scr === 'cal');
+    const run = RUNS[S.arun], F = framesOf(run), fr = F[Math.min(S.aframe, F.length - 1)], fitted = run.out === 'fit' || run.out === 'borrowed';
+    $('#n-runs').textContent = `${RUNS.length} kept this session`;
+    $('#list-runs').innerHTML = RUNS.map((r, i) => `<div class="row a ${i === S.arun ? 'sel' : ''}" data-arun="${i}"><span class="id">${r.e}</span><span class="xy">${r.at}</span>`
+      + (r.out === 'fit' ? `<span class="tag ok">${r.k.toFixed(1)} · ${r.r2.toFixed(2)}</span>` : r.out === 'borrowed' ? `<span class="tag ok">from ${r.from} · ${r.r2.toFixed(2)}</span>` : `<span class="tag no">${r.out}</span>`) + '</div>').join('');
+    $('#raw-name').textContent = fr.name; $('#raw-name').title = `embryos / embryo_${run.e} / calibration / 20261113_${run.at.replace(':', '')}00 / frames / ${fr.name}`;
+    $('#raw').style.setProperty('--bl', `${(1 - fr.score) * 16}px`); $('#raw').style.setProperty('--op', `${.3 + .7 * fr.score}`);
+    $('#raw-rd').textContent = `x 1203  y 988  =  ${Math.round(110 + 4300 * fr.score)} counts · 16-bit, unscaled`;
+    $('#raw-cap').innerHTML = `Exposure <b>${fr.n}</b> of ${F.length} · ${fr.kind} · galvo <b>${fr.g.toFixed(3)}</b>° · piezo <b>${fr.p.toFixed(1)}</b> µm · score <b>${fr.score.toFixed(2)}</b>`;
+    let last = '';
+    $('#film').innerHTML = F.map((x, i) => { const head = x.kind + (x.kind === 'focus sweep' ? ` at ${x.g.toFixed(3)}°` : ''), lab = head !== last ? `<span class="ph">${head}</span>` : ''; last = head;
+      return lab + `<span class="fr ${i === Math.min(S.aframe, F.length - 1) ? 'sel' : ''}" data-frame="${i}" title="${x.name}" style="--bl:${(1 - x.score) * 3}px;--op:${.3 + .7 * x.score}"><b style="width:${Math.round(x.score * 100)}%"></b></span>`; }).join('');
+    $('#run-kv').innerHTML = [['Embryo', run.e], ['Taken', `13 Nov, ${run.at}`], ['Method', run.out === 'borrowed' ? `slope from embryo ${run.from}` : 'scan'], ['Z buffer', '25 µm'],
+      ['Came to', fitted ? 'a fit' : `${run.out}: ${run.why}`], ['Slope', fitted ? `${run.k.toFixed(1)} µm/deg` : '—'], ['Offset', fitted ? `${run.off.toFixed(1)} µm` : '—'], ['R²', fitted ? run.r2.toFixed(2) : '—'],
+      ['Exposures', run.n], ['On disk', `${(run.n * 0.2).toFixed(1)} MB`]].map(([a, b]) => `<span>${a}</span><b>${b}</b>`).join('');
+    $('#run-curves').innerHTML = run.out === 'fit' ? [0, 1, 2].map(i => curveHtml(i, false)).join('')
+      : `<p class="note" style="margin:0">${run.out === 'borrowed' ? 'No focus curves: this run took its slope from embryo ' + run.from + ' and measured only this embryo\'s extent and focus.' : 'No focus curves: this run stopped before a fit. Its exposures are all here.'}</p>`;
 
     // ── Acquisition, before a run ──
     $('#test-one').textContent = `Test embryo ${e.id}`; $('#test-one').disabled = !e.fit || e.ref || !p.spim;
@@ -618,6 +699,12 @@
   document.addEventListener('click', ev => {
     const t = ev.target, go = t.closest('[data-go]'), row = t.closest('[data-id]'), fix = t.closest('[data-fix]');
     if (go) { document.body.dataset.screen = go.dataset.go; $$('.tab[data-go]').forEach(b => b.classList.toggle('on', b.dataset.go === go.dataset.go)); }
+    // From the Fit view to the archive: the selected embryo's latest run. And back: that run's embryo.
+    if (go && go.dataset.fromFit != null) { const i = RUNS.findIndex(r => r.e === S.sel); if (i >= 0) { S.arun = i; S.aframe = 28; } }
+    if (t.closest('#recal')) S.sel = RUNS[S.arun].e;
+    if (t.closest('[data-arun]')) { S.arun = +t.closest('[data-arun]').dataset.arun; S.aframe = Math.min(28, RUNS[S.arun].n - 1); }
+    if (t.closest('[data-frame]')) S.aframe = +t.closest('[data-frame]').dataset.frame;
+    if (t.closest('[data-open]')) say('An exposure opens at full size with its counts, with Show in folder and Fiji, as it does today. The whole run, and every other run, is on the Calibration tab.');
     if (t.closest('[data-centre]')) { S.at = +t.closest('[data-centre]').dataset.centre; say(`Stage centred on embryo ${S.at} (mockup)`); }
     else if (t.closest('[data-role]')) { const x = E.find(e => e.id === +t.closest('[data-role]').dataset.role);
       if (x.ref) x.ref = false; else if (S.out.has(x.id)) { S.out.delete(x.id); x.ref = true; } else S.out.add(x.id); }
@@ -681,6 +768,8 @@
     render(); say('HALT · ' + did.join(' · '));
   });
 
+  document.addEventListener('keydown', ev => { if (document.body.dataset.screen !== 'cal' || !['ArrowLeft', 'ArrowRight'].includes(ev.key)) return;
+    S.aframe = Math.max(0, Math.min(RUNS[S.arun].n - 1, Math.min(S.aframe, RUNS[S.arun].n - 1) + (ev.key === 'ArrowRight' ? 1 : -1))); render(); });
   $('#theme').addEventListener('click', () => { const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; });
   render();
 })();

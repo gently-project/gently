@@ -13,7 +13,8 @@ last section).
    all on Scope. None of them is on the Calibration page, which is why the
    first calibration pressed for this study spent eleven exposures on a dark
    laser. The proposal is one row in Scope's Sheet panel and a Fit view in the
-   picture's strip.
+   picture's strip, with the Calibration tab in the left navigation as the
+   archive of every run and every raw exposure.
 2. **Acquisition is two jobs that never happen at the same time**, designing a
    run and watching one, drawn as three columns that are always all there. The
    proposal is one surface with two states, each using the whole page, in
@@ -47,6 +48,10 @@ last section).
 - The scheduler was read for the cause of the cadence (`_reschedule` in
   `gently/app/orchestration/timelapse.py`).
 - The built Scope was measured for the room a calibration row would have.
+- The tab called Calibration in the left navigation was not in the first
+  pass. It was read afterwards, when the owner asked where the raw
+  calibration images would go, and it changed the proposal (C9, and "Where
+  the raw images go").
 
 Limits. The simulated rig cannot finish a calibration (its camera shows no
 nuclei in a hardware-timed scan), so the page after a *successful* calibration
@@ -67,6 +72,7 @@ a drawing, and its buttons reach nothing.
 | C6 | The evidence is thumbnails | The kept run is a grid of pictures 290 px wide inside the card. The fit itself, a line through two or three points, is the thing to judge, and it is one plot among them behind a click. |
 | C7 | Settings come and go | Method, edges, Z buffer, More…, and a bounds row that exists only with edges off: five visibilities for nine fields. |
 | C8 | Wide controls, far labels | Calibrate is 596 px wide. "Selected" and "embryo 2" are 1,100 px apart. |
+| C9 | Two things are called Calibration, and neither is the archive | The surface on Devices is where a calibration is pressed. The tab in the left navigation (Profile, Gallery) shows the display copies a calibration pushes to the browser: held in memory, so empty after a restart. The record itself is on disk with the embryo, every exposure as it came off the camera (`embryos/{id}/calibration/{when}/frames/*.tif`, 49 runs kept on this rig since late September), and the page reaches only the latest run of the selected embryo, through the strip on the Devices surface. An earlier run, or a refused one, is reached by opening the folder. |
 
 What is right and should stay: the verbs say what they will do (Calibrate or
 Recalibrate, "Borrow embryo 1's slope", "Calibrate 3 uncalibrated", the
@@ -92,6 +98,7 @@ with its evidence and a way past it; the frames are shown as they land.
 | A13 | The cadence asked is not the cadence kept | From the records: asked 300 s, kept 303.1 s (n = 1,933); 600 s, 603.2 (924); 60 s, 63.5 (417); 30 s, 33.5 (232). An embryo's next volume is scheduled from when its last one finished, not from when it was due (`_reschedule(embryo, from_now=True)`), so every interval is the interval plus one acquisition. |
 | A14 | The default is not what is run | Of the 5,501 intervals between consecutive timepoints on disk, 69 % were asked at 5 min, 17 % at 10 min, 8 % at 1 min and 4 % at 30 s. A new session's form opens at 30 s. (A resumed session gets its own last plan back.) |
 | A15 | A test volume ends in a toast | Acquire one volume answers "Volume acquired". The picture it took is not shown on the page that took it. |
+| A16 | Two stages can end a run, of the eight that are read | "At hatching" and "at comma stage" are offered and no other stage. They are the two detectors the first scheduler had (November 2025). Since February an ending is any set of stages, and perception reads eight (early, bean, comma, 1.5-fold, 2-fold, pretzel, hatching, hatched), but the organism's table still names two sets (`STOP_CONDITIONS` in `gently/organisms/celegans/__init__.py`), the parser accepts only names in that table, and the page keeps its own copy of the list. |
 
 What is right and should stay: the plan is one object said back as one
 sentence, and Start sends exactly what was said; "all subjects" is the default
@@ -154,6 +161,38 @@ read back; a value that can be set can be typed.
   next step is on the screen they are already on: an amber `uncal` on each
   row, and "Calibrate 3 uncalibrated" in the Fit view.
 
+### Where the raw images go
+
+Asked by the owner on seeing the drawing: with calibration on Scope, how are
+the raw calibration images reached, and do they go to the Calibration page?
+
+They stay where they are, on disk with the embryo, every exposure as it came
+off the camera; moving the button changes nothing about what is kept. What
+changes is the two ways in:
+
+- **The Fit view is for judging one calibration.** It shows the selected
+  embryo's latest run: the line, the focus curves, the frames behind each
+  point. A frame opens as it does today, at full size with its counts, with
+  Show in folder and Fiji. That is everything the strip on the Devices
+  surface does now, drawn larger.
+- **The Calibration tab in the left navigation becomes the archive.** Yes:
+  that is the right home. Every run of every embryo, the refused and aborted
+  ones too; one exposure large with its counts and its file's name; the whole
+  run's strip under it in the order taken, each with its score; the run's
+  record beside it (what was asked, what came of it, the fit, the curves);
+  Show in folder, Open in Fiji, and Recalibrate, which goes to Scope with that
+  embryo selected. The Fit view links to it.
+
+The tab already exists and already shows calibration images, but from the
+wrong source (C9). Reading the records on disk instead, through the routes
+the strip already uses (`/api/calibration/records`, with `.u16` for the
+counts), is what makes it an archive: it survives a restart, and it has every
+run. Those routes serve the live session; an earlier session's runs are on
+disk in the same layout and would need the session named in the request.
+
+The result is one thing called Calibration, where the evidence is kept, and
+Scope, where it is made.
+
 That last point reverses a decision. Calibration became a page because, with
 the bottom camera and the SPIM head set up, an operator "was not sure what to
 do in Gently at this point", and the answer then was a tab in workflow order.
@@ -180,7 +219,11 @@ Both states are Scope's three zones.
 - *Right, the plan*, in boxes of 22 px rows with labels beside their values:
   Cadence, SPIM volume, Brightfield overview, Ends, Watching. Lasers are the
   presets as the Light panel draws them, with each routed line's power shown
-  as it is and typed to change it. Nothing in it grows with the roster.
+  as it is and typed to change it. Nothing in it grows with the roster. An
+  ending can be any stage perception reads, not two of them (A16): the
+  organism's table names each as "that stage or any later", so a missed call
+  cannot run a night long, and the page asks the server for the list instead
+  of keeping a copy.
 - *Far right, the run before it starts*: the sentence; then what stands in its
   way, each line derived and each with its fix one press away; then Start,
   pinned to the foot of the column and wearing the verdict.
@@ -237,6 +280,9 @@ select embryo 3 and press Calibrate (refused: the laser is dark), route 488,
 arm side A, press ◎ on embryo 3, press Calibrate again and watch the Fit view.
 Then Acquisition: change the cadence to 30 s and read the lines, press "Run
 without them", press Start, go back to Scope and press something, press HALT.
+Then "Ca" in the left rail, or "All runs and exposures" in the Fit view: the
+Calibration tab as the archive. Pick a run, step through its exposures with
+the arrow keys, look at a refused one.
 
 Its numbers are this rig's: the slopes, the 4.0 s a volume costs, the 105 MB
 it weighs, the three seconds a round runs long. Light, Head and Stage are
@@ -263,14 +309,23 @@ Smallest first. Each step stands on its own.
    buttons; a saved plan as Load.
 7. **Two states**: the form is put away while a run is going, and the tiles
    show the run.
-8. **Calibration onto Scope**: the Fit row, the Fit view, then the toolbar
+8. **The Calibration tab reads the records on disk**, and becomes the
+   archive. It stands on its own and is worth having whatever is decided
+   about Scope: today a refused run's exposures can only be seen in a file
+   manager.
+9. **Calibration onto Scope**: the Fit row, the Fit view, then the toolbar
    entry removed.
-9. **Verbs that ask** while a run is going.
+10. **Verbs that ask** while a run is going.
+
+Beside these, and small: **every stage as an ending** (A16), which is four
+lines in the organism's table (bean, 1.5-fold, 2-fold, pretzel) and the page
+asking for the list.
 
 ## Decisions that are the owner's
 
-- Whether the Calibration entry leaves the toolbar (step 8), or stays as a
-  surface rebuilt in Scope's idiom.
+- Whether the Calibration entry leaves the Devices toolbar (step 9), or stays
+  as a surface rebuilt in Scope's idiom. Either way the tab in the left
+  navigation can become the archive (step 8).
 - What an uncalibrated embryo does to Start: refuse the run (today), or offer
   to run without it.
 - The cadence. Either the page says the cadence that will be kept, or the

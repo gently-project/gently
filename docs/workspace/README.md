@@ -9,7 +9,7 @@ checked. The two mockups in this folder are the drawings it was built from.
 | `mockup-v1.html` | the first drawing: three zones, group boxes, dense rows |
 | `mockup-v2.html` | after the audit below: number boxes, a real small-window layout, both themes |
 | `calibration-and-acquisition.md` | the study of the two surfaces beside Scope, and what is proposed for them. Not built. |
-| `mockup-run-v1.html` | that proposal drawn: calibration on Scope, Acquisition before a run and during one |
+| `mockup-run-v1.html` | that proposal drawn: calibration on Scope, Acquisition before a run and during one, the Calibration tab as the archive of raw exposures |
 
 Open any of the mockups in a browser. The controls move; nothing reaches a
 microscope.
