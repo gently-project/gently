@@ -26,6 +26,7 @@ const ReviewApp = {
 
     _initialized: false,
     _loadRun: 0,            // the click a session detail answers; an older answer is dropped
+    _listRun: 0,            // the load the list is drawn from; an older answer is dropped
     _stale: false,          // rows changed while the tab was hidden
 
     async init() {
@@ -49,8 +50,15 @@ const ReviewApp = {
         if (!this.sessions.length) list.innerHTML = '<div class="loading">Loading sessions...</div>';
 
         try {
-            const [resp] = await Promise.all([fetch('/api/sessions'), this.loadProjects()]);
+            // The rows are drawn as soon as they arrive. The projects are
+            // asked for beside them and the rows drawn again when those come:
+            // all they add is a project's name on a row and in the filters,
+            // and the list waited for them, 200 ms after it had its own answer.
+            const run = ++this._listRun;
+            const projects = this.loadProjects();
+            const resp = await fetch('/api/sessions');
             const data = await resp.json();
+            if (run !== this._listRun) return;      // a newer load took over
             this.sessions = data.sessions || [];
             this.sessions.forEach(s => {
                 s._hay = [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
@@ -58,6 +66,13 @@ const ReviewApp = {
             });
             this.renderSessionList();
             this.fillSizes();
+            projects.then(() => {
+                if (run !== this._listRun) return;
+                this.renderSessionList();
+                // A session opened in the meantime names its projects too.
+                const filed = document.getElementById('session-filed');
+                if (filed && this.currentSession) filed.innerHTML = this.renderFiled(this.currentSession);
+            });
         } catch (e) {
             if (!this.sessions.length) list.innerHTML = '<div class="error">Failed to load sessions</div>';
             console.error('Failed to load sessions:', e);

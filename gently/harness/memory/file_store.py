@@ -1527,21 +1527,31 @@ class FileContextStore:
             status="planned",
             include_children=True,
         )
+        # What every item a planned one may wait on has come to, read once.
+        # Each dependency used to be looked up on its own, and a lookup reads
+        # every campaign's plan until it finds the item: with six projects
+        # that was a thousand YAML reads to list them, and most of the 240 ms
+        # the Projects list (and the Sessions tab, which waited for it) took.
+        done = (PlanItemStatus.COMPLETED.value, PlanItemStatus.SKIPPED.value)
+        status_of: dict[str, str] | None = None
         unblocked: list[PlanItem] = []
         for item in items:
             if not item.depends_on:
                 unblocked.append(item)
                 continue
-            all_resolved = True
-            for dep_id in item.depends_on:
-                dep = self.get_plan_item(dep_id)
-                if dep and dep.status not in (
-                    PlanItemStatus.COMPLETED,
-                    PlanItemStatus.SKIPPED,
-                ):
-                    all_resolved = False
-                    break
-            if all_resolved:
+            if status_of is None:
+                status_of = {}
+                for cid in self._campaign_index:
+                    for raw in self._read_plan_items_raw(cid):
+                        # The first campaign that holds an id is the one a
+                        # lookup finds, as before.
+                        item_id = raw.get("id")
+                        if isinstance(item_id, str):
+                            status_of.setdefault(item_id, str(raw.get("status", "planned")))
+            # An item that waits on something nobody can find is not held up by it.
+            if all(
+                dep_id not in status_of or status_of[dep_id] in done for dep_id in item.depends_on
+            ):
                 unblocked.append(item)
         return unblocked
 

@@ -409,7 +409,7 @@ class TestTheListIsQuick:
         assert c.get("/api/sessions/s1").json()["bytes"] > 0
 
     def test_the_tab_draws_the_list_then_asks_for_sizes_in_batches(self):
-        load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:1200]
+        load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:2000]
         assert load.index("this.renderSessionList();") < load.index("this.fillSizes();")
         fill = REVIEW_JS[REVIEW_JS.index("async fillSizes() {") :][:1600]
         assert "fetch(`/api/sessions/sizes?ids=" in fill
