@@ -251,6 +251,29 @@ const OperateManager = (function () {
         return M ? M.atPosition(_xy, xy) : true;
     }
 
+    // ══ THE RUN OWNS THE INSTRUMENT ═════════════════════════════════════
+    // While a timelapse is running, a verb here that would take the instrument
+    // from it asks first: the stage, the head, a live view, a calibration.
+    // The run drives the stage to each embryo and takes the cameras on its own
+    // clock, so a hand on them mid-run is either undone by the next round or
+    // meets the one in progress.
+    //
+    // Gated on the rig's state, which the shell keeps on <body> for every
+    // surface (data-run, from the run's own events), and never on which
+    // surface is on screen. A paused run is held on purpose and asks nothing.
+    // One yes holds for a minute, so a correction of several presses is one
+    // question and not several.
+    const HANDS_ON_MS = 60000;
+    let _handsOnUntil = 0;
+    function mayTakeFromRun(what) {
+        if (document.body.dataset.run !== 'running') return true;
+        if (Date.now() < _handsOnUntil) return true;
+        const ok = window.confirm(`A run is going. ${what} takes the instrument from it.`
+            + '\n\nPause the run first if this is more than a nudge. Go ahead anyway?');
+        if (ok) _handsOnUntil = Date.now() + HANDS_ON_MS;
+        return ok;
+    }
+
     // ══ THE XY CHOKEPOINT ═══════════════════════════════════════════════════
     // The ONLY caller of /api/devices/stage/move in this file. Nothing
     // interlocks XY against the F-drive: the server validates that x and y are
@@ -264,6 +287,7 @@ const OperateManager = (function () {
     // the why() helper the catch calls — so every failed move threw a second
     // time, inside its own handler, and the operator saw no toast at all.
     async function moveStageTo(x, y, said) {
+        if (!mayTakeFromRun('Moving the stage')) return false;
         try {
             await postJSON('/api/devices/stage/move', { x, y });
             if (said) toast(said);
@@ -424,6 +448,9 @@ const OperateManager = (function () {
                 toastFail('Too close to the floor for that step');
                 return;
             }
+            // The head's gauge says what a step of it would take from a run;
+            // the bottom objective's focus is not the run's and says nothing.
+            if (cfg.takes && !mayTakeFromRun(cfg.takes)) return;
             busy = true; render();
             try {
                 absorb(await postJSON(cfg.nudge, { delta }));
@@ -484,6 +511,8 @@ const OperateManager = (function () {
         nudge: '/api/devices/spim/fdrive/nudge',
         bands: true, scale: 'log', ticks: [100, 1000, 10000],
         steps: [50, 10, 5],
+        // What a step of it would take from a run that is going (mayTakeFromRun).
+        takes: 'Moving the head',
         // The sample: within this of the F-drive's floor the panel says so.
         warnBelow: 100,
         // The head's height is one of the lines said before a run starts.
@@ -499,6 +528,7 @@ const OperateManager = (function () {
      * load height, so the button says it is travelling and HALT stays live.
      */
     async function headTo(um, b) {
+        if (!mayTakeFromRun('Moving the head')) return;
         const was = b ? b.textContent : '';
         if (b) { b.disabled = true; b.textContent = 'Going…'; }
         try {
@@ -1191,6 +1221,7 @@ const OperateManager = (function () {
     }
 
     async function toggleBottomCam() {
+        if (!_bottomOn && !mayTakeFromRun('Starting the bottom camera')) return;
         const b = $('op-cam-toggle');
         const done = pending(b, _bottomOn ? 'Stopping…' : 'Starting…');
         try {
@@ -1366,6 +1397,7 @@ const OperateManager = (function () {
 
     // ══ SPIM PANE ═══════════════════════════════════════════════════════════
     async function toggleSpim() {
+        if (!_spimOn && !mayTakeFromRun('Starting the light-sheet view')) return;
         const b = $('op-spim-toggle');
         const done = pending(b, _spimOn ? 'Stopping…' : 'Starting…');
         try {
@@ -1672,6 +1704,7 @@ const OperateManager = (function () {
 
     async function calibrateSelected(opts) {
         if (!_selected) { toastFail('Select an embryo first'); return; }
+        if (!mayTakeFromRun('A calibration')) return;
         // The button is in the Sheet panel, on screen with any camera. The run
         // takes the light-sheet camera for itself, so whichever view was live
         // is stopped (its surface's onLeave) and Fit comes up to show the run.
@@ -2024,6 +2057,7 @@ const OperateManager = (function () {
     async function calibrateAll() {
         const pending = uncalibrated();
         if (!pending.length) return;
+        if (!mayTakeFromRun('Calibrating the rest')) return;
         const btn = $('op-cal-all'), out = $('op-cal-result');
         const t0 = Date.now();
         const tick = setInterval(() => {
@@ -2092,6 +2126,7 @@ const OperateManager = (function () {
 
     async function borrowCalibration() {
         if (!_selected) { toastFail('Select an embryo first'); return; }
+        if (!mayTakeFromRun('Borrowing a fit, which scans this embryo,')) return;
         const b = $('op-cal-borrow'), out = $('op-cal-result');
         const label = b ? b.textContent : '';
         const sel = $('op-cal-borrow-from');
@@ -4070,6 +4105,8 @@ const OperateManager = (function () {
         if (!$('op-stage-host')) return;
         _stagePadMounted = true;
         StagePad.mount('op-stage-host');
+        // The pad sends its own jogs, so it is told when to ask first.
+        StagePad.setGuard(() => mayTakeFromRun('Moving the stage'));
     }
 
     let _panelsMounted = false;

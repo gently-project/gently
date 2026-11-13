@@ -89,8 +89,13 @@ const StagePad = (() => {
         jog(dir[0] * step * k, dir[1] * step * k);
     }
 
+    // Whoever mounts the pad may say when a move has to be asked about first
+    // (Operate: while a run is going). No guard, no question.
+    let guard = null;
+
     async function jog(dx, dy) {
         if (busy || (!dx && !dy)) return;
+        if (guard && !guard()) return;
         busy = true;
         lastSaid = '';
         render();
@@ -137,7 +142,7 @@ const StagePad = (() => {
         timer = setInterval(refresh, 1500);
     }
 
-    return { mount, jog, refresh, STEPS };
+    return { mount, jog, refresh, STEPS, setGuard: fn => { guard = fn; } };
 })();
 
 if (typeof module !== 'undefined') module.exports = StagePad;
