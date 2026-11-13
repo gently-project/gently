@@ -577,6 +577,40 @@
     overflow-y: auto;
 }
 
+/* The plan's column: the form scrolls, the sentence and Start do not. Start
+   used to follow the form and sat under the fold with three embryos. */
+.op-col-plan { overflow-y: auto; }
+.op-runfoot {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin-top: auto;
+    padding-top: var(--op-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--op-2);
+    background: var(--bg-dark);
+    border-top: 1px solid var(--op-rule);
+}
+/* Before it starts: a mark, and a line an operator acts on. */
+.op-preflight { display: flex; flex-direction: column; gap: 3px; max-height: 38vh; overflow-y: auto; scrollbar-width: thin; }
+.op-preflight[hidden] { display: none; }
+.op-pf-line { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 6px; font-size: 0.76rem; line-height: 1.35; color: var(--op-ink); }
+.op-pf-mark { font-family: 'JetBrains Mono', ui-monospace, monospace; font-weight: 700; text-align: center; }
+.op-pf-line.is-ok .op-pf-mark { color: var(--op-live); }
+.op-pf-line.is-warn .op-pf-mark { color: var(--op-warn); }
+.op-pf-line.is-no .op-pf-mark { color: var(--op-bad); }
+.op-pf-line.is-ok { color: var(--op-ink-dim); }
+/* Said for a reader that does not see the mark; not drawn. */
+.op-pf-kind { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.op-pf-fix { height: 20px; padding: 0 7px; margin: 1px 0 1px 2px; font-size: 0.72rem; color: var(--op-ink); border-color: var(--op-rule); }
+.op-pf-line.is-no .op-pf-fix:first-of-type { border-color: var(--accent); color: var(--accent); }
+/* Start, wearing the verdict. Still Start's place; not a button to press. */
+.op-btn-primary.is-blocked, .op-btn-primary.is-blocked:disabled {
+    background: transparent; border-color: var(--op-warn); color: var(--op-warn); opacity: 1; cursor: not-allowed;
+}
+.op-plan-kept { white-space: nowrap; }
+
 .op-roster { display: flex; flex-direction: column; gap: var(--op-1); }
 
 .op-lib-list { display: flex; flex-direction: column; gap: var(--op-1); }
@@ -1605,6 +1639,8 @@
 }
 .op-plan-say[data-bad="1"] { color: var(--op-warn); }
 .op-plan-say[hidden] { display: none; }
+/* In the foot it is spaced by the foot. */
+.op-runfoot .op-plan-say { margin: 0; }
 .op-run-plan { font-size: 0.82rem; color: var(--op-ink-dim); }
 .op-plan-sec {
     margin-top: var(--op-3);

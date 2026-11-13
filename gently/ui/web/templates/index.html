@@ -926,7 +926,7 @@
                       <div class="op-roster" id="op-fields"></div>
                     </div>
 
-                    <div class="op-col">
+                    <div class="op-col op-col-plan">
                       <div class="op-block-head">What to run</div>
                       <!-- Which embryos, said out loud. "All subjects" is the
                            default and is what this pane has always done; a plain
@@ -971,6 +971,12 @@
                               <option value="s" selected>s</option>
                               <option value="min">min</option>
                             </select>
+                            {# The cadence that will be kept, where it is not
+                               the one asked: an embryo's next volume is timed
+                               from when its last one finished, so 300 s is
+                               kept as 303 and 30 s as 33.5 (run-preflight.js). #}
+                            <span class="op-cap op-plan-kept" id="op-plan-kept"
+                                  title="Each embryo's next volume is timed from when its last one finished, so an interval runs one acquisition long"></span>
                           </span></div>
 
                         <div class="op-plan-sec">Channels</div>
@@ -1064,16 +1070,29 @@
                       {# The plan, said as one sentence, where the eye is when the
                          hand is on Start — not at the top of a panel that scrolls.
                          Adaptive mode's only; the other modes hide it. #}
-                      <p class="op-plan-say" id="op-plan-say" aria-live="polite" hidden></p>
-                      <div class="op-cap op-plan-from" id="op-plan-from" hidden></div>
-                      <!-- Label is set per mode by renderRunButton(); this is single mode's verb
-                           so there is no flash of the wrong one on load. -->
-                      <button class="op-btn op-btn-primary op-btn-wide" id="op-run-start"
-                              type="button">Acquire one volume</button>
-                      {# The plan as a template: what "Saved tactic" mode lists and
-                         runs. Adaptive mode's only. #}
-                      <button class="op-btn op-btn-ghost op-btn-wide" id="op-plan-save"
-                              type="button" hidden>Save this plan…</button>
+                      {# The sentence, what stands in its way, and Start, in a
+                         foot that does not scroll: the form above it does.
+                         Start used to follow the form, and with three embryos
+                         sat 107 px under the fold of a maximized window. #}
+                      <div class="op-runfoot">
+                        <p class="op-plan-say" id="op-plan-say" aria-live="polite" hidden></p>
+                        <div class="op-cap op-plan-from" id="op-plan-from" hidden></div>
+                        {# Before it starts (run-preflight.js): who is in the
+                           run, whether each has a fit, the light, a round
+                           against the cadence, what it writes against what
+                           is free, where the head is. The lines that would
+                           refuse the run are counted onto Start. #}
+                        <div class="op-preflight" id="op-preflight" role="list"
+                             aria-label="Before it starts" hidden></div>
+                        <!-- Label is set per mode by renderRunButton(); this is single mode's verb
+                             so there is no flash of the wrong one on load. -->
+                        <button class="op-btn op-btn-primary op-btn-wide" id="op-run-start"
+                                type="button" aria-describedby="op-preflight">Acquire one volume</button>
+                        {# The plan as a template: what "Saved tactic" mode lists and
+                           runs. Adaptive mode's only. #}
+                        <button class="op-btn op-btn-ghost op-btn-wide" id="op-plan-save"
+                                type="button" hidden>Save this plan…</button>
+                      </div>
                     </div>
 
                     <div class="op-col">
@@ -1959,6 +1978,7 @@
     <script src="/static/js/panels/stage-pad.js"></script>
     <script src="/static/js/panels/overview-stage.js"></script>
     <script src="/static/js/acquisition-plan.js"></script>
+    <script src="/static/js/run-preflight.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/boot-banner.js"></script>
     <!-- Rig menu: the header chip + the microscope controls behind it. Loads

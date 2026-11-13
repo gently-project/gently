@@ -334,7 +334,10 @@ class TestThePane:
 
     def test_the_plan_is_checked_against_the_limits_before_it_is_sent(self):
         assert "AcquisitionPlan.validate(plan, ids, _laserLimits)" in _js("startRun")
-        assert "AcquisitionPlan.validate(plan, subjectIds(), _laserLimits)" in _js("renderPlan")
+        # Before the press too: it is one of the lines under the sentence
+        # (run-preflight.js), where it used to be a tooltip on it.
+        assert "AcquisitionPlan.validate(plan, [...ids], _laserLimits)" in _js("preflightContext")
+        assert "renderPreflight(plan);" in _js("renderPlan")
 
 
 # ---------------------------------------------------------------------------

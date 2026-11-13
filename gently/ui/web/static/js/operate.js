@@ -463,6 +463,7 @@ const OperateManager = (function () {
 
         return {
             wire, refresh, absorb, absorbTelemetry, render, nudge,
+            pos: () => st.pos,
             floor: () => st.floor,
             status: () => st.status,
             max: () => st.max,
@@ -485,7 +486,8 @@ const OperateManager = (function () {
         steps: [50, 10, 5],
         // The sample: within this of the F-drive's floor the panel says so.
         warnBelow: 100,
-        onRead: () => renderGoto(),
+        // The head's height is one of the lines said before a run starts.
+        onRead: () => { renderGoto(); if (_pane === 'acquire') renderPreflight(); },
     });
 
     /**
@@ -2274,9 +2276,14 @@ const OperateManager = (function () {
     function renderRunButton() {
         const b = $('op-run-start');
         if (!b || _starting) return;
-        b.disabled = _runBusy;
-        b.textContent = _runBusy ? 'A run is going' : (RUN_VERB[_mode] || 'Start');
-        b.title = _runBusy ? 'Stop the run before starting another' : '';
+        // What would refuse the run is counted onto the button: the verdict
+        // is where the hand is, and the reasons are the lines above it.
+        const v = _mode === 'adaptive' && !_runBusy ? RunPreflight.verdict(_preflight) : { blocked: 0, says: '' };
+        b.disabled = _runBusy || v.blocked > 0;
+        b.textContent = _runBusy ? 'A run is going' : (v.says || RUN_VERB[_mode] || 'Start');
+        b.classList.toggle('is-blocked', v.blocked > 0);
+        b.title = _runBusy ? 'Stop the run before starting another'
+            : v.blocked ? 'What stands in the way is listed above' : '';
     }
 
     function setMode(m) {
@@ -2293,7 +2300,7 @@ const OperateManager = (function () {
         if (say) say.hidden = m !== 'adaptive';
         const save = $('op-plan-save');
         if (save) save.hidden = m !== 'adaptive';
-        renderRunButton();
+        renderPreflight();
         renderSingle();
     }
 
@@ -2994,9 +3001,159 @@ const OperateManager = (function () {
             }
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
-        const problems = AcquisitionPlan.validate(plan, subjectIds(), _laserLimits);
-        say.dataset.bad = problems.length ? '1' : '0';
-        say.title = problems.join(' ');
+        // What is wrong with the plan is a line under the sentence now, with
+        // its fix, not a tooltip on a sentence turned amber. The sentence
+        // stays the plan and nothing more.
+        say.dataset.bad = '0';
+        say.title = '';
+        renderPreflight(plan);
+    }
+
+    // ══ BEFORE IT STARTS ══════════════════════════════════════════════════
+    // What stands in the way of the run, between the sentence and Start
+    // (run-preflight.js). The page knew every embryo was uncalibrated and
+    // said so only as a 409 after the press; it knew the cadence and the
+    // slices and never said that a night at the form's default is 576 GB.
+    // Derived on every renderPlan from what has already been read. The one
+    // thing asked of the server for it is the disk's free room.
+    let _room = null;           // {free_bytes} as last read; null is unread
+    let _preflight = [];        // the lines as last drawn, for Start to count
+
+    async function readRoom() {
+        try { _room = await getJSON('/api/devices/timelapse/room'); } catch (_) { _room = null; }
+        if (_pane === 'acquire') renderPreflight();
+    }
+
+    /** Everything the lines are derived from, gathered from what the page holds. */
+    function preflightContext(plan) {
+        const ids = new Set(subjectIds());
+        const targets = _embryos.filter(e => ids.has(e.id));
+        const volumes = plan.spim.enabled !== false;
+        const held = key => { const h = heldAcross(targets, key); return h ? h.max : null; };
+        const light = SharedState.get('light') || {};
+        const powers = {};
+        Object.entries(light.power || {}).forEach(([wl, pct]) => { if (pct != null) powers[wl] = pct; });
+        // An unread preset is not a dark one: no line is claimed either way.
+        const routed = light.config && typeof LightPanel !== 'undefined' && LightPanel.wavelengthsOf
+            ? LightPanel.wavelengthsOf(light.config) : null;
+        const refs = typeof BrightfieldRefs !== 'undefined' && BrightfieldRefs.status ? BrightfieldRefs.status() : null;
+        // "No embryos to image" has two causes with two fixes; say which.
+        let problems = AcquisitionPlan.validate(plan, [...ids], _laserLimits);
+        if (volumes && !ids.size) {
+            problems = problems.filter(q => !/^No embryos/.test(q));
+            problems.unshift(!_embryos.length ? 'No embryos yet: detect on the bottom camera, then register.'
+                : _targetScope === 'selected' ? 'No subject is selected.'
+                    : 'Every embryo is marked as a reference: make at least one a subject.');
+        }
+        return {
+            plan,
+            est: RunPreflight.estimate(plan, targets.length,
+                { slices: held('num_slices'), exposureMs: held('exposure_ms') }),
+            subjects: targets.map(e => ({
+                id: e.id, label: labelFor(e), calibrated: hasFit(e), r2: hasFit(e) ? fitScore(e) : null })),
+            references: _embryos.filter(e => e.role === 'calibration').length,
+            notSelected: _targetScope === 'selected' ? Math.max(0, allSubjectIds().length - ids.size) : 0,
+            problems,
+            routed, powers, limits: _laserLimits,
+            head: fd.pos() != null ? { um: fd.pos(), gotoMin: gotoLimits().lo } : null,
+            freeBytes: _room && _room.free_bytes != null ? Number(_room.free_bytes) : null,
+            refs,
+            lowR2: LOW_CONFIDENCE_R2,
+        };
+    }
+
+    /**
+     * Redraw a list a line at a time, leaving alone the lines that still say
+     * what they said.
+     *
+     * A press on a line's button starts on one node and has to end on the
+     * same one. Typing a cadence and then pressing "Calibrate the 3" blurs
+     * the field; the blur is a change; the change re-says the plan; and a
+     * list replaced whole between the press and the release swallows the
+     * press. Found in the browser: the button did nothing, every time, when
+     * it was the first thing pressed after typing. It also keeps the focus
+     * of someone who tabbed onto a fix while the light was being re-read.
+     */
+    function patchLines(host, html) {
+        const had = host._lines || [];
+        html.forEach((h, i) => {
+            if (had[i] === h && host.children[i]) return;
+            const t = document.createElement('template');
+            t.innerHTML = h;
+            const el = t.content.firstElementChild;
+            if (host.children[i]) host.replaceChild(el, host.children[i]);
+            else host.appendChild(el);
+        });
+        while (host.children.length > html.length) host.lastElementChild.remove();
+        host._lines = html.slice();
+    }
+
+    const PREFLIGHT_MARK = { ok: '✓', warn: '!', no: '✕' };
+    const PREFLIGHT_SAID = { ok: '', warn: 'Worth knowing: ', no: 'In the way: ' };
+
+    /**
+     * The lines, drawn. `plan` is passed by renderPlan, which has just read
+     * the form; anything else that changes what the lines are derived from
+     * (the light, the head, the disk) calls with none and the form is read.
+     */
+    function renderPreflight(plan) {
+        const host = $('op-preflight');
+        if (!host) return;
+        if (_mode !== 'adaptive') {
+            host.hidden = true; _preflight = [];
+            renderRunButton();
+            return;
+        }
+        const ctx = preflightContext(plan || readPlan());
+        _preflight = RunPreflight.lines(ctx);
+        host.hidden = false;
+        // The mark is decoration; what kind of line it is, is said in words
+        // for a reader that does not see it.
+        patchLines(host, _preflight.map(l =>
+            `<div class="op-pf-line is-${l.kind}" role="listitem">` +
+            `<span class="op-pf-mark" aria-hidden="true">${PREFLIGHT_MARK[l.kind]}</span>` +
+            `<span class="op-pf-says"><span class="op-pf-kind">${PREFLIGHT_SAID[l.kind]}</span>${escapeHtml(l.text)}` +
+            (l.fix || []).map(f => ` <button type="button" class="op-btn op-btn-quiet op-pf-fix" ` +
+                `data-preflight-fix="${escapeHtml(f.action)}">${escapeHtml(f.label)}</button>`).join('') +
+            '</span></div>'));
+        const kept = $('op-plan-kept');
+        if (kept) kept.textContent = RunPreflight.keptWords(ctx.est);
+        renderRunButton();
+    }
+
+    /** The way past a line: each fix is one press, and says what it did. */
+    function preflightFix(action) {
+        const ids = new Set(subjectIds());
+        const subs = _embryos.filter(e => ids.has(e.id));
+        if (action === 'calibrate') {
+            // The instrument is pointed at the first embryo with no fit. The
+            // set a run images is left as it is: this is not a narrowing.
+            const first = subs.find(e => !hasFit(e));
+            if (first && _targets.includes(first.id)) {
+                _selected = first.id;
+                SharedState.set('selectedEmbryoId', _selected);
+                publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle();
+            } else if (first) {
+                selectEmbryo(first.id);
+            }
+            showPane('cal');
+        } else if (action === 'without') {
+            const keep = subs.filter(hasFit).map(e => e.id);
+            if (!keep.length) return;
+            _targets = keep.slice();
+            if (!keep.includes(_selected)) _selected = keep[0];
+            SharedState.set('selectedEmbryoIds', _targets.slice());
+            SharedState.set('selectedEmbryoId', _selected);
+            publishRoster(); renderSpimTarget(); renderCalTarget();
+            setTargetScope('selected');
+            renderPlan();
+            toast(`The run is the ${keep.length} calibrated embryo${keep.length === 1 ? '' : 's'}`);
+        } else if (action === 'head') {
+            const lo = gotoLimits().lo;
+            if (lo != null) headTo(lo);
+        } else if (action === 'overview') {
+            showPane('bottom');
+        }
     }
 
     /**
@@ -3382,7 +3539,7 @@ const OperateManager = (function () {
             // The run is watched while this pane is open: a poll for the
             // clocks, and the events for the moments. Nothing polls when it
             // is not.
-            onEnter() { restorePlan(); renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
+            onEnter() { restorePlan(); readRoom(); renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
             onLeave() { clearInterval(_runPoll); _runPoll = null; },
             render() { publishRoster(); renderSingle(); renderTargetScope(); renderPlan(); },
         },
@@ -3478,8 +3635,10 @@ const OperateManager = (function () {
                     { actions: ['centre', 'remove'], showFit: true, compact: true });
             }
             if ($('op-roster')) {
+                // The fit is shown here too: this is the list a run is
+                // started from, and a run refuses an embryo without one.
                 RosterPanel.mount('op-roster',
-                    { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom' });
+                    { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom', showFit: true });
             }
         }
         mountFieldsPanels();
@@ -4005,6 +4164,13 @@ const OperateManager = (function () {
             if (b && !b.disabled) setTargetScope(b.dataset.scope);
         });
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
+        const pf = $('op-preflight');
+        if (pf) pf.addEventListener('click', e => {
+            const b = e.target.closest('[data-preflight-fix]');
+            if (b) preflightFix(b.dataset.preflightFix);
+        });
+        // The light is one of the lines: what it is read as changes them.
+        SharedState.on('light', () => { if (_pane === 'acquire') renderPreflight(); });
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
         const saveBtn = $('op-plan-save');

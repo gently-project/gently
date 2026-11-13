@@ -98,8 +98,16 @@ def test_taken_from_the_fields_captures_the_stage_when_chosen_not_at_start():
 def test_the_sentence_sits_beside_start_not_atop_a_scrolling_panel():
     panel = HTML[HTML.index('id="op-panel-adaptive"') : HTML.index('id="op-panel-library"')]
     assert 'id="op-plan-say"' not in panel, "the sentence is back at the top of the panel"
-    tail = HTML[HTML.index('id="op-plan-say"') : HTML.index('id="op-run-start"')]
-    assert len(tail) < 600, "the sentence and Start are not next to each other"
+    # Beside Start means in the one foot with it, which does not scroll.
+    # Between them now is what stands in the run's way, and nothing else:
+    # no form control has come between the sentence and the press.
+    foot = HTML[HTML.index('class="op-runfoot"') :]
+    foot = foot[: foot.index('id="op-plan-save"')]
+    assert 'id="op-plan-say"' in foot and 'id="op-run-start"' in foot
+    tail = foot[foot.index('id="op-plan-say"') : foot.index('id="op-run-start"')]
+    assert 'id="op-preflight"' in tail
+    for control in ("<input", "<select", 'class="op-field"'):
+        assert control not in tail, f"{control} sits between the sentence and Start"
 
 
 def test_the_roster_keeps_the_override_rows_in_step():

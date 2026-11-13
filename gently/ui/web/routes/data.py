@@ -3527,6 +3527,40 @@ def create_router(server) -> APIRouter:
             plan, source = None, None
         return {"plan": plan, "source": source, "session_id": sid}
 
+    @router.get("/api/devices/timelapse/room")
+    async def timelapse_room():
+        """What the disk a run writes to has free.
+
+        For the line the pane says before Start: what the run will write
+        against the room there is for it. The default plan for three embryos
+        is about 576 GB a night, and nothing on the page said so.
+        {free_bytes, total_bytes, path}, each null when the storage root
+        cannot be read. Never errors: an unread disk is a line left out, not
+        a page that will not draw."""
+        import os
+        import shutil
+
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        store = getattr(agent, "store", None) if agent else None
+        where = getattr(store, "root", None)
+        if not isinstance(where, (str, os.PathLike)):
+            # No session is live yet: the server's own store is the same disk.
+            where = getattr(getattr(server, "gently_store", None), "root", None)
+        usage = None
+        if isinstance(where, (str, os.PathLike)):
+            try:
+                usage = shutil.disk_usage(os.fspath(where))
+            except Exception:
+                logger.debug("disk usage read failed", exc_info=True)
+        if usage is None:
+            return {"free_bytes": None, "total_bytes": None, "path": None}
+        return {
+            "free_bytes": int(usage.free),
+            "total_bytes": int(usage.total),
+            "path": os.fspath(where),
+        }
+
     @router.get("/api/devices/timelapse/status")
     async def timelapse_status():
         """The run as it stands: status, cadence, every embryo, the brightfield channel.
