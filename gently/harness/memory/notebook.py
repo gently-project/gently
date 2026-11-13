@@ -13,7 +13,7 @@ import re
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -258,6 +258,9 @@ class NotebookStore:
         # A deleted note's file goes here, whole, so the delete can be undone.
         self.removed_dir = self.root / "removed"
         self.notes_dir.mkdir(parents=True, exist_ok=True)
+        # The clock's reading for the last new line, and the time that line was
+        # given (write_note): the same unless lines shared a tick.
+        self._tick: tuple[datetime, datetime] | None = None
         self.index_dir.mkdir(parents=True, exist_ok=True)
         self.removed_dir.mkdir(parents=True, exist_ok=True)
         # reverse indexes: facet -> {value: [note_id, ...]}
@@ -355,6 +358,18 @@ class NotebookStore:
         old = self._note_path(note.id)
         if old is not None:
             old.unlink()
+        else:
+            # A line written after another is later than it. The clock on
+            # Windows ticks every few milliseconds, so two lines written back
+            # to back were given the same created_at and listed in the order
+            # of their random ids: the newer ask under the older one, and an
+            # answer not "after" its ask. Only a line inside the last tick is
+            # moved, by a microsecond; one with a time of its own is left.
+            if self._tick is not None and self._tick[0] <= note.created_at <= self._tick[1]:
+                note.created_at = self._tick[1] + timedelta(microseconds=1)
+                self._tick = (self._tick[0], note.created_at)
+            else:
+                self._tick = (note.created_at, note.created_at)
         # A line written under this id is live again: an older removed copy
         # must not come back over it on undo.
         removed = self._removed_path(note.id)
