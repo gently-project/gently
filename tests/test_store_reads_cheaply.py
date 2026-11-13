@@ -71,7 +71,8 @@ def test_what_a_session_holds_scans_each_projection_folder_once(tmp_path, monkey
 
     monkeypatch.setattr(os, "scandir", counting)
     held = what_a_session_holds(store, "s1")
-    assert held["embryo_count"] == 2 and held["timepoints"] == 6
+    # Two embryos with three each: the run got to 3 timepoints and holds 6 volumes.
+    assert held["embryo_count"] == 2 and held["timepoints"] == 3 and held["volumes"] == 6
     assert held["last_image_at"] is not None
     assert scans["n"] == 2
     assert store.list_projection_timepoints("s1", "embryo_1") == [1, 2, 3]

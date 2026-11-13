@@ -2751,10 +2751,11 @@ function renderProjSessions() {
         ${rows.map(s => {
             const [cls, label] = endedOf(s);
             const run = runOf(s) || {};
+            const tp = run.timepoints ?? run.total_timepoints;   // how far the run got, not the sum over embryos
             const sentence = [
                 s.embryo_count ? `${s.embryo_count} emb` : '',
                 run.interval_seconds ? `${run.interval_seconds} s` : '',
-                run.total_timepoints ? `${run.total_timepoints} tp` : '',
+                tp ? `${tp} tp` : '',
             ].filter(Boolean).join(' · ');
             const plans = (s.plan_items || []).map(p => `<span class="pj-chip">plan: ${esc(p.title)}</span>`).join(' ');
             const holds = [

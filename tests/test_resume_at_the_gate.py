@@ -77,7 +77,9 @@ class TestTheRoute:
         _session(store, "aaaa1111", embryos=4, images=3)
         got = _resumable(store)["sessions"]
         assert [s["session_id"] for s in got] == ["aaaa1111"]
-        assert got[0]["embryo_count"] == 4 and got[0]["timepoints"] == 12
+        # Four embryos imaged three times each: 3 timepoints, and 12 images to show.
+        assert got[0]["embryo_count"] == 4 and got[0]["timepoints"] == 3
+        assert got[0]["volumes"] == 12 and "s.volumes ?? s.timepoints" in GATE
         assert got[0]["last_image_at"] and got[0]["run"] is None
 
     def test_an_empty_session_is_not(self, store):

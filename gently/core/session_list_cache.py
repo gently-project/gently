@@ -41,7 +41,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Bumped when what a kept row means changes: an older file is then ignored.
-VERSION = 1
+# 2: a session's ``timepoints`` became how far its run got (the most any one
+#    embryo has) and ``volumes`` their sum; a row kept before that says the sum
+#    as timepoints and no volumes.
+VERSION = 2
 
 # The two files whose rewriting marks a session as changed.
 _WATCHED = ("session.yaml", "timelapse.yaml")

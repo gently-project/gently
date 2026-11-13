@@ -132,7 +132,11 @@ def what_a_session_holds(store, sid: str) -> dict | None:
         embryo_ids = []
     if not embryo_ids:
         return None
+    # A session's timepoints are how far its run got: the most any one embryo
+    # has, since a round gives each embryo one. The sum over embryos is the
+    # volumes on disk — four embryos imaged once hold 1 timepoint, 4 volumes.
     timepoints = 0
+    volumes = 0
     last_image: float | None = None
     for eid in embryo_ids:
         # One scan of the projections folder gives both the count and the
@@ -148,7 +152,8 @@ def what_a_session_holds(store, sid: str) -> dict | None:
                 tps = []
         if not tps:
             continue
-        timepoints += len(tps)
+        timepoints = max(timepoints, len(tps))
+        volumes += len(tps)
         if taken is not None:
             last_image = taken if last_image is None else max(last_image, taken)
 
@@ -161,13 +166,17 @@ def what_a_session_holds(store, sid: str) -> dict | None:
     if state:
         rows = state.get("embryos") or {}
         going = [k for k, v in rows.items() if not (v or {}).get("is_complete")]
+        acquired = [int((v or {}).get("timepoints_acquired") or 0) for v in rows.values()]
         last_run = {
             "status": state.get("status"),
             "embryos_going": len(going),
             "saved_at": state.get("saved_at"),
             "started_at": state.get("started_at"),
             "rounds": state.get("current_round"),
+            # The orchestrator's count is the sum over embryos; ``timepoints``
+            # is how far the run got, the most any one embryo acquired.
             "total_timepoints": state.get("total_timepoints"),
+            "timepoints": max(acquired) if acquired else None,
             "interval_seconds": state.get("base_interval_seconds"),
         }
         if state.get("status") in ("running", "paused") and going:
@@ -180,6 +189,7 @@ def what_a_session_holds(store, sid: str) -> dict | None:
         "created_at": info.get("created_at", ""),
         "embryo_count": len(embryo_ids),
         "timepoints": timepoints,
+        "volumes": volumes,
         "last_image_at": (
             datetime.fromtimestamp(last_image).isoformat(timespec="seconds")
             if last_image is not None

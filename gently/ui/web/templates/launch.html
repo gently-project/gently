@@ -264,7 +264,8 @@ function paintWhich() {
       const title = (named ? esc(s.name) : "Carry on from " + esc(when(s.created_at) || s.session_id))
         + ` <span class="pick-id">${esc(s.session_id)}</span>`;
       const parts = [plural(s.embryo_count, "embryo")];
-      if (s.timepoints) parts.push(plural(s.timepoints, "image"));
+      const images = s.volumes ?? s.timepoints;   // every embryo's, together
+      if (images) parts.push(plural(images, "image"));
       if (s.last_image_at) parts.push("last " + ago(s.last_image_at));
       const run = s.run
         ? `<br><span class="pick-run">A run was interrupted, with ${plural(s.run.embryos_going, "embryo")} still going. It can be resumed from Acquisition.</span>`

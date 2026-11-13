@@ -7,14 +7,16 @@
  * reads them off the frames' clocks and the temperature log.
  *
  * Positions are fractions of the frame (0..1), so the same click lands on the
- * full TIFF and on any thumbnail of it.
+ * full TIFF and on any thumbnail of it. The pins are drawn on the viewer's
+ * layer — the picture's box exactly — never on a box around it, so a mark
+ * stays on its embryo whatever size the frame is shown at.
  */
 const TwitchHatchTool = {
     sid: null, data: null, field: 0, idx: 0,
     history: [],   // rows as they were before each save; Ctrl+Z walks it back
 
     async mount(el, sid) {
-        if (this.sid !== sid) this.history = [];
+        if (this.sid !== sid) { this.history = []; this.range = null; }
         this.sid = sid; this.el = el;
         document.removeEventListener('keydown', this._onKey);
         this._onKey = ev => {
@@ -55,7 +57,6 @@ const TwitchHatchTool = {
         if (!frames.length) { this.el.innerHTML = '<div class="empty-tab">No brightfield frames in this session</div>'; return; }
         const cur = this.frame();
         const report = this.data.report || [];
-        const here = report.map((r, i) => [r, i]).filter(([r]) => r.field === this.field);
         this.el.innerHTML = `
           <div class="th-bar">
             <span class="th-fields">${this.fields().map(f => `<button class="session-edit-btn ${f === this.field ? 'is-on' : ''}" data-field="${f}">field ${f}</button>`).join('')}</span>
@@ -66,7 +67,6 @@ const TwitchHatchTool = {
           </div>
           <div class="th-stage">
             <div class="th-img" title="Click an embryo on the frame it first twitches"></div>
-            ${here.map(([r, i]) => `<span class="th-pin ${r.hatch_frame == null ? 'is-open' : ''}" style="left:${r.x * 100}%;top:${r.y * 100}%" title="#${i + 1}">${i + 1}</span>`).join('')}
           </div>
           <table class="th-table">
             <thead><tr><th>#</th><th>field</th><th>twitch</th><th>hatch</th><th>minutes</th><th>°C</th><th>vs Sulston (${this.data.sulston_min} min)</th><th>by</th><th></th></tr></thead>
@@ -122,14 +122,24 @@ const TwitchHatchTool = {
         const host = this.el.querySelector('.th-img');
         if (!host) return;
         if (!this.view || this.view.host !== host) {
-            if (this.view) this.view.destroy();
+            // The pane was redrawn (a mark saved, a field picked): the old
+            // viewer goes, the contrast a person set on it stays.
+            if (this.view) { if (this.view.data) this.range = [this.view.lo, this.view.hi, this.view.gamma]; this.view.destroy(); }
             this.view = U16View.create(host, { bar: true });
         }
-        const keep = this.view.data ? [this.view.lo, this.view.hi, this.view.gamma] : null;
+        const keep = this.view.data ? [this.view.lo, this.view.hi, this.view.gamma] : this.range;
         this.view.load(this.u16(frame.stem)).then(meta => {
-            // The contrast a person set holds across frames of one field.
+            // The contrast a person set holds across frames, and across redraws.
             if (meta && keep) this.view.setRange(keep[0], keep[1], keep[2]);
         }).catch(() => {});
+    },
+
+    // This field's pins, on the viewer's layer: the picture's box, so a
+    // fraction of the frame is the same spot at every size, on every window.
+    drawPins() {
+        if (!this.view || !this.view.layer) return;
+        const here = (this.data.report || []).map((r, i) => [r, i]).filter(([r]) => r.field === this.field);
+        this.view.layer.innerHTML = here.map(([r, i]) => `<span class="th-pin ${r.hatch_frame == null ? 'is-open' : ''}" style="left:${r.x * 100}%;top:${r.y * 100}%" title="#${i + 1}">${i + 1}</span>`).join('');
     },
 
     wire() {
@@ -138,15 +148,17 @@ const TwitchHatchTool = {
         const slider = el.querySelector('.th-slider');
         slider.oninput = () => { this.idx = +slider.value; this.scrub(); };
         el.querySelectorAll('.th-step').forEach(b => { b.onclick = () => this.step(+b.dataset.step); });
-        this.scrub();   // the arrows' disabled state at the ends
-        this.showFrame(this.frame());
+        this.scrub();   // shows the frame, and the arrows' disabled state at the ends
+        this.drawPins();
         el.querySelector('.th-img').onclick = ev => {
-            const img = this.view ? this.view.canvas : ev.currentTarget, r = img.getBoundingClientRect();
-            if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
-            this.save([...this.data.rows, {
-                field: this.field, x: (ev.clientX - r.left) / r.width, y: (ev.clientY - r.top) / r.height,
-                twitch_frame: this.frame().frame, hatch_frame: null,
-            }]);
+            // A click on the picture itself — not the bar under it — as a
+            // fraction of the canvas, which is the frame at whatever size.
+            const c = this.view && this.view.canvas;
+            if (!c || ev.target !== c) return;
+            const r = c.getBoundingClientRect();
+            const x = (ev.clientX - r.left) / r.width, y = (ev.clientY - r.top) / r.height;
+            if (!(x >= 0 && x < 1 && y >= 0 && y < 1)) return;
+            this.save([...this.data.rows, { field: this.field, x, y, twitch_frame: this.frame().frame, hatch_frame: null }]);
         };
         el.querySelectorAll('[data-hatch]').forEach(b => b.onclick = () => {
             const rows = this.data.rows.map((r, i) => i === +b.dataset.hatch ? { ...r, hatch_frame: this.frame().frame } : r);

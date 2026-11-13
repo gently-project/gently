@@ -21,7 +21,7 @@ const U16View = {
         };
         host.classList.add('u16');
         host.innerHTML = `
-            <div class="u16-stage"><canvas class="u16-c"></canvas><div class="u16-read" hidden></div></div>
+            <div class="u16-stage"><canvas class="u16-c"></canvas><div class="u16-layer"></div><div class="u16-read" hidden></div></div>
             <div class="u16-bar${opts.bar === false ? ' is-hidden' : ''}">
                 <button type="button" class="u16-auto" title="Auto contrast, as ImageJ's Auto button · press again for a tighter cut">auto</button>
                 <label class="u16-l">black <input class="u16-lo" type="range" min="0" max="65535" step="1"><output class="u16-lo-v">0</output></label>
@@ -35,6 +35,10 @@ const U16View = {
         // The bar's parts are taken once: a host may move the bar out of the
         // stage (the overview stage puts it in its side column), and after
         // that nothing under `host` would answer a query for them.
+        // The stage is the picture's box exactly, and the layer fills it: a
+        // mark put there at left:x% top:y% is at fraction (x, y) of the frame,
+        // whatever size the frame is shown at.
+        view.stage = $('.u16-stage'); view.layer = $('.u16-layer');
         const lo = $('.u16-lo'), hi = $('.u16-hi'), g = $('.u16-g');
         const loV = $('.u16-lo-v'), hiV = $('.u16-hi-v'), gV = $('.u16-g-v');
         // The sliders span the data seen so far, widened to hold whatever range
@@ -160,12 +164,19 @@ const U16View = {
         document.querySelectorAll('.u16-overlay').forEach(o => o.remove());
         const o = document.createElement('div');
         o.className = 'u16-overlay';
-        o.innerHTML = `<div class="u16-overlay-head"><span class="u16-overlay-title">${title ? String(title).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) : ''}</span><button type="button" class="u16-overlay-close" aria-label="Close">×</button></div><div class="u16-overlay-body"></div>`;
+        o.innerHTML = `<div class="u16-overlay-head"><span class="u16-overlay-title">${title ? String(title).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])) : ''}</span><span class="u16-overlay-hint">Esc or click outside the picture to close</span><button type="button" class="u16-overlay-close" aria-label="Close" title="Close (Esc)">×</button></div><div class="u16-overlay-body"></div>`;
         document.body.appendChild(o);
         const close = () => { o.remove(); document.removeEventListener('keydown', onKey); };
         const onKey = e => { if (e.key === 'Escape') close(); };
         o.querySelector('.u16-overlay-close').onclick = close;
-        o.addEventListener('click', e => { if (e.target === o) close(); });
+        // The picture and the bar keep it open; a click anywhere else — the
+        // dark around the frame, not only the overlay's own margin — closes
+        // it. Both the press and the release have to land outside, so a drag
+        // that starts on a slider and ends off the bar does not.
+        const keeps = t => !!(t && t.closest && t.closest('.u16-c, .u16-bar, .u16-overlay-title, .u16-overlay-close'));
+        let pressedOutside = false;
+        o.addEventListener('mousedown', e => { pressedOutside = !keeps(e.target); });
+        o.addEventListener('click', e => { if (pressedOutside && !keeps(e.target)) close(); });
         document.addEventListener('keydown', onKey);
         const view = U16View.create(o.querySelector('.u16-overlay-body'));
         view.load(url).catch(err => { view.info.textContent = `could not load: ${err.message}`; });
