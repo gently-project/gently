@@ -61,6 +61,7 @@ def _dl(**devices) -> DeviceLayerServer:
     dl.devices = dict(devices)
     dl._state_pause_counter = 0
     dl._state_latest = {}
+    dl._state_subscribers = []
     return dl
 
 

@@ -3035,6 +3035,36 @@ class DeviceLayerServer(Service):
             logger.exception("Axis move to %.2f did not complete cleanly", target)
         return float(device.read()[device.name]["value"])
 
+    # What the slow poller calls each axis it reads (`_read_slow_positions`).
+    _AXIS_KINDS = {"fdrive": "fdrive", "z_stage": "bottom_z"}
+
+    async def _move_axis(self, device, target: float) -> float:
+        """Move a fenced axis, and have the snapshot say where it now is.
+
+        Every poll tick carries every axis's last-read position. XY's tick goes
+        out twice a second; the F-drive and the bottom Z are read every two
+        seconds. So after a move the next ticks went on carrying the height
+        from before it, and a page that had just shown the move's own answer
+        stepped back to the old number until the slow read came round: up to
+        two seconds of a wrong height, at the moment the head is being brought
+        down onto a sample by hand. The position the move itself read is put
+        in the snapshot here, on the event loop and after the move, so it
+        lands behind any poll that was already in flight, and is sent.
+        """
+        async with self.pause_state_updates():
+            new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+        positions = dict(self._state_latest.get("positions", {}))
+        kind = next(
+            (k for key, k in self._AXIS_KINDS.items() if self.devices.get(key) is device), None
+        )
+        entry = {**positions.get(device.name, {}), "Position": new_pos}
+        if kind and "kind" not in entry:
+            entry["kind"] = kind
+        positions[device.name] = entry
+        self._state_latest = {**self._state_latest, "positions": positions, "t": time.time()}
+        await self._broadcast_state(self._tick_payload())
+        return new_pos
+
     def _axis_status_response(self, device_key: str, label: str):
         device = self.devices.get(device_key)
         if device is None:
@@ -3091,8 +3121,7 @@ class DeviceLayerServer(Service):
                 status=400,
             )
         try:
-            async with self.pause_state_updates():
-                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+            new_pos = await self._move_axis(device, target)
         except ValueError as exc:  # device-level fence (defensive)
             return web.json_response({"success": False, "error": str(exc)}, status=400)
         except Exception as exc:
@@ -3580,8 +3609,7 @@ class DeviceLayerServer(Service):
             )
         target = float(hi)
         try:
-            async with self.pause_state_updates():
-                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+            new_pos = await self._move_axis(device, target)
         except Exception as exc:
             return web.json_response({"success": False, "error": str(exc)}, status=500)
         return web.json_response(
@@ -3632,8 +3660,7 @@ class DeviceLayerServer(Service):
                 status=400,
             )
         try:
-            async with self.pause_state_updates():
-                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+            new_pos = await self._move_axis(device, target)
         except Exception as exc:
             return web.json_response({"success": False, "error": str(exc)}, status=500)
         return web.json_response(

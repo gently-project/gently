@@ -187,6 +187,105 @@ async def test_a_new_pose_and_the_end_of_a_pause_mark_the_optics_moved():
     assert dl._state_optics_moved is True, "whatever held MMCore may have moved them"
 
 
+# ── a moved axis is where the move left it ───────────────────────────────
+#
+# Every tick carries every axis's last-read position. With XY's tick going out
+# twice a second and the F-drive read every two, the ticks after a move went
+# on carrying the height from before it: a page that had just shown the
+# move's own answer stepped back to the old number for up to two seconds,
+# with the head being brought down onto a sample by hand. Found on the
+# simulated rig, 2026-11-13, by pressing a step and reading the gauge.
+
+
+class _Status:
+    def wait(self):
+        pass
+
+
+class _Axis:
+    def __init__(self, name, at, limits=(30.0, 25000.0)):
+        self.name, self.pos, self.limits = name, at, limits
+
+    def read(self):
+        return {self.name: {"value": self.pos}}
+
+    def set(self, target):
+        self.pos = float(target)
+        return _Status()
+
+
+def _nudge(delta):
+    req = AsyncMock()
+    req.json = AsyncMock(return_value={"delta": delta})
+    return req
+
+
+@pytest.mark.asyncio
+async def test_a_move_puts_the_new_height_in_the_snapshot_and_sends_it():
+    dl = _dl()
+    dl.devices = {"fdrive": _Axis("ZStage:V:37", 114.6)}
+    dl._state_latest["positions"] = {
+        "XYStage:XY:31": {"X": 1.0, "Y": 2.0, "kind": "xy_stage"},
+        "ZStage:V:37": {"Position": 114.6, "kind": "fdrive"},
+    }
+    resp = await dl.handle_nudge_fdrive(_nudge(-5))
+    assert json.loads(resp.text)["position"] == 109.6
+    assert dl._state_latest["positions"]["ZStage:V:37"] == {"Position": 109.6, "kind": "fdrive"}
+    assert dl._state_latest["positions"]["XYStage:XY:31"]["X"] == 1.0, "the other axes are kept"
+    sent = dl._state_subscribers[0].get_nowait()
+    assert sent["positions"]["ZStage:V:37"]["Position"] == 109.6
+    assert "properties" not in sent, "a move is a tick, not a sweep"
+
+
+@pytest.mark.asyncio
+async def test_the_next_xy_tick_carries_the_height_from_after_the_move():
+    dl = _dl()
+    dl.devices = {"fdrive": _Axis("ZStage:V:37", 114.6)}
+    dl._state_latest["positions"] = {"ZStage:V:37": {"Position": 114.6, "kind": "fdrive"}}
+    await dl.handle_nudge_fdrive(_nudge(-5))
+    dl._state_subscribers[0].get_nowait()  # the move's own tick
+    dl._read_xy_position = lambda: {"XYStage:XY:31": {"X": 5.0, "Y": 6.0, "kind": "xy_stage"}}
+    (tick,) = await _first(dl, dl._position_poller)
+    assert tick["positions"]["ZStage:V:37"]["Position"] == 109.6
+
+
+@pytest.mark.asyncio
+async def test_every_way_of_moving_the_head_says_where_it_went():
+    for handler, body, where in (
+        ("handle_nudge_fdrive", {"delta": 50}, 164.6),
+        ("handle_goto_fdrive", {"position": 1000}, 1000.0),
+        ("handle_raise_fdrive", None, 25000.0),
+    ):
+        dl = _dl()
+        dl.devices = {"fdrive": _Axis("ZStage:V:37", 114.6)}
+        req = AsyncMock()
+        req.json = AsyncMock(return_value=body)
+        resp = await getattr(dl, handler)(req)
+        assert json.loads(resp.text)["position"] == where, handler
+        assert dl._state_latest["positions"]["ZStage:V:37"]["Position"] == where, handler
+        assert dl._state_pause_counter == 0, "polling was left paused"
+
+
+@pytest.mark.asyncio
+async def test_an_axis_the_poller_has_not_read_yet_is_named_for_the_page():
+    """The page tells the axes apart by `kind`. A move made before the first
+    slow read still has to say which axis it is."""
+    dl = _dl()
+    dl.devices = {"z_stage": _Axis("ZStage:Z:32", 25.6, limits=(-50.0, 250.0))}
+    resp = await dl.handle_nudge_bottom_z(_nudge(1))
+    assert resp.status == 200, resp.text
+    assert dl._state_latest["positions"]["ZStage:Z:32"] == {"Position": 26.6, "kind": "bottom_z"}
+
+
+def test_the_movers_all_go_through_the_one_place_that_says_so():
+    body = DEVICE_LAYER[DEVICE_LAYER.index("    async def _move_axis(self, device, target") :]
+    body = body[: body.index("\n    def _axis_status_response")]
+    assert body.index("pause_state_updates()") < body.index('"Position": new_pos')
+    assert "await self._broadcast_state(self._tick_payload())" in body
+    assert DEVICE_LAYER.count("new_pos = await self._move_axis(device, target)") == 3
+    assert DEVICE_LAYER.count("asyncio.to_thread(self._nudge_axis_blocking") == 1
+
+
 # ── the properties, when asked ───────────────────────────────────────────
 
 
