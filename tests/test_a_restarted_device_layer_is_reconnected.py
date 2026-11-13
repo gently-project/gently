@@ -33,7 +33,7 @@ class _Session:
 
 def _client() -> DiSPIMMicroscope:
     m = DiSPIMMicroscope.__new__(DiSPIMMicroscope)
-    m._session = _Session()
+    m._session = _Session()  # type: ignore[assignment]  # a stand-in with the one method used
     m._qs_connected = True
     m._sam_available = True
     return m
