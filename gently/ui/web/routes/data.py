@@ -1732,17 +1732,20 @@ def create_router(server) -> APIRouter:
             logger.exception("Stage move command failed")
             raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
 
-    # The pane calls the sample "at the objective" when the F-drive is within
-    # this of its floor (operate-math.js ENGAGED_WITHIN_UM); an XY move then
-    # drags the sample across the head. The jog refuses under the same rule.
-    ENGAGED_WITHIN_UM = 1000.0
+    # The jog used to refuse (409, "XY is locked") while the F-drive was
+    # within 1000 µm of its floor. That was the page's XY lock, which the
+    # operator had taken out on 2026-11-08: the rig images at about 85 µm to
+    # floor, so the lock was engaged for the whole of a run. This copy of it
+    # was missed then and went on 2026-11-13, when the pad came to sit beside
+    # the light-sheet view, where every press at imaging height hit it.
+    # Nothing interlocks XY against the F-drive, here or on the move route
+    # above; what is kept is the XY envelope, below.
 
     @router.post("/api/devices/stage/jog", dependencies=[Depends(require_control)])
     async def stage_jog(payload: dict = Body(...)):  # noqa: B008
-        """Move the stage by {"dx", "dy"} µm from where it is — the bottom
-        camera's pad. Refuses while the sample is at the objective (409),
-        and keeps the target inside the XY envelope when one is enforced
-        (said back as ``clamped``). Returns where the stage went."""
+        """Move the stage by {"dx", "dy"} µm from where it is — the Stage
+        panel's pad. Keeps the target inside the XY envelope when one is
+        enforced (said back as ``clamped``). Returns where the stage went."""
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
@@ -1755,17 +1758,6 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=400, detail="a jog is at most 20 mm")
         if dx == 0 and dy == 0:
             raise HTTPException(status_code=400, detail="nothing to move by")
-        try:
-            fd = await client.get_fdrive()
-        except Exception:
-            fd = None
-        floor = (fd or {}).get("distance_to_floor") if isinstance(fd, dict) else None
-        if isinstance(floor, (int, float)) and floor < ENGAGED_WITHIN_UM:
-            raise HTTPException(
-                status_code=409,
-                detail=f"the sample is at the objective ({floor:.0f} µm to floor): XY is locked. "
-                "Back the head off first.",
-            )
         try:
             x0, y0 = await client.get_stage_position()
         except Exception as exc:

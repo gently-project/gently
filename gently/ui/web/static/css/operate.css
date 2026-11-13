@@ -1858,7 +1858,6 @@
 .sp-row { display: flex; align-items: baseline; gap: var(--op-2); flex-wrap: wrap; }
 .sp-pos { font-size: 12px; color: var(--op-ink-dim); }
 .sp-pos .op-num { color: var(--op-ink); }
-.sp-locked { font-size: 12px; color: var(--op-warn); }
 .sp-grid { display: grid; grid-template-columns: repeat(3, max-content); gap: var(--op-1); justify-content: start; align-items: center; }
 .sp-btn { min-width: 56px; }
 .sp-mid { font-size: 11px; color: var(--op-ink-dim); text-align: center; min-width: 56px; }

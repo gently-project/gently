@@ -1,7 +1,10 @@
-"""The XY stage, from the bottom camera's pane.
+"""The XY stage, from the page.
 
 "one more feature i want in the bottom cam view - there is no way to move
 the xy stage..."
+
+The jog route kept the last piece of the XY lock: it refused whenever the
+SPIM head was within 1000 µm of its floor, and the rig images at about 85.
 """
 
 from __future__ import annotations
@@ -9,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -19,6 +23,7 @@ WEB = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web"
 INDEX = (WEB / "templates" / "index.html").read_text(encoding="utf-8")
 OPERATE = (WEB / "static" / "js" / "operate.js").read_text(encoding="utf-8")
 PAD = (WEB / "static" / "js" / "panels" / "stage-pad.js").read_text(encoding="utf-8")
+DATA = (WEB / "routes" / "data.py").read_text(encoding="utf-8")
 
 
 def _client(*, at=(1000.0, 2000.0), floor=5000.0, envelope=None, move_ok=True):
@@ -58,15 +63,24 @@ class TestTheJog:
         }
         c.move_to_position.assert_awaited_once_with(1200.0, 1950.0)
 
-    def test_refuses_while_the_sample_is_at_the_objective(self):
-        c = _client(floor=300.0)
+    @pytest.mark.parametrize("floor", [85.0, 300.0, 999.0, 5000.0, None])
+    def test_the_head_being_down_does_not_refuse_a_jog(self, floor):
+        """ "The sample at objective xy locked — that feature — I need to get
+        rid of it." It went from the page on 2026-11-08; this route kept its
+        own copy (409, "XY is locked") until 2026-11-13."""
+        c = _client(floor=floor)
         r = _app(c).post("/api/devices/stage/jog", json={"dx": 200, "dy": 0})
-        assert r.status_code == 409 and "XY is locked" in r.json()["detail"]
-        c.move_to_position.assert_not_awaited()
+        assert r.status_code == 200, r.text
+        c.move_to_position.assert_awaited_once_with(1200.0, 2000.0)
+        # The head is not even asked about: nothing here depends on it.
+        c.get_fdrive.assert_not_awaited()
 
-    def test_an_unknown_floor_does_not_lock(self):
-        c = _client(floor=None)
-        assert _app(c).post("/api/devices/stage/jog", json={"dx": 10, "dy": 0}).status_code == 200
+    def test_nothing_on_the_route_or_the_pad_is_a_lock(self):
+        route = DATA[DATA.index('@router.post("/api/devices/stage/jog"') :]
+        route = route[: route.index("\n    @router.")]
+        assert "409" not in route and "get_fdrive" not in route
+        assert "ENGAGED_WITHIN_UM" not in DATA
+        assert "is-locked" not in PAD and "locked()" not in PAD
 
     def test_stops_at_the_edge_of_an_enforced_envelope(self):
         env = {"x_min": 0.0, "x_max": 1100.0, "y_min": 0.0, "y_max": 9000.0, "enforced": True}
@@ -122,7 +136,6 @@ class TestThePad:
             "/api/devices/stage/jog",
             "ArrowUp",
             "shiftKey",
-            "is-locked",
         ):
             assert needle in PAD, needle
         # The pad never claims a screen direction it cannot know.

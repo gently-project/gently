@@ -4,15 +4,20 @@
  *     StagePad.mount('op-stage-host');
  *
  * Four buttons and a step. Each press asks the server to move by that much
- * from where the stage is (POST /api/devices/stage/jog); the server refuses
- * while the sample is at the objective and keeps the target inside the XY
- * envelope. The buttons are named by stage axis, not by screen direction:
- * which way +X moves in the picture depends on how the camera is mounted,
- * and a pad that says "left" and moves the picture right is worse than one
- * that says "−X". Watch the image; after one press you know.
+ * from where the stage is (POST /api/devices/stage/jog); the server keeps
+ * the target inside the XY envelope. The buttons are named by stage axis,
+ * not by screen direction: which way +X moves in the picture depends on how
+ * the camera is mounted, and a pad that says "left" and moves the picture
+ * right is worse than one that says "−X". Watch the image; after one press
+ * you know.
  *
  * Arrow keys work while the pad has focus; Shift multiplies the step by ten.
  * The readout follows the stage, driven from here or from the joystick.
+ *
+ * The pad used to grey itself out, and the server to refuse, while the SPIM
+ * head was within 1000 µm of its floor ("XY locked — sample at objective").
+ * That lock was taken out of the page on 2026-11-08 at the operator's
+ * request and its last pieces, here and on the jog route, on 2026-11-13.
  */
 const StagePad = (() => {
     'use strict';
@@ -29,19 +34,13 @@ const StagePad = (() => {
     const fmt = v => (v == null || !Number.isFinite(v)) ? '—' : Math.round(v).toLocaleString();
     const toast = (m, bad) => { if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, bad ? 8000 : 2500, bad ? 'error' : undefined); };
 
-    function locked() {
-        const cam = $('op-cam-bottom');
-        return !!(cam && cam.classList.contains('is-locked'));
-    }
-
     function render() {
         if (!host) return;
-        const off = busy || locked();
+        const off = busy;
         host.innerHTML = `
             <div class="sp" tabindex="0" aria-label="XY stage pad: arrow keys move the stage by the chosen step, Shift for ten times">
                 <div class="sp-row sp-head">
                     <span class="sp-pos" title="Where the stage is, µm">x <b class="op-num">${fmt(pos.x)}</b> &nbsp; y <b class="op-num">${fmt(pos.y)}</b> <i>µm</i></span>
-                    ${locked() ? '<span class="sp-locked">XY locked — sample at objective</span>' : ''}
                 </div>
                 <div class="sp-grid">
                     <span></span>
@@ -75,7 +74,7 @@ const StagePad = (() => {
     }
 
     async function jog(dx, dy) {
-        if (busy || locked() || (!dx && !dy)) return;
+        if (busy || (!dx && !dy)) return;
         busy = true;
         lastSaid = '';
         render();
@@ -120,11 +119,6 @@ const StagePad = (() => {
         refresh();
         clearInterval(timer);
         timer = setInterval(refresh, 1500);
-        // The lock banner comes and goes with the F-drive; follow it.
-        const cam = $('op-cam-bottom');
-        if (cam && typeof MutationObserver !== 'undefined') {
-            new MutationObserver(() => render()).observe(cam, { attributes: true, attributeFilter: ['class'] });
-        }
     }
 
     return { mount, jog, refresh, STEPS };
