@@ -192,7 +192,7 @@ const HomeApp = (() => {
                     `<button class="home-resume" data-resume="${escapeHtml(s.session_id)}">Resume</button>`;
                 return `<div class="home-item">
                     <div class="home-item-main">
-                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}${whoChip(s)}</div>
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.suggested_name || s.session_id)}</span>${live}${diag}${projectChip(s)}${whoChip(s)}</div>
                         <span class="home-item-meta">${escapeHtml(relTime(s.last_active))} · ${s.embryo_count || 0} embryos</span>
                     </div>${resume}
                 </div>`;

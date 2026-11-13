@@ -214,10 +214,43 @@ class TestNaming:
         sid = _session_with_a_run(store)
         c = _client(store)
         row = c.get("/api/sessions").json()["sessions"][0]
-        assert row["name"] == sid  # the list keeps the id as the fallback name
+        # The list sends no name for a session nobody named: the id in a
+        # name's place stopped the page from saying what the session holds.
+        assert row["name"] is None
         assert row["suggested_name"] == "1 embryo · every 10 min · Oct 4 overnight · complete"
         d = c.get(f"/api/sessions/{sid}").json()
         assert d["name"] is None and d["suggested_name"] == row["suggested_name"]
+
+    def test_every_page_that_lists_sessions_says_what_an_unnamed_one_holds(self):
+        # On the rig 381 of 384 sessions have no name. The list sent the id in
+        # its place, so `s.name || s.suggested_name` never reached the second
+        # word and the Sessions tab was a column of eight hex digits.
+        js = WEB / "static" / "js"
+        for page in ("review.js", "home.js", "campaigns.js"):
+            src = (js / page).read_text(encoding="utf-8")
+            assert "s.name || s.session_id" not in src, page
+            assert "s.name || s.suggested_name || s.session_id" in src, page
+
+    def test_a_name_has_the_width_of_its_row_until_the_actions_need_the_corner(self):
+        # A derived name is fifty characters and the column is 275 px: with the
+        # corner always kept free it was cut after twenty.
+        at_rest = (
+            ".session-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }"
+        )
+        assert at_rest in REVIEW_CSS
+        assert "\n.session-name { padding-right: 140px;" not in REVIEW_CSS
+        shown = (
+            ".session-item:hover .session-name, .session-item.active .session-name, "
+            ".session-item:focus-within .session-name { padding-right: 140px; }"
+        )
+        assert shown in REVIEW_CSS
+        # The same three states the actions are shown in.
+        assert (
+            ".session-item:hover .session-row-actions, .session-item.active .session-row-actions, "
+            ".session-item:focus-within .session-row-actions { opacity: 1; }"
+        ) in REVIEW_CSS
+        # And the whole name is in the row's title, for when it is still cut.
+        assert "(not named yet: read off the session itself)" in REVIEW_JS
 
     def test_the_derived_name_reads_well_with_little_to_go_on(self):
         assert derive_session_name(created_at="2026-10-06T09:38:00") == "Oct 6"

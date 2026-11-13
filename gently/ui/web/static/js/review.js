@@ -756,7 +756,7 @@ const ReviewApp = {
             const open = this.currentSession && this.currentSession.session_id === s.session_id;
             return `
             <div class="session-item ${s.active ? 'active-session' : ''}${open ? ' active' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
-                <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
+                <div class="session-name${s.name ? '' : ' is-suggested'}" title="${this.escapeHtml(s.name || `${s.suggested_name || s.session_id} (not named yet: read off the session itself)`)}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}${s.advanced_diagnostics ? ' <span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : ''}</div>
                 <div class="session-meta">
                     <span>${this.formatDate(s.created_at)}</span>
                     ${held.map(h => `<span class="dot"></span><span>${h}</span>`).join('')}

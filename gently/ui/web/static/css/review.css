@@ -114,8 +114,11 @@
 .session-row-actions { position: absolute; right: 10px; top: 10px; display: flex; gap: 5px; opacity: 0; transition: opacity 0.12s ease; }
 .session-item:hover .session-row-actions, .session-item.active .session-row-actions, .session-item:focus-within .session-row-actions { opacity: 1; }
 .session-row-actions > * { margin: 0 !important; font-size: 11.5px !important; line-height: 1.4 !important; padding: 1px 8px !important; }
-/* The name line leaves the corner free, so the actions never sit on the words. */
-.session-name { padding-right: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The name line leaves the corner free while the actions are in it, so they
+   never sit on the words. At rest it has the row's whole width: a session
+   nobody named is called by what it holds, and that is fifty characters. */
+.session-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-item:hover .session-name, .session-item.active .session-name, .session-item:focus-within .session-name { padding-right: 140px; }
 
 .session-name {
     font-size: 13.5px;

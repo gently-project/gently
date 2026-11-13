@@ -438,7 +438,11 @@ def create_router(server) -> APIRouter:
                         "tags": s.get("tags") or [],
                         "plan_items": served.get(sid, []),
                         **extra,
-                        "name": s.get("name") or sid,
+                        # The name it was given, or none: the page then calls
+                        # it by what it holds (suggested_name). Sending the id
+                        # in a name's place made 381 of the rig's 384 sessions
+                        # read as eight hex digits.
+                        "name": s.get("name") or None,
                         "created_at": s.get("created_at", ""),
                         "last_active": s.get("last_active", ""),
                         "embryo_count": held.get("embryo_count", 0),
