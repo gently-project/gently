@@ -58,7 +58,21 @@ and that changes — read it rather than trusting a list here. What stays true:
 - **CI drives no browser.** It runs `pytest` and the JavaScript unit tests
   under `tests/js/`, which cover pure modules only. What the UI looks like and
   does under `gently/ui/web/static/js/` is not covered, so verify it by running
-  the app and exercising the UI by hand.
+  the app and exercising the UI by hand. Nothing checks those scripts for a
+  name that is never defined either: a variable left behind by a removal
+  throws only when its line runs.
+- **With no microscope, there is a simulated rig.** `tools/sim_rig.py` runs
+  the real device layer on a stand-in for the Micro-Manager core (moving
+  axes, both cameras, lasers, three embryos in the dish), so the Devices tab
+  can be driven end to end. Start it, then the app with a storage path of its
+  own. Never point a simulated session at the rig's `D:\Gently3`. (`--no-sync`
+  because a plain `uv run` re-syncs the environment first, which on the
+  microscope PC uninstalls the `torch-gpu` and `sam` extras.)
+
+  ```bash
+  uv run --no-sync python tools/sim_rig.py      # device layer on 127.0.0.1:60610
+  GENTLY_STORAGE_PATH="$TEMP/gently-sim" uv run --no-sync python launch_gently.py --no-api --no-auth --no-browser
+  ```
 - CI runs on pull requests and on pushes to `main`/`development`, so a feature
   branch with no PR open gets no signal at all.
 
@@ -99,7 +113,7 @@ D:/Gently3/
       intent.yaml                          # planned vs actual
       timelapse.yaml                       # checkpointed timelapse state
       acquisition.yaml                     # the plan the run was started with
-      overview_fields.yaml                 # the bottom-camera fields the overview is taken from (Bottom cam pane)
+      overview_fields.yaml                 # the bottom-camera fields the overview is taken from (Scope's rail)
       timeline.jsonl                       # session events
       interaction_log.jsonl                # agent conversation records
       conversation.json                    # Claude API messages (resumption)
@@ -151,7 +165,7 @@ D:/Gently3/
     device_layer_{YYYYMMDD_HHMMSS}.log
   config/
     hardware.yaml
-    rail_cards.json                        # which Bottom cam rail cards are open — the rig's, written as pressed
+    rail_cards.json                        # which of Operate's folding cards are open — the rig's, written as pressed
   incoming/{uuid}.tif                      # transient device staging
 ```
 
