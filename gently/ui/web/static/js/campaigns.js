@@ -909,7 +909,7 @@ function renderInspector(data) {
             const _available = state._availableSessions.filter(s => !_linkedIds.has(s.session_id));
             const _opts = _available.length === 0
                 ? `<option value="">No other sessions available</option>`
-                : _available.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.session_id)}</option>`).join('');
+                : _available.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.suggested_name || s.session_id)}</option>`).join('');
             sessHtml += `<div class="session-picker">
                 <select class="session-picker-select" id="session-picker-select">${_opts}</select>
                 <div class="session-picker-actions">

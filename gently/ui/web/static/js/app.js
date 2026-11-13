@@ -77,7 +77,7 @@ function switchTab(tabName) {
     if (tabName === TABS.HOME && typeof HomeApp !== 'undefined') HomeApp.init();
 
     // Render galleries
-    if (tabName === TABS.CALIBRATION) renderCalibrationGallery();
+    if (tabName === TABS.CALIBRATION) { renderCalibrationGallery(); CalibrationManager.entered(); }
     if (tabName === TABS.EVENTS) renderEventsTable();
 
     // Clear detection badge when viewing Embryos tab

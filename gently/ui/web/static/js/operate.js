@@ -1,24 +1,36 @@
 /**
- * Operate — three independent instrument surfaces.
+ * Operate — one workspace, and two surfaces beside it.
  *
- *   Bottom cam   see the dish, focus the bottom objective, find embryos
- *   SPIM head    bring the objectives to height over the sample
+ *   Scope        the dish, what the rig sees and the instrument, on one
+ *                screen: find embryos on the bottom camera, bring the head
+ *                down, look through either light-sheet camera
+ *   Calibration  the piezo–galvo fit for an embryo
  *   Acquisition  the embryo roster and what to run on it
  *
- * There are no steps, no phases and no progress ladder. Every pane is fully
- * live whenever it is visible.
+ * Scope shows one frame at a time, from the camera chosen in the strip above
+ * it: the bottom camera, or the light sheet from side A, side B or both.
+ * `_pane` still names the camera surface ('bottom' or 'spim'), because the
+ * cameras contend for MMCore and one may stream at a time. What changed on
+ * 2026-11-13 is that the two are one section of the page, with one rail and
+ * the same instrument panels in the same places (index.html, "SCOPE"). They
+ * used to be two panes, each assembling its own rail around its own frame.
+ *
+ * There are no steps, no phases and no progress ladder. Every surface is
+ * fully live whenever it is visible.
  *
  * THE INVARIANT: no control anywhere reads `_pane`. It is consulted by exactly
- * two things — render dispatch, and which camera stream owns MMCore. If a
- * `disabled`, `hidden` or early-return ever starts keying off `_pane`, the step
- * model has grown back and this rewrite has been undone.
+ * two things — render dispatch (which section is on screen, and inside Scope
+ * which camera's frame, caption, verbs and display panel), and which camera
+ * stream owns MMCore. If a `disabled` or an early-return ever starts keying
+ * off `_pane`, the step model has grown back and this rewrite has been undone.
  *
- * Gating comes from live hardware state only: the XY interlock (moveStageTo /
- * OperateMath.isEngaged) and the F-drive floor (OperateMath.stepAllowed).
- * Selection is a cursor — it parameterises requests and never disables anything.
+ * Gating comes from live hardware state only: the F-drive floor
+ * (OperateMath.stepAllowed). Selection is a cursor — it parameterises requests
+ * and never disables anything. (An XY interlock against the F-drive used to
+ * stand here too; see moveStageTo for why it went.)
  *
- * Pure geometry, banding and the interlock predicate live in operate-math.js so
- * they can be unit-tested (tests/js/operate-math.test.mjs).
+ * Pure geometry and banding live in operate-math.js so they can be
+ * unit-tested (tests/js/operate-math.test.mjs).
  */
 const OperateManager = (function () {
     const M = (typeof OperateMath !== 'undefined') ? OperateMath : null;
@@ -47,6 +59,9 @@ const OperateManager = (function () {
 
     // ── navigation: the ONLY navigation state in this file ──────────────────
     let _pane = 'bottom';
+    // The camera surface Scope last showed: "Scope" in the toolbar comes back
+    // to it from Calibration or Acquisition.
+    let _scope = 'bottom';
 
     // ── session facts (owned by the bus, mirrored here) ─────────────────────
     let _embryos = [];
@@ -72,23 +87,6 @@ const OperateManager = (function () {
     // timelapse, started the SPIM camera streaming under the run.
     let _bottomOn = false;
     let _spimOn = false;
-
-    // ── the interlock latch ─────────────────────────────────────────────────
-    // Retract is a RELATIVE move, so there is no absolute "safe height" to
-    // derive this from — asking the hardware cannot answer it. Persist it, so
-    // the ordinary reaction to something looking stuck (F5) doesn't come back
-    // claiming the head is up and re-enable an absolute XY move with the
-    // objective down. Telemetry can still clear it (see OperateMath.isEngaged).
-    const HEAD_KEY = 'gently.operate.headLowered';
-    function loadHeadLowered() {
-        try { return sessionStorage.getItem(HEAD_KEY) === '1'; } catch (_) { return false; }
-    }
-    let _headLowered = loadHeadLowered();
-    function setHeadLowered(v) {
-        _headLowered = !!v;
-        try { sessionStorage.setItem(HEAD_KEY, _headLowered ? '1' : '0'); } catch (_) {}
-        renderLock();
-    }
 
     // ── marking ─────────────────────────────────────────────────────────────
     // Markers are held in STAGE coordinates and re-projected onto whatever frame
@@ -129,8 +127,22 @@ const OperateManager = (function () {
     }
     // Read back from the Light panel's device read, never remembered here.
     const ledIsOpen = () => (SharedState.get('light') || {}).led === 'Open';
-    let _galvo = 0.0, _piezo = 50.0;
-    let _mode = 'single';
+    // The live sheet's pose, per side: B's scanner and piezo are different
+    // devices with their own numbers, so switching sides must not carry A's.
+    // Both axes start at 0, the origin the ASIdiSPIM plugin's Home goes to.
+    let _side = 'A';
+    const _pose = { A: { galvo: 0.0, piezo: 0.0 }, B: { galvo: 0.0, piezo: 0.0 } };
+    // The axes' extents per side, from the controller (fetchRange); until
+    // read, a span to draw the line with.
+    const _range = { A: null, B: null };
+    const RANGE_DEFAULT = { galvo: [-5, 5], piezo: [-100, 100] };
+    // When this pane last chose a side. A frame of the old side that lands
+    // inside the window was grabbed before the switch and is dropped; outside
+    // the window, a frame of another side means the device layer is on a side
+    // this pane never chose, and the pane follows it (adoptLsParams).
+    const SIDE_SWITCH_MS = 2000;
+    let _sideChangedAt = 0;
+    let _mode = 'adaptive';
     let _selectedLib = null;
     let _runPaused = false;
 
@@ -239,20 +251,43 @@ const OperateManager = (function () {
         return M ? M.atPosition(_xy, xy) : true;
     }
 
+    // ══ THE RUN OWNS THE INSTRUMENT ═════════════════════════════════════
+    // While a timelapse is running, a verb here that would take the instrument
+    // from it asks first: the stage, the head, a live view, a calibration.
+    // The run drives the stage to each embryo and takes the cameras on its own
+    // clock, so a hand on them mid-run is either undone by the next round or
+    // meets the one in progress.
+    //
+    // Gated on the rig's state, which the shell keeps on <body> for every
+    // surface (data-run, from the run's own events), and never on which
+    // surface is on screen. A paused run is held on purpose and asks nothing.
+    // One yes holds for a minute, so a correction of several presses is one
+    // question and not several.
+    const HANDS_ON_MS = 60000;
+    let _handsOnUntil = 0;
+    function mayTakeFromRun(what) {
+        if (document.body.dataset.run !== 'running') return true;
+        if (Date.now() < _handsOnUntil) return true;
+        const ok = window.confirm(`A run is going. ${what} takes the instrument from it.`
+            + '\n\nPause the run first if this is more than a nudge. Go ahead anyway?');
+        if (ok) _handsOnUntil = Date.now() + HANDS_ON_MS;
+        return ok;
+    }
+
     // ══ THE XY CHOKEPOINT ═══════════════════════════════════════════════════
-    // The ONLY caller of /api/devices/stage/move in this file. The server does
-    // NOT interlock XY against the F-drive — routes/data.py validates that x and
-    // y are floats and nothing else — so this predicate is the whole guard.
-    // Do not add a second fetch of this endpoint; grep the URL string before
-    // touching XY motion.
+    // The ONLY caller of /api/devices/stage/move in this file. Nothing
+    // interlocks XY against the F-drive: the server validates that x and y are
+    // floats and nothing else, and the page's own lock — XY refused, a banner
+    // and a Back off button in every pane whenever the head was within
+    // 1000 µm of its floor — was taken out on 2026-11-08 at the operator's
+    // request: the rig images at ~85 µm to floor, so it refused every
+    // drive-to-embryo during a run. The chokepoint stays: one caller, and
+    // grep the URL string before touching XY motion.
     // `said` is what to toast on success. It was named `why`, which shadowed
     // the why() helper the catch calls — so every failed move threw a second
     // time, inside its own handler, and the operator saw no toast at all.
     async function moveStageTo(x, y, said) {
-        if (isEngaged()) {
-            toastFail('Sample is at the objective — back it off before moving XY');
-            return false;
-        }
+        if (!mayTakeFromRun('Moving the stage')) return false;
         try {
             await postJSON('/api/devices/stage/move', { x, y });
             if (said) toast(said);
@@ -262,17 +297,17 @@ const OperateManager = (function () {
             return false;
         }
     }
-    function isEngaged() {
-        return M ? M.isEngaged(_headLowered, fd.floor()) : _headLowered;
-    }
-
     // ══ Z INSTRUMENT ════════════════════════════════════════════════════════
     // One factory, two instances. The axes differ enormously in scale — the
     // bottom objective has a ~200 µm throw, the F-drive runs 30→25000 µm onto a
     // sample sitting at ~50 — so the F-drive gets position-banded steps and a
     // log track, and the bottom axis a fixed ladder on a linear one.
+    //
+    // The track lies along the panel, its low end at the left. It stood
+    // upright, 84 px for the whole of the F-drive's travel, which gave the
+    // last few hundred µm (where the head is driven by hand) about 20 px.
     function makeZAxis(cfg) {
-        const st = { pos: null, min: null, max: null, floor: null, status: 'unknown' };
+        const st = { pos: null, min: null, max: null, floor: null, status: 'unknown', said: {} };
         let busy = false;
 
         const num = v => (v == null || !Number.isFinite(Number(v))) ? null : Number(v);
@@ -284,8 +319,10 @@ const OperateManager = (function () {
             if (num(d.max) != null) st.max = num(d.max);
             if (num(d.distance_to_floor) != null) st.floor = num(d.distance_to_floor);
             else if (st.pos != null && st.min != null) st.floor = st.pos - st.min;
+            if (num(d.goto_min) != null) st.said.goto_min = num(d.goto_min);
             if (st.pos != null) st.status = 'ok';
             render();
+            if (cfg.onRead) cfg.onRead(st);
         }
         // 1 Hz position stream. Without this the gauge goes stale the moment
         // someone drives the axis at the controller box instead of from here.
@@ -348,7 +385,7 @@ const OperateManager = (function () {
                 .filter(t => t > st.min && t < st.max)
                 .map(t => {
                     const f = M ? M.gaugeFraction(t, st.min, st.max, cfg.scale) : null;
-                    return f == null ? '' : `<span style="bottom:${(f * 100).toFixed(2)}%">${t}</span>`;
+                    return f == null ? '' : `<span style="left:${(f * 100).toFixed(2)}%">${t}</span>`;
                 }).join('');
         }
 
@@ -356,8 +393,12 @@ const OperateManager = (function () {
             const g = $(cfg.gauge);
             if (g) {
                 g.dataset.status = st.status;
-                g.classList.toggle('is-near-floor',
-                    st.status === 'ok' && st.floor != null && st.floor < 100);
+                // Only an axis whose floor is something to hit says so. The
+                // bottom objective's lower limit is the far end of its focus
+                // travel, and it used to wear the same amber mark whenever it
+                // was within 100 µm of it, which was most of the time.
+                g.classList.toggle('is-near-floor', cfg.warnBelow != null
+                    && st.status === 'ok' && st.floor != null && st.floor < cfg.warnBelow);
                 // In flight: the nudges going pale said nothing (#109). Now the
                 // gauge says so, and the caption below it names the state.
                 g.classList.toggle('is-moving', busy);
@@ -375,7 +416,7 @@ const OperateManager = (function () {
                 ? M.gaugeFraction(st.pos, st.min, st.max, cfg.scale) : null;
             if (mark) {
                 if (frac == null) mark.style.display = 'none';
-                else { mark.style.display = 'block'; mark.style.bottom = `${(frac * 100).toFixed(2)}%`; }
+                else { mark.style.display = 'block'; mark.style.left = `${(frac * 100).toFixed(2)}%`; }
             }
             const lo = $(cfg.root + '-min'), hi = $(cfg.root + '-max');
             if (lo) lo.textContent = st.min == null ? '—' : Math.round(st.min);
@@ -400,7 +441,6 @@ const OperateManager = (function () {
             if (foot) foot.textContent = statusText || '';
             renderTicks();
             renderNudges();
-            renderLock();
         }
 
         async function nudge(delta) {
@@ -408,6 +448,9 @@ const OperateManager = (function () {
                 toastFail('Too close to the floor for that step');
                 return;
             }
+            // The head's gauge says what a step of it would take from a run;
+            // the bottom objective's focus is not the run's and says nothing.
+            if (cfg.takes && !mayTakeFromRun(cfg.takes)) return;
             busy = true; render();
             try {
                 absorb(await postJSON(cfg.nudge, { delta }));
@@ -447,8 +490,12 @@ const OperateManager = (function () {
 
         return {
             wire, refresh, absorb, absorbTelemetry, render, nudge,
+            pos: () => st.pos,
             floor: () => st.floor,
             status: () => st.status,
+            max: () => st.max,
+            // What the read said besides the position (a typed go-to's floor).
+            said: key => st.said[key],
         };
     }
 
@@ -464,41 +511,83 @@ const OperateManager = (function () {
         nudge: '/api/devices/spim/fdrive/nudge',
         bands: true, scale: 'log', ticks: [100, 1000, 10000],
         steps: [50, 10, 5],
-        onDown: () => setHeadLowered(true),
+        // What a step of it would take from a run that is going (mayTakeFromRun).
+        takes: 'Moving the head',
+        // The sample: within this of the F-drive's floor the panel says so.
+        warnBelow: 100,
+        // The head's height is one of the lines said before a run starts.
+        onRead: () => { renderGoto(); if (_pane === 'acquire') renderPreflight(); },
     });
 
-    // ══ THE INTERLOCK, MADE VISIBLE ═════════════════════════════════════════
-    // Enforcement alone is not enough: with click-to-center always available,
-    // the operator must be able to see WHY a click will not do anything. The
-    // affordance withdraws itself (locked cursor) and the banner says so.
-    function renderLock() {
-        const eng = isEngaged();
-        const d = fd.floor();
-        ['bottom', 'spim'].forEach(p => {
-            const el = $(`op-lock-${p}`);
-            if (el) el.hidden = !eng;
-            const dd = $(`op-lock-${p}-d`);
-            if (dd) dd.textContent = d == null ? '—' : Math.round(d);
-            // #139: "-2 µm to floor" sat in the same soft orange as 1970 for
-            // half an hour. Below the floor is a different state, not a number.
-            const below = d != null && d < 0;
-            if (el) el.classList.toggle('is-below', below);
-            const unit = el && el.querySelector('.op-lock-txt i');
-            if (unit) unit.textContent = below ? 'µm BELOW floor' : 'µm to floor';
-        });
-        const cam = $('op-cam-bottom');
-        if (cam) cam.classList.toggle('is-locked', eng);
-        drawMarkers();
-    }
-    // Always reachable, unlike the old design where clearing the latch lived on
-    // a step you might never arrive at — lower the head, never reach it, and XY
-    // stayed locked forever with no escape short of clearing sessionStorage.
-    // #109. One request, no client-side gate, no busy check: the whole point
-    // is that it works while a nudge is in flight. Both axes re-read after.
     /**
      * The SPIM head fully up, to the F-drive's top limit. A long move — the
      * button says so while it travels, and HALT stays live beside it.
      */
+    /**
+     * The SPIM head to a height, by name: "To 1000 µm". A long move from the
+     * load height, so the button says it is travelling and HALT stays live.
+     */
+    async function headTo(um, b) {
+        if (!mayTakeFromRun('Moving the head')) return;
+        const was = b ? b.textContent : '';
+        if (b) { b.disabled = true; b.textContent = 'Going…'; }
+        try {
+            const r = await postJSON('/api/devices/spim/fdrive/goto', { position: um });
+            const at = r && r.position != null ? Math.round(r.position) : null;
+            toast(at != null ? `SPIM head at ${at} µm` : `SPIM head sent to ${um} µm`);
+            return true;
+        } catch (e) {
+            toastFail(`Move to ${um} µm failed (${why(e)})`);
+            return false;
+        } finally {
+            if (b) { b.disabled = false; b.textContent = was; }
+            fd.refresh();
+        }
+    }
+    /**
+     * The SPIM head to a height that was typed. The box takes a height from
+     * the typed floor up to the F-drive's top, both as the server gave them
+     * (the floor comes with the F-drive read, `goto_min`): below the floor
+     * the head is brought down by the steps, watching the picture, so a
+     * slipped digit cannot put it on the sample. A height outside that is
+     * refused here, in words, and the server refuses it as well.
+     */
+    function gotoLimits() {
+        const lo = fd.said('goto_min'), hi = fd.max();
+        return { lo: Number.isFinite(lo) ? lo : null, hi: Number.isFinite(hi) ? hi : null };
+    }
+    function renderGoto() {
+        const box = $('op-fd-goto');
+        if (!box) return;
+        const { lo, hi } = gotoLimits();
+        box.placeholder = lo != null && hi != null ? `${Math.round(lo)}–${Math.round(hi)}`
+            : lo != null ? `${Math.round(lo)} or more` : 'height';
+        box.title = lo != null
+            ? `A height from ${Math.round(lo)} µm up. Below ${Math.round(lo)} µm the head comes down by the steps.`
+            : 'A height in µm';
+    }
+    async function goHeadTyped() {
+        const box = $('op-fd-goto');
+        if (!box) return;
+        const um = typeof NumRow !== 'undefined' ? NumRow.parse(box.value) : Number(box.value);
+        if (um == null || !Number.isFinite(um)) {
+            if (String(box.value).trim()) toastFail('That is not a height: type a number of µm');
+            box.focus();
+            return;
+        }
+        const { lo, hi } = gotoLimits();
+        if (lo != null && um < lo) {
+            toastFail(`A typed height stops at ${Math.round(lo)} µm. Below that, bring the head down with the steps.`);
+            box.select();
+            return;
+        }
+        if (hi != null && um > hi) {
+            toastFail(`The head's top is ${Math.round(hi)} µm`);
+            box.select();
+            return;
+        }
+        if (await headTo(um, $('op-fd-go'))) box.value = '';
+    }
     async function raiseHead() {
         const b = $('op-fd-raise');
         if (b) { b.disabled = true; b.textContent = 'Raising…'; }
@@ -506,7 +595,6 @@ const OperateManager = (function () {
             const r = await postJSON('/api/devices/spim/fdrive/raise', {});
             const at = r && r.position != null ? Math.round(r.position) : null;
             toast(at != null ? `SPIM head raised to ${at} µm` : 'SPIM head raised');
-            setHeadLowered(false);
         } catch (e) {
             toastFail(`Raise failed (${why(e)})`);
         } finally {
@@ -540,20 +628,44 @@ const OperateManager = (function () {
             fd.refresh(); bz.refresh();
         }
     }
-    async function backOff() {
-        try {
-            fd.absorb(await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }));
-            // A retract that FAILS must not report the head as up: that is the
-            // state the XY chokepoint trusts before commanding an absolute move.
-            setHeadLowered(false);
-            toast('Backed off 100 µm');
-        } catch (e) {
-            if (e && e.data && e.data.position != null) fd.absorb(e.data);
-            toastFail(`Back-off failed (${why(e)}) — head still down`);
+    // ══ VIEWPORT ════════════════════════════════════════════════════════════
+    // ── what is arriving ────────────────────────────────────────────────────
+    // Frames a second reaching this page, counted from the arrivals of the
+    // last few seconds, and the frame's size. In the bar above the frame, so
+    // "is the view slow, or is it the exposure" has a number. Written at most
+    // once a second: a per-frame text change is one more thing for the page
+    // (and the session recorder) to do on every frame.
+    const ARRIVAL_WINDOW_MS = 4000;
+    const _arrivals = { bottom: [], spim: [] };
+    // The sensor's size as the pixel fetch states it (showFrame). The frame
+    // event carries only the preview's size and its downsample, whose product
+    // overstates a sensor the downsample does not divide (2050 for 2048).
+    const _frameDims = { bottom: null, spim: null };
+    let _viewMetaAt = 0;
+    function noteFrame(pane) {
+        const now = performance.now();
+        const a = _arrivals[pane];
+        a.push(now);
+        while (a.length && now - a[0] > ARRIVAL_WINDOW_MS) a.shift();
+        if (now - _viewMetaAt >= 1000) renderViewMeta();
+    }
+    function renderViewMeta() {
+        const el = $('op-view-meta');
+        if (!el) return;
+        _viewMetaAt = performance.now();
+        const pane = _pane === 'spim' ? 'spim' : 'bottom';
+        const on = pane === 'spim' ? _spimOn : _bottomOn;
+        const a = _arrivals[pane];
+        const bits = [];
+        if (on && a.length >= 2) {
+            const span = (a[a.length - 1] - a[0]) / 1000;
+            if (span > 0) bits.push(`${((a.length - 1) / span).toFixed(1)} fps`);
         }
+        if (_frameDims[pane]) bits.push(_frameDims[pane]);
+        const text = bits.join(' · ');
+        if (el.textContent !== text) el.textContent = text;
     }
 
-    // ══ VIEWPORT ════════════════════════════════════════════════════════════
     function frameOf(p) {
         if (!p || !Array.isArray(p.shape)) return null;
         return { w: p.shape[1], h: p.shape[0], downsample: p.downsample || 1 };
@@ -580,10 +692,18 @@ const OperateManager = (function () {
         if (img.naturalWidth && img.naturalHeight) setCamAspect(img);
         else img.addEventListener('load', () => setCamAspect(img), { once: true });
     }
+    // The frame's aspect, on the fit box and on the viewport box around it:
+    // the fit draws its chrome to it, and Scope sizes the box from it
+    // (operate.css, "Scope"); the fit inherits what the box has.
+    function setCamAr(fit, ar) {
+        fit.style.setProperty('--cam-ar', ar);
+        const box = fit.closest('.op-cam');
+        if (box) box.style.setProperty('--cam-ar', ar);
+    }
     function setCamAspect(img) {
         const fit = img.closest('.op-cam-fit');
         if (fit && img.naturalWidth && img.naturalHeight) {
-            fit.style.setProperty('--cam-ar', `${img.naturalWidth} / ${img.naturalHeight}`);
+            setCamAr(fit, `${img.naturalWidth} / ${img.naturalHeight}`);
         }
     }
 
@@ -630,7 +750,8 @@ const OperateManager = (function () {
             view.set(new Uint16Array(buf), meta);
             const fit = fitOf(pane), ph = $(phId);
             fit.classList.add('has-pixels');
-            fit.style.setProperty('--cam-ar', `${meta.width} / ${meta.height}`);
+            setCamAr(fit, `${meta.width} / ${meta.height}`);
+            if (meta.sourceWidth && meta.sourceHeight) _frameDims[pane] = `${meta.sourceWidth}×${meta.sourceHeight}`;
             if (ph) ph.style.display = 'none';
             if (typeof ImageView !== 'undefined' && ImageView.frameArrived) ImageView.frameArrived(box);
         } catch (_) {
@@ -819,12 +940,10 @@ const OperateManager = (function () {
         embryoPoints(r).forEach(({ emb, cx, cy }) => {
             const sel = emb.id === _selected;
             ctx.save();
-            ctx.strokeStyle = isEngaged() ? '#7d8899' : (sel ? '#93c5fd' : '#60a5fa');
+            ctx.strokeStyle = sel ? '#93c5fd' : '#60a5fa';
             ctx.fillStyle = ctx.strokeStyle;
             ctx.lineWidth = sel ? 2.5 : 1.2;
-            if (isEngaged()) ctx.setLineDash([4, 3]);
             ctx.beginPath(); ctx.arc(cx, cy, EMB_R, 0, Math.PI * 2); ctx.stroke();
-            ctx.setLineDash([]);
             if (sel) {
                 // Selected: dashed outer halo so the state reads as shape, not only shade.
                 ctx.setLineDash([3, 3]); ctx.lineWidth = 1.2;
@@ -836,18 +955,19 @@ const OperateManager = (function () {
             ctx.fillText(labelFor(emb), cx + EMB_R + 3, cy + 4);
             ctx.restore();
         });
-        const locked = isEngaged();
-        const colour = locked ? '#7d8899' : '#4ade80';
+        const colour = '#4ade80';
         _markers.forEach((m, i) => {
             const p = markerToCanvas(m, r);
             if (!p) return;
             const { cx, cy } = p;
             ctx.save();
             ctx.strokeStyle = colour;
-            ctx.lineWidth = locked ? 1.2 : 2;
-            if (locked) ctx.setLineDash([4, 3]);
+            // One look for a pending mark. There were two: greyed and dashed
+            // while the XY lock was engaged. The lock went on 2026-11-08 and
+            // its variable with it, but these lines went on reading it, so
+            // drawing the first mark threw and no mark could be placed.
+            ctx.lineWidth = 2;
             ctx.beginPath(); ctx.arc(cx, cy, 11, 0, Math.PI * 2); ctx.stroke();
-            ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
             ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6);
@@ -1101,6 +1221,7 @@ const OperateManager = (function () {
     }
 
     async function toggleBottomCam() {
+        if (!_bottomOn && !mayTakeFromRun('A live view from the bottom camera')) return;
         const b = $('op-cam-toggle');
         const done = pending(b, _bottomOn ? 'Stopping…' : 'Starting…');
         try {
@@ -1116,8 +1237,9 @@ const OperateManager = (function () {
         _bottomOn = on;
         const b = $('op-cam-toggle');
         if (b) { b.textContent = on ? 'Stop camera' : 'Start camera'; b.classList.toggle('is-on', on); }
-        if (!on) freezeImg('op-img-bottom', 'op-ph-bottom', 'Camera off');
+        if (!on) { freezeImg('op-img-bottom', 'op-ph-bottom', 'Camera off'); _arrivals.bottom.length = 0; }
         renderSubnavMeta();
+        renderViewMeta();
     }
 
     // Name the stages that are actually running: "blobs" and "blobs + Claude +
@@ -1151,6 +1273,9 @@ const OperateManager = (function () {
         if (typeof cfg.use_sam === 'boolean') tune.use_sam = cfg.use_sam;
         if (typeof cfg.min_relative_peak === 'number') tune.min_relative_peak = cfg.min_relative_peak;
         if (cfg.method === 'dark' || cfg.method === 'bright') tune.method = cfg.method;
+        // Finding is in the rail beside whichever camera is up, and what it
+        // finds is drawn on the bottom camera's frame: that frame comes up.
+        showPane('bottom');
         const b = $('op-detect');
         if (b) { b.disabled = true; b.textContent = 'Detecting…'; }
         _detecting = true;
@@ -1262,7 +1387,7 @@ const OperateManager = (function () {
             const n = (d.registered || []).length;
             _markers = [];
             drawMarkers(); renderMarkCount();
-            setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — they're in the roster and on the SPIM head.`);
+            setDetectNote(`Registered ${n} embryo${n === 1 ? '' : 's'} — ${n === 1 ? 'it is' : 'they are'} in the list below.`);
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
         } catch (e) {
             toastFail(`Register failed (${why(e)})`);
@@ -1272,10 +1397,14 @@ const OperateManager = (function () {
 
     // ══ SPIM PANE ═══════════════════════════════════════════════════════════
     async function toggleSpim() {
+        if (!_spimOn && !mayTakeFromRun('A live view of the light sheet')) return;
         const b = $('op-spim-toggle');
         const done = pending(b, _spimOn ? 'Stopping…' : 'Starting…');
         try {
             const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
+            // Before the first frame: the side and pose the device layer is
+            // on, so the frames that follow are the ones this pane shows.
+            if (!_spimOn) await adoptLsParams();
             const d = await postJSON(ep, {});
             done(() => {
                 applySpim(!!d.streaming);
@@ -1286,26 +1415,151 @@ const OperateManager = (function () {
         _spimOn = on;
         const b = $('op-spim-toggle');
         if (b) { b.textContent = on ? 'Stop view' : 'Start view'; b.classList.toggle('is-on', on); }
-        if (!on) freezeImg('op-img-spim', 'op-ph-spim', 'View off');
+        if (!on) { freezeImg('op-img-spim', 'op-ph-spim', 'View off'); _arrivals.spim.length = 0; }
         renderSubnavMeta();
+        renderViewMeta();
     }
 
     let _lsTimer = null;
     function postLsParams() {
         if (_lsTimer) clearTimeout(_lsTimer);
         _lsTimer = setTimeout(() => {
-            postJSON('/api/devices/lightsheet/live/params',
-                { galvo: _galvo, piezo: _piezo, side: 'A' }).catch(() => {});
+            // Multi has no sheet of its own: the device layer keeps A and B
+            // where they were, so only the view changes hands.
+            const body = _side === 'Multi'
+                ? { side: _side }
+                : { galvo: _pose[_side].galvo, piezo: _pose[_side].piezo, side: _side };
+            postJSON('/api/devices/lightsheet/live/params', body).catch(() => {});
         }, 120);
     }
-    function nudgeGalvo(d) {
-        _galvo = Math.max(-5, Math.min(5, _galvo + d));
-        const el = $('op-gv'); if (el) el.textContent = _galvo.toFixed(1);
+    // Whose sheet the Sheet panel's two lines move, said in its heading.
+    const SIDE_SAYS = {
+        A: 'side A · scanner AB · piezo P',
+        B: 'side B · scanner CD · piezo Q',
+        Multi: 'no side chosen',
+    };
+    function renderPose() {
+        const multi = _side === 'Multi';
+        const p = _pose[multi ? 'A' : _side];
+        const r = _range[multi ? 'A' : _side] || RANGE_DEFAULT;
+        renderAxis('op-gv', _axisRow.galvo, r.galvo, p.galvo, multi);
+        renderAxis('op-pz', _axisRow.piezo, r.piezo, p.piezo, multi);
+        const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
+        const says = $('op-sheet-side'); if (says) says.textContent = SIDE_SAYS[_side] || '';
+        renderSource();
+        const img = $('op-img-spim');
+        if (img) img.alt = multi ? 'Light-sheet view, both sides: A red, B green' : `Light-sheet view, side ${_side}`;
+    }
+
+    // ── which camera is on screen ───────────────────────────────────────────
+    // The strip above the frame. The bottom camera is its own surface; the
+    // three light-sheet choices are the SPIM surface on a side.
+    function renderSource() {
+        const on = _pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : _pane === 'cal' ? 'fit' : null;
+        document.querySelectorAll('#op-source [data-source]').forEach(b => {
+            const is = b.dataset.source === on;
+            b.classList.toggle('is-on', is);
+            b.setAttribute('aria-pressed', is ? 'true' : 'false');
+        });
+    }
+    function chooseSource(src) {
+        if (src === 'bottom') { showPane('bottom'); return; }
+        // Not a camera: what the selected embryo's calibration looks at.
+        if (src === 'fit') { showPane('cal'); return; }
+        // A side pressed is the side wanted. It is told to the device layer
+        // BEFORE the surface is entered, so the read on entering finds this
+        // page's own switch a moment old and leaves it be (adoptLsParams).
+        // The same side as before is not re-sent: entering reads what the
+        // device layer is on, and the strip shows that.
+        if (src !== _side) setSpimSide(src);
+        showPane('spim');
+    }
+    function setSpimSide(side) {
+        if (side !== 'A' && side !== 'B' && side !== 'Multi') return;
+        if (side === _side) return;
+        _side = side;
+        _sideChangedAt = Date.now();
+        renderPose();
+        fetchRange(side);
+        // The frame on screen is the other side's until the next one lands.
+        if (_spimOn) clearImg('op-img-spim', 'op-ph-spim', side === 'Multi' ? 'Switching to Multi…' : `Switching to side ${side}…`);
         postLsParams();
     }
-    function nudgePiezo(d) {
-        _piezo = Math.max(0, Math.min(200, _piezo + d));
-        const el = $('op-pz'); if (el) el.textContent = _piezo.toFixed(0);
+    // One axis row: the line's ends are the extent, its knob the pose, the
+    // box the same number, typed (panels/numrow.js: the two are one control,
+    // and a pose read back does not land under a drag or a half-typed
+    // number). Multi has no sheet of its own: the line is off and the box
+    // blank.
+    const _axisRow = { galvo: null, piezo: null };
+    function renderAxis(id, row, ext, v, off) {
+        const inp = $(id + '-in'), box = $(id);
+        if (inp) { inp.min = ext[0]; inp.max = ext[1]; inp.disabled = off; }
+        if (box) box.disabled = off;
+        const lo = $(id + '-min'), hi = $(id + '-max');
+        if (lo) lo.textContent = fmtExt(ext[0]);
+        if (hi) hi.textContent = fmtExt(ext[1]);
+        if (row) row.show(v);
+        else if (inp) inp.value = v;
+        if (off && box) box.value = '—';
+    }
+    const fmtExt = x => (x > 0 ? '+' : x < 0 ? '−' : '') + String(Number(Math.abs(x).toFixed(2)));
+    // The extents, from the controller, once per side: the micro-mirror card's
+    // deflection limits on the slice axis and the piezo's soft limits, the
+    // same source the plugin bounds its sliders by. A pose outside them is
+    // pulled inside.
+    async function fetchRange(side) {
+        if ((side !== 'A' && side !== 'B') || _range[side]) return;
+        try {
+            const r = await getJSON(`/api/devices/lightsheet/live/range?side=${side}`);
+            if (!r || !Array.isArray(r.galvo) || !Array.isArray(r.piezo)) return;
+            _range[side] = r;
+            const p = _pose[side];
+            p.galvo = Math.min(r.galvo[1], Math.max(r.galvo[0], p.galvo));
+            p.piezo = Math.min(r.piezo[1], Math.max(r.piezo[0], p.piezo));
+            renderPose();
+        } catch (_) { /* no controller to ask: the default span stands */ }
+    }
+    // The device layer outlives this page (an app restart, a reload, a second
+    // browser on the rig) and keeps the live side and pose it was last given.
+    // The pane takes them from it rather than assuming A at 0/0: assumed, the
+    // stream came tagged with a side the pane had not chosen and every frame
+    // was dropped as the other side's, the view blank for good. Read-only:
+    // nothing on the rig moves. Asked when the view starts, when the pane is
+    // entered and when the stream says otherwise; one read in flight at a
+    // time, and none inside a switch this pane has just made, whose post is
+    // the truth then.
+    let _adopting = null;
+    function adoptLsParams() {
+        if (_adopting) return _adopting;
+        _adopting = (async () => {
+            try {
+                if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;
+                const r = await getJSON('/api/devices/lightsheet/live/params');
+                // Asked again after the wait: a side pressed while this read
+                // was in flight is newer than its answer, which would put the
+                // strip back on the side just left.
+                if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;
+                const p = r && r.params;
+                if (!p || (p.side !== 'A' && p.side !== 'B' && p.side !== 'Multi')) return;
+                if (p.side !== 'Multi') {
+                    const pose = _pose[p.side];
+                    if (Number.isFinite(p.galvo)) pose.galvo = p.galvo;
+                    if (Number.isFinite(p.piezo)) pose.piezo = p.piezo;
+                }
+                _side = p.side;
+                renderPose();
+                fetchRange(p.side);
+            } catch (_) { /* no device layer to ask: the pane's own side stands */ }
+            finally { _adopting = null; }
+        })();
+        return _adopting;
+    }
+    // The knob moved: the pose takes the number, line and readout follow, and
+    // the device layer hears it on the debounce tick.
+    function setAxis(key, v) {
+        if (_side === 'Multi' || !Number.isFinite(v)) return;
+        _pose[_side][key] = v;
+        renderPose();
         postLsParams();
     }
     // The LED has ONE control, in the Light panel. There used to be a second
@@ -1450,6 +1704,11 @@ const OperateManager = (function () {
 
     async function calibrateSelected(opts) {
         if (!_selected) { toastFail('Select an embryo first'); return; }
+        if (!mayTakeFromRun('A calibration')) return;
+        // The button is in the Sheet panel, on screen with any camera. The run
+        // takes the light-sheet camera for itself, so whichever view was live
+        // is stopped (its surface's onLeave) and Fit comes up to show the run.
+        if (_pane !== 'cal') showPane('cal');
         hideRefusal();
         const b = $('op-calibrate'), out = $('op-cal-result');
         // A routine that runs for tens of seconds behind a disabled button is
@@ -1552,21 +1811,38 @@ const OperateManager = (function () {
         renderBorrow(emb);
         renderCalibrateAll();
         renderClearFit(emb);
+        renderFitRow();
+        if (emb) renderCalKept(emb);
+    }
+
+    // The Sheet panel's Fit row: whose fit, what it is, and the verb. It is
+    // on screen with any camera, so it is drawn with the instrument
+    // (renderScope) and reads nothing from the server.
+    function renderFitRow() {
+        const emb = _embryos.find(e => e.id === _selected);
         // The verb says which of the two things it does. Running it again over
         // a fit that already exists is a different decision from calibrating
         // something that has none, and the button used to read the same.
         const b = $('op-calibrate');
         if (b && !b.disabled) b.textContent = hasFit(emb) ? 'Recalibrate' : 'Calibrate';
         const out = $('op-cal-result');
-        if (!out || !emb) return;
-        if (hasFit(emb)) {
-            const r2 = (emb.calibration || {}).r_squared;
-            out.textContent = `${Number(emb.calibration.slope_um_per_deg).toFixed(1)} µm/deg`
-                + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
-        } else {
-            out.textContent = 'not calibrated';
+        if (!out) return;
+        // While a run goes the line is the run's ("sweeping…"); it is put
+        // back when the run ends and the button with it.
+        if (b && b.disabled) return;
+        let says = 'no embryo selected';
+        if (emb && hasFit(emb)) {
+            // A fit records an R² for each end of the sheet; the weaker one
+            // decides, as it does when a fit is borrowed (fitScore).
+            const c = emb.calibration || {};
+            const known = [c.r_squared_top, c.r_squared_bottom, c.r_squared].some(v => v != null);
+            says = `embryo ${labelFor(emb)} · ${Number(c.slope_um_per_deg).toFixed(1)} µm/deg`
+                + (known ? ` · R² ${fitScore(emb).toFixed(2)}` : '');
+        } else if (emb) {
+            says = `embryo ${labelFor(emb)} · not calibrated`;
         }
-        renderCalKept(emb);
+        out.textContent = says;
+        out.title = says;
     }
 
     // ── what the calibration looked at ──────────────────────────────────────
@@ -1685,14 +1961,39 @@ const OperateManager = (function () {
         const detail = (err && err.data && err.data.detail) || (err && err.message) || '';
         // First line is the verdict; the rest is per-position detail the
         // filmstrip already shows. Keep the line short and let them look.
-        why_.textContent = String(detail).split(String.fromCharCode(10))[0]
+        const verdict = String(detail).split(String.fromCharCode(10))[0]
             || 'Nothing visible at the expected focus.';
+        // The server cannot tell an unlit sheet from a raised head from a
+        // stage that is somewhere else: its advice is to check all three.
+        // The page can read all three, and they are on screen beside this.
+        const points = pointAtWhatIsWrong();
+        const stop = /[.!?]$/.test(verdict) ? '' : '.';
+        why_.textContent = points.length ? `${verdict}${stop} ${points.map(p => p.says).join(' ')}` : verdict;
         row.hidden = false;
+    }
+
+    const POINTED = { light: 'op-light-host', head: 'op-gauge-fd', stage: 'op-stage-panel' };
+    function pointAtWhatIsWrong() {
+        if (typeof RunPreflight === 'undefined' || !RunPreflight.calibrationPoints) return [];
+        const light = SharedState.get('light');
+        const points = RunPreflight.calibrationPoints({
+            emitting: typeof LightPanel !== 'undefined' && light ? LightPanel.emitting(light) : null,
+            ledOpen: ledIsOpen(),
+            head: fd.pos() != null ? { um: fd.pos(), gotoMin: gotoLimits().lo } : null,
+            atEmbryo: _xy ? atSelected() : null,
+        });
+        unpoint();
+        points.forEach(p => { const el = $(POINTED[p.panel]); if (el) el.classList.add('is-pointed'); });
+        return points;
+    }
+    function unpoint() {
+        Object.values(POINTED).forEach(id => { const el = $(id); if (el) el.classList.remove('is-pointed'); });
     }
 
     function hideRefusal() {
         const row = $('op-cal-refused');
         if (row) row.hidden = true;
+        unpoint();
     }
 
     // ── clearing a fit ──────────────────────────────────────────────────────
@@ -1759,6 +2060,7 @@ const OperateManager = (function () {
     async function calibrateAll() {
         const pending = uncalibrated();
         if (!pending.length) return;
+        if (!mayTakeFromRun('Calibrating the rest')) return;
         const btn = $('op-cal-all'), out = $('op-cal-result');
         const t0 = Date.now();
         const tick = setInterval(() => {
@@ -1827,6 +2129,7 @@ const OperateManager = (function () {
 
     async function borrowCalibration() {
         if (!_selected) { toastFail('Select an embryo first'); return; }
+        if (!mayTakeFromRun('Borrowing a fit, which scans this embryo,')) return;
         const b = $('op-cal-borrow'), out = $('op-cal-result');
         const label = b ? b.textContent : '';
         const sel = $('op-cal-borrow-from');
@@ -2040,11 +2343,14 @@ const OperateManager = (function () {
     // of which (single) acquires a volume and finishes, and is not starting an
     // experiment at all. The mode selector sits in a block above, so an
     // operator who chose a mode and then looked away had nothing to read.
+    // The form is the run (`adaptive`). A saved tactic that is not a plan
+    // cannot fill a form, so it is run as it is (`library`). The other two
+    // things this used to offer as peers of those were never kinds of run: a
+    // test volume is a button beside the pictures (testVolume), and handing
+    // the embryos to the agent is a button under Start (handToAgent).
     const RUN_VERB = {
-        single: 'Acquire one volume',
         adaptive: 'Start timelapse',
         library: 'Run tactic',
-        agent: 'Brief the agent',
     };
 
     // A run is running or paused: nothing else may start. The button used to
@@ -2056,40 +2362,127 @@ const OperateManager = (function () {
     function renderRunButton() {
         const b = $('op-run-start');
         if (!b || _starting) return;
-        b.disabled = _runBusy;
-        b.textContent = _runBusy ? 'A run is going' : (RUN_VERB[_mode] || 'Start');
-        b.title = _runBusy ? 'Stop the run before starting another' : '';
+        // What would refuse the run is counted onto the button: the verdict
+        // is where the hand is, and the reasons are the lines above it.
+        const v = _mode === 'adaptive' && !_runBusy ? RunPreflight.verdict(_preflight) : { blocked: 0, says: '' };
+        b.disabled = _runBusy || v.blocked > 0;
+        b.textContent = _runBusy ? 'A run is going' : (v.says || RUN_VERB[_mode] || 'Start');
+        b.classList.toggle('is-blocked', v.blocked > 0);
+        b.title = _runBusy ? 'Stop the run before starting another'
+            : v.blocked ? 'What stands in the way is listed above' : '';
     }
 
+    /**
+     * What Start does: the form's plan (`adaptive`), or a saved tactic as it
+     * is (`library`). There is no strip of modes: the form is always there,
+     * and a tactic is chosen from the Saved list.
+     */
     function setMode(m) {
-        _mode = m;
-        document.querySelectorAll('#op-modes [data-mode]').forEach(b =>
-            b.classList.toggle('is-on', b.dataset.mode === m));
-        ['single', 'adaptive', 'library', 'agent'].forEach(k => {
-            const p = $(`op-panel-${k}`);
-            if (p) p.hidden = k !== m;
-        });
-        if (m === 'library') loadLibrary();
-        if (m === 'adaptive') { loadLaserPresets(); renderPlan(); }
+        _mode = m === 'library' ? 'library' : 'adaptive';
+        if (_mode === 'library') showSaved(true);
+        if (_mode === 'adaptive') { _selectedLib = null; loadLaserPresets(); renderPlan(); }
         const say = $('op-plan-say');
-        if (say) say.hidden = m !== 'adaptive';
-        const save = $('op-plan-save');
-        if (save) save.hidden = m !== 'adaptive';
-        renderRunButton();
+        if (say) say.classList.toggle('is-aside', _mode !== 'adaptive');
+        renderPlanName();
+        renderPreflight();
         renderSingle();
     }
 
+    /** The Saved list, open or shut. Load opens it; choosing a plan shuts it. */
+    function showSaved(open) {
+        const box = $('op-panel-library'), b = $('op-plan-load');
+        if (box) box.hidden = !open;
+        if (b) b.setAttribute('aria-expanded', String(!!open));
+        if (open) loadLibrary();
+    }
+
+    // The saved plan the form was filled from: {id, name, edited}. Left as
+    // it was loaded, Start runs it as that tactic, so the run is filed as
+    // what it was loaded from; once edited it is the form's own.
+    let _loaded = null;
+
+    /** The form has been changed by hand: a pending change, and no longer
+     *  the saved plan it may have been loaded from. */
+    function planTouched() {
+        _planDirty = true;
+        if (_loaded) _loaded.edited = true;
+    }
+
+    function renderPlanName() {
+        const el = $('op-plan-name');
+        if (!el) return;
+        el.textContent = _mode === 'library' ? 'a saved tactic, as it is'
+            : _loaded ? (_loaded.edited ? `${_loaded.name}, edited` : _loaded.name)
+                : '';
+    }
+
+    /**
+     * The test volume's button: which embryo, and why not when it cannot.
+     *
+     * It is the selected embryo's volume with the plan's slices and exposure,
+     * kept under the embryo as its next timepoint, and its projection lands
+     * on its tile. It used to be a mode with fields of its own, and what it
+     * took was shown nowhere on the page that took it.
+     */
     function renderSingle() {
-        const t = $('op-single-target'), d = $('op-single-delta');
+        const b = $('op-test-one');
+        if (!b || _testing) return;
         const emb = _embryos.find(e => e.id === _selected);
-        if (t) t.textContent = emb ? `embryo ${labelFor(emb)}` : 'none selected';
-        if (!d) return;
+        const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
+        const why = !emb ? 'Select an embryo first'
+            : _runBusy ? 'A run is going'
+                : !volumes ? 'This plan takes no volumes'
+                    : !hasFit(emb) ? `Embryo ${labelFor(emb)} has no calibration: a volume of it would be refused`
+                        : '';
+        b.textContent = emb ? `Test embryo ${labelFor(emb)}` : 'Test volume';
+        b.disabled = !!why;
+        // A fact, not a gate: how far off the stage is. The volume goes to
+        // the embryo wherever the stage is now.
         const xy = emb ? resolveXY(emb) : null;
-        // A fact, not a gate: the operator is told how far off the stage is and
-        // decides for themselves. Acquire is never disabled on this.
-        if (!xy || !_xy) { d.textContent = '—'; return; }
-        const dx = xy.x - _xy.x, dy = xy.y - _xy.y;
-        d.textContent = `${Math.round(Math.hypot(dx, dy))} µm away`;
+        const away = xy && _xy ? ` The stage is ${Math.round(Math.hypot(xy.x - _xy.x, xy.y - _xy.y))} µm from it.` : '';
+        b.title = why || `One volume of embryo ${labelFor(emb)} with this plan's slices and exposure, kept as its next timepoint.${away}`;
+    }
+
+    let _testing = false;
+
+    async function testVolume() {
+        const b = $('op-test-one');
+        const emb = _embryos.find(e => e.id === _selected);
+        if (!emb || _testing) return;
+        if (_runBusy) { toastFail('A run is going. Stop it before taking a test volume.'); return; }
+        const plan = readPlan();
+        _testing = true; _acquiring = true; renderSubnavMeta();
+        if (b) { b.disabled = true; b.textContent = `Taking embryo ${labelFor(emb)}…`; }
+        try {
+            const d = await postJSON('/api/devices/acquire/volume', {
+                // Say WHICH embryo. The route used to receive no id at
+                // all, so it imaged wherever the stage happened to be
+                // and could not check whether that embryo had ever been
+                // calibrated. Manual-mode snapping still omits it on
+                // purpose — a test shot at the current position is a
+                // real thing to want.
+                embryo_id: emb.id,
+                num_slices: plan.spim.slices != null ? plan.spim.slices : (emb.num_slices || 50),
+                exposure_ms: plan.spim.exposureMs != null ? plan.spim.exposureMs : (emb.exposure_ms || 10),
+            });
+            // The first line of what the acquisition said: which embryo,
+            // and whether it was kept.
+            toast(String((d && d.message) || 'Volume acquired').split(/\r?\n/)[0]);
+            // Its picture, on its tile, now: the roster's own update follows.
+            try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) { /* the broadcast will */ }
+        } catch (e) {
+            // In the operator's words. The route's own are for a caller that
+            // can pass a flag: "…or pass allow_uncalibrated=true to acquire
+            // anyway".
+            if (e && e.status === 409 && /not calibrated/i.test(String((e.data || {}).detail || ''))) {
+                toastFail(`No volume taken: embryo ${labelFor(emb)} has no calibration.`);
+            } else {
+                toastFail(`No volume taken (${why(e)})`);
+            }
+        } finally {
+            _testing = false; _acquiring = false;
+            await forceLedOff(); renderSubnavMeta(); renderSingle(); renderTiles();
+        }
     }
 
     async function loadLibrary() {
@@ -2108,10 +2501,54 @@ const OperateManager = (function () {
                     ? AcquisitionPlan.describe(AcquisitionPlan.fromStructure(t.structure), subjects)
                     : (t.kind || '');
                 return `<button class="op-libitem${t.id === _selectedLib ? ' is-sel' : ''}" type="button" ` +
-                    `data-lib="${escapeHtml(t.id)}">${escapeHtml(t.name || t.id)}` +
+                    `data-lib="${escapeHtml(t.id)}"${isPlan ? ' data-lib-plan="1"' : ''} ` +
+                    `title="${isPlan ? 'Fill the form with this plan' : 'Run this tactic as it is'}">${escapeHtml(t.name || t.id)}` +
                     `<small class="${isPlan ? 'op-lib-say' : ''}">${escapeHtml(sub)}</small></button>`;
             }).join('');
+            _library = items;
         } catch (_) { host.innerHTML = '<div class="op-empty">Library unavailable</div>'; }
+    }
+
+    let _library = [];
+
+    /**
+     * One of the Saved list, chosen. A plan fills the form and the list
+     * shuts: the form is then that plan, said in the sentence, checked by
+     * the lines, started by Start. A tactic that is not a plan has no form
+     * to fill, so it stays chosen and Start runs it as it is.
+     */
+    function chooseSaved(id) {
+        const t = _library.find(x => x.id === id);
+        if (!t) return;
+        if (t.kind === 'standing_timelapse' && t.structure) {
+            try { fillPlan(AcquisitionPlan.fromStructure(t.structure)); } catch (e) { toastFail('That plan could not be read'); return; }
+            _loaded = { id: t.id, name: t.name || t.id, edited: false };
+            // A pending change: the embryos do not hold it yet, and a form
+            // that follows the embryos would write theirs back over it.
+            _planDirty = true;
+            _selectedLib = null;
+            showSaved(false);
+            setMode('adaptive');
+            toast(`“${_loaded.name}” is in the form`);
+            return;
+        }
+        _selectedLib = id;
+        setMode('library');
+    }
+
+    /** The embryos, handed to the agent with the roster said in words. */
+    function handToAgent() {
+        const roster = _embryos.map(e => {
+            const xy = resolveXY(e);
+            const r = e.role === 'calibration' ? 'reference' : 'subject';
+            return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
+        }).join(', ');
+        const prompt = `I marked ${_embryos.length} embryos: ${roster}. ` +
+            'Propose and start an Operation Plan to image them.';
+        if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
+            AgentChat.togglePanel(true);
+            if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
+        } else toastFail('Agent chat unavailable');
     }
 
     /**
@@ -2152,6 +2589,8 @@ const OperateManager = (function () {
             b.classList.toggle('is-on', on);
             b.setAttribute('aria-pressed', String(on));
         });
+        const inrun = $('op-roster-inrun');
+        if (inrun) inrun.textContent = _embryos.length ? `· ${subjectIds().length} in the run` : '';
         const a = el.querySelector('[data-scope="all"]');
         const s2 = el.querySelector('[data-scope="selected"]');
         if (a) a.textContent = `All subjects (${all})`;
@@ -2165,6 +2604,9 @@ const OperateManager = (function () {
         _targetScope = scope === 'selected' ? 'selected' : 'all';
         renderTargetScope();
         renderSingle();
+        // Which embryos is part of the plan: its sentence, its lines, the
+        // table's dimming and the pictures all follow.
+        if (_pane === 'acquire') renderPlan();
     }
 
     // Every embryo marked as a reference means there is nothing to image. Say
@@ -2187,27 +2629,6 @@ const OperateManager = (function () {
         _starting = true;
         if (b) { b.disabled = true; b.textContent = 'Working…'; }
         try {
-            if (_mode === 'single') {
-                if (!_selected) { toastFail('Select an embryo first'); return; }
-                _acquiring = true; renderSubnavMeta();
-                try {
-                    const d = await postJSON('/api/devices/acquire/volume', {
-                        // Say WHICH embryo. The route used to receive no id at
-                        // all, so it imaged wherever the stage happened to be
-                        // and could not check whether that embryo had ever been
-                        // calibrated. Manual-mode snapping still omits it on
-                        // purpose — a test shot at the current position is a
-                        // real thing to want.
-                        embryo_id: _selected,
-                        num_slices: Math.max(1, Number(($('op-vol-slices') || {}).value) || 50),
-                        exposure_ms: Math.max(1, Number(($('op-vol-exp') || {}).value) || 10),
-                    });
-                    // The first line of what the acquisition said: which embryo,
-                    // and whether it was kept.
-                    toast(String((d && d.message) || 'Volume acquired').split(/\r?\n/)[0]);
-                } finally { _acquiring = false; await forceLedOff(); renderSubnavMeta(); }
-                return;
-            }
             if (_mode === 'adaptive') {
                 const plan = readPlan();
                 // A brightfield frame is of the field. It is taken with no
@@ -2218,6 +2639,16 @@ const OperateManager = (function () {
                 if (problems.length) { toastFail(problems[0]); return; }
                 // One object: the sentence the operator just read is exactly
                 // what goes on the wire, and what the run view says back.
+                // A saved plan, loaded and left as it was, is run as that
+                // tactic: the run is then filed as what it was loaded from.
+                if (_loaded && !_loaded.edited && !(_setupItem && _setupItem.id)) {
+                    const d = await postJSON('/api/operate/run-tactic',
+                        { library_id: _loaded.id, embryo_ids: ids, scope: _targetScope });
+                    if (!d.success) { toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`); return; }
+                    toast(`“${_loaded.name}” started`);
+                    landOnRun(AcquisitionPlan.describe(plan, planSubjects()));
+                    return;
+                }
                 const payload = AcquisitionPlan.toPayload(plan, ids);
                 payload.scope = _targetScope;   // "what to run", kept with the plan
                 if (_setupItem && _setupItem.id) payload.plan_item_id = _setupItem.id;
@@ -2239,19 +2670,6 @@ const OperateManager = (function () {
                 else toastFail(`Run failed: ${(d.result && d.result.message) || '?'}`);
                 return;
             }
-            if (_mode === 'agent') {
-                const roster = _embryos.map(e => {
-                    const xy = resolveXY(e);
-                    const r = e.role === 'calibration' ? 'reference' : 'subject';
-                    return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
-                }).join(', ');
-                const prompt = `I marked ${_embryos.length} embryos: ${roster}. ` +
-                    'Propose and start an Operation Plan to image them.';
-                if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
-                    AgentChat.togglePanel(true);
-                    if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
-                } else toastFail('Agent chat unavailable');
-            }
         } catch (e) {
             toastFail(`Start failed (${why(e)})`);
         } finally { done(); }
@@ -2264,8 +2682,8 @@ const OperateManager = (function () {
     // The Adaptive pane is a form for one object (acquisition-plan.js). Every
     // input re-reads it and re-says it; Start sends exactly what was said.
     // The fields of view the overview is taken from, [{x, y}] in stage µm:
-    // one, or several when the embryos do not all fit in one frame. Built on
-    // the Bottom cam pane (panels/fields.js), kept in the session
+    // one, or several when the embryos do not all fit in one frame. Built in
+    // the rail on Scope (panels/fields.js), kept in the session
     // (/api/brightfield/fields), read by the plan as "taken from the fields".
     let _bfPins = [];
     let _laserPresetsLoaded = false;
@@ -2586,14 +3004,11 @@ const OperateManager = (function () {
         set('op-tl-stop', plan.stop.kind);
         set('op-tl-condval', plan.stop.value);
         set('op-tl-monitor', plan.monitoringMode || 'idle');
-        renderOverrideRows();
-        plan.overrides.forEach(o => {
-            const row = document.querySelector(`#op-plan-overrides [data-embryo="${CSS.escape(o.embryoId)}"]`);
-            if (!row) return;
-            const sel = row.querySelector('select'), inp = row.querySelector('input');
-            if (sel) sel.value = o.kind;
-            if (inp && o.value != null) inp.value = o.value;
-        });
+        // Every ending is written: an embryo the plan leaves alone is cleared
+        // of the last plan's.
+        _endings = {};
+        plan.overrides.forEach(o => { _endings[o.embryoId] = { kind: o.kind, value: o.value }; });
+        renderEndings();
     }
 
     /**
@@ -2648,12 +3063,11 @@ const OperateManager = (function () {
 
     function readPlan() {
         const v = id => { const el = $(id); return el ? el.value : undefined; };
-        const overrides = [];
-        document.querySelectorAll('#op-plan-overrides [data-embryo]').forEach(row => {
-            const kind = (row.querySelector('select') || {}).value || 'default';
-            const val = (row.querySelector('input') || {}).value;
-            overrides.push({ embryoId: row.dataset.embryo, kind, value: val });
-        });
+        // Only of the embryos this run images: an ending set on one that is
+        // then left out is kept on its row, and is not sent.
+        const inRun = new Set(subjectIds());
+        const overrides = Object.keys(_endings).filter(id => inRun.has(id))
+            .map(id => ({ embryoId: id, kind: _endings[id].kind, value: _endings[id].value }));
         const laserPowers = {};
         document.querySelectorAll('#op-plan-powers [data-plan-power]').forEach(inp => {
             laserPowers[inp.dataset.planPower] = inp.value;
@@ -2690,33 +3104,71 @@ const OperateManager = (function () {
         return opts.join('');
     }
 
-    /** Rows for per-embryo endings, kept in step with the roster. */
-    function renderOverrideRows() {
-        const host = $('op-plan-overrides');
-        if (!host) return;
-        const current = {};
-        host.querySelectorAll('[data-embryo]').forEach(row => {
-            current[row.dataset.embryo] = {
-                kind: (row.querySelector('select') || {}).value,
-                value: (row.querySelector('input') || {}).value,
-            };
-        });
-        const subjects = planSubjects();
-        if (!subjects.length) { host.innerHTML = ''; return; }
-        host.innerHTML = subjects.map(sub => {
-            const c = current[sub.id] || { kind: 'default', value: '' };
-            const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
-            return `<div class="op-field op-plan-ovr-row" data-embryo="${escapeHtml(sub.id)}">` +
-                `<span class="op-label">embryo ${escapeHtml(sub.label)}</span>` +
-                `<span class="op-plan-pair"><select class="op-sel">${stopOptions(c.kind, true)}</select>` +
-                `<input class="op-num-in" type="number" min="1" value="${escapeHtml(c.value || '')}"${needs ? '' : ' hidden'}></span></div>`;
-        }).join('');
+    // How each embryo ends, where it is not as the run does: {id: {kind,
+    // value}}. It was a row an embryo in the plan's form, so the form grew
+    // with the roster, which is what pushed Start off the screen. It is a
+    // cell on the embryo's own row in the table now (panels/roster.js draws
+    // the row and asks here for the cell), and the form does not grow.
+    let _endings = {};
+
+    /** The ending cell of one embryo's row in the Acquisition table. */
+    function endingCell(emb) {
+        if (!emb || emb.role === 'calibration') return '';
+        const c = _endings[emb.id] || { kind: 'default', value: '' };
+        const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+        // An embryo's own ending is the ending of its volumes.
+        const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
+        const who = `embryo ${labelFor(emb)}`;
+        return `<select class="op-sel rp-end" data-ending="kind" aria-label="How ${escapeHtml(who)} ends"${volumes ? '' : ' disabled'}>` +
+            `${stopOptions(c.kind, true)}</select>` +
+            (needs ? `<input class="op-numbox rp-end-n" type="number" min="1" data-ending="value" ` +
+                `value="${escapeHtml(c.value == null ? '' : c.value)}" ` +
+                `aria-label="${needs === 'count' ? 'After how many timepoints' : 'After how many hours'}, ${escapeHtml(who)}">` : '');
+    }
+
+    /** A change in an ending cell: the select, or the number beside it. */
+    function setEnding(id, control) {
+        if (!id || !control) return;
+        const cur = _endings[id] || { kind: 'default', value: '' };
+        if (control.dataset.ending === 'kind') cur.kind = control.value;
+        else cur.value = control.value;
+        if (cur.kind === 'default') delete _endings[id];
+        else _endings[id] = cur;
+        planTouched();
+        // The number box comes and goes with the kind; a typed number must
+        // not redraw the box it is being typed in.
+        if (control.dataset.ending === 'kind') renderEndings();
+        renderPlan();
+    }
+
+    /** The table's ending cells, and what the plan says of them. */
+    function renderEndings() {
+        if (typeof RosterPanel !== 'undefined' && RosterPanel.render) RosterPanel.render();
+        // How many the run images, beside how many there are: it follows a
+        // role and the scope alike, so it is said where both redraw.
+        const inrun = $('op-roster-inrun');
+        if (inrun) inrun.textContent = _embryos.length ? `· ${subjectIds().length} in the run` : '';
+        const say = $('op-plan-ends-say');
+        if (!say) return;
+        const ids = new Set(subjectIds());
+        const own = _embryos.filter(e => ids.has(e.id) && _endings[e.id]);
+        const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
+        say.hidden = !volumes;
+        say.textContent = !own.length
+            ? 'Every embryo ends with the run. One embryo\'s own ending is on its row, on the left.'
+            : `${own.length} embryo${own.length === 1 ? ' ends' : 's end'} on ${own.length === 1 ? 'its' : 'their'} own: ` +
+                own.map(e => `${labelFor(e)} ${AcquisitionPlan.stopWords(_endings[e.id].kind, _endings[e.id].value)}`).join(', ') +
+                '. Set on the row, on the left.';
+    }
+
+    /** Is this embryo imaged by the run as it stands? For the table's dimming. */
+    function inRun(emb) {
+        return !!emb && subjectIds().includes(emb.id);
     }
 
     function renderPlan() {
         const say = $('op-plan-say');
         if (!say) return;
-        renderOverrideRows();
         renderPowerRows();
         syncPlanFromEmbryos();
         let plan = readPlan();
@@ -2749,12 +3201,13 @@ const OperateManager = (function () {
             // the frames move tonight.
             const later = _runBusy ? ' A change here applies at the next Start, not to the run going now.' : '';
             pin.textContent = !here ? ''
-                : n === 0 ? 'No fields yet — add them on Bottom cam, beside the picture, or from the list on the left.'
+                : n === 0 ? 'No fields yet — add them on Scope, beside the picture, or from the list on the left.'
                     : (n === 1 ? 'One frame each round, from field 1.' : `${n} frames each round, one from each field.`)
-                        + ' Add or drop fields in the list on the left, or on Bottom cam.' + later;
+                        + ' Add or drop fields in the list on the left, or on Scope.' + later;
         }
         // How the frame is lit and exposed, and whether its dark and flat
-        // exist, are set on Bottom cam; said back here with the way there.
+        // exist, are set on Scope (the rail's Overview frames box, beside
+        // the bottom camera's picture); said back here with the way there.
         const setup = $('op-plan-bf-setup');
         const ovSummary = $('op-ov-summary');
         if (setup || ovSummary) {
@@ -2765,19 +3218,186 @@ const OperateManager = (function () {
             const refTxt = !refs ? '' : refs.have ? ' · dark and flat taken'
                 : ' · <span class="op-cap-warn">no dark and flat yet</span>';
             const said = `${escapeHtml(lit)} · ${escapeHtml(exp)}${refTxt}`;
-            // The same fact in both places: the Bottom cam block's closed
-            // state, and the Acquisition pane's line with the way there.
+            // The same fact in both places: the Overview frames box's
+            // closed state, and the Acquisition pane's line with the way there.
             if (ovSummary) ovSummary.innerHTML = said;
             if (setup) {
-                setup.innerHTML = `${said} — `
+                setup.innerHTML = `<span>${said}</span>`
                     + '<button type="button" class="op-btn op-btn-quiet" data-goto-pane="bottom" '
-                    + 'title="The light, exposure, dark and flat are set beside the live view">Change on Bottom cam →</button>';
+                    + 'title="The light, exposure, dark and flat are set beside the live view">Change on Scope →</button>';
             }
         }
         say.textContent = AcquisitionPlan.describe(plan, planSubjects());
-        const problems = AcquisitionPlan.validate(plan, subjectIds(), _laserLimits);
-        say.dataset.bad = problems.length ? '1' : '0';
-        say.title = problems.join(' ');
+        // What is wrong with the plan is a line under the sentence now, with
+        // its fix, not a tooltip on a sentence turned amber. The sentence
+        // stays the plan and nothing more.
+        say.dataset.bad = '0';
+        say.title = '';
+        renderEndings();
+        renderPlanName();
+        renderPreflight(plan);
+        renderSingle();
+        renderTiles();
+    }
+
+    // ══ BEFORE IT STARTS ══════════════════════════════════════════════════
+    // What stands in the way of the run, between the sentence and Start
+    // (run-preflight.js). The page knew every embryo was uncalibrated and
+    // said so only as a 409 after the press; it knew the cadence and the
+    // slices and never said that a night at the form's default is 576 GB.
+    // Derived on every renderPlan from what has already been read. The one
+    // thing asked of the server for it is the disk's free room.
+    let _room = null;           // {free_bytes} as last read; null is unread
+    let _preflight = [];        // the lines as last drawn, for Start to count
+
+    async function readRoom() {
+        try { _room = await getJSON('/api/devices/timelapse/room'); } catch (_) { _room = null; }
+        if (_pane === 'acquire') renderPreflight();
+    }
+
+    /** Everything the lines are derived from, gathered from what the page holds. */
+    function preflightContext(plan) {
+        const ids = new Set(subjectIds());
+        const targets = _embryos.filter(e => ids.has(e.id));
+        const volumes = plan.spim.enabled !== false;
+        const held = key => { const h = heldAcross(targets, key); return h ? h.max : null; };
+        const light = SharedState.get('light') || {};
+        const powers = {};
+        Object.entries(light.power || {}).forEach(([wl, pct]) => { if (pct != null) powers[wl] = pct; });
+        // An unread preset is not a dark one: no line is claimed either way.
+        const routed = light.config && typeof LightPanel !== 'undefined' && LightPanel.wavelengthsOf
+            ? LightPanel.wavelengthsOf(light.config) : null;
+        const refs = typeof BrightfieldRefs !== 'undefined' && BrightfieldRefs.status ? BrightfieldRefs.status() : null;
+        // "No embryos to image" has two causes with two fixes; say which.
+        let problems = AcquisitionPlan.validate(plan, [...ids], _laserLimits);
+        if (volumes && !ids.size) {
+            problems = problems.filter(q => !/^No embryos/.test(q));
+            problems.unshift(!_embryos.length ? 'No embryos yet: detect on the bottom camera, then register.'
+                : _targetScope === 'selected' ? 'No subject is selected.'
+                    : 'Every embryo is marked as a reference: make at least one a subject.');
+        }
+        return {
+            plan,
+            est: RunPreflight.estimate(plan, targets.length,
+                { slices: held('num_slices'), exposureMs: held('exposure_ms') }),
+            subjects: targets.map(e => ({
+                id: e.id, label: labelFor(e), calibrated: hasFit(e), r2: hasFit(e) ? fitScore(e) : null })),
+            references: _embryos.filter(e => e.role === 'calibration').length,
+            notSelected: _targetScope === 'selected' ? Math.max(0, allSubjectIds().length - ids.size) : 0,
+            problems,
+            routed, powers, limits: _laserLimits,
+            head: fd.pos() != null ? { um: fd.pos(), gotoMin: gotoLimits().lo } : null,
+            freeBytes: _room && _room.free_bytes != null ? Number(_room.free_bytes) : null,
+            refs,
+            lowR2: LOW_CONFIDENCE_R2,
+        };
+    }
+
+    /**
+     * Redraw a list a line at a time, leaving alone the lines that still say
+     * what they said.
+     *
+     * A press on a line's button starts on one node and has to end on the
+     * same one. Typing a cadence and then pressing "Calibrate the 3" blurs
+     * the field; the blur is a change; the change re-says the plan; and a
+     * list replaced whole between the press and the release swallows the
+     * press. Found in the browser: the button did nothing, every time, when
+     * it was the first thing pressed after typing. It also keeps the focus
+     * of someone who tabbed onto a fix while the light was being re-read.
+     */
+    function patchLines(host, html, opts) {
+        const had = host._lines || [];
+        const held = opts && opts.keepFocused ? document.activeElement : null;
+        html.forEach((h, i) => {
+            if (had[i] === h && host.children[i]) return;
+            // A select being chosen from, or a number being typed: the line
+            // waits for the next redraw rather than close under the hand.
+            if (held && host.children[i] && host.children[i].contains(held)
+                && /^(SELECT|INPUT)$/.test(held.tagName)) { html[i] = had[i]; return; }
+            const t = document.createElement('template');
+            t.innerHTML = h;
+            const el = t.content.firstElementChild;
+            if (host.children[i]) host.replaceChild(el, host.children[i]);
+            else host.appendChild(el);
+        });
+        while (host.children.length > html.length) host.lastElementChild.remove();
+        host._lines = html.slice();
+    }
+
+    const PREFLIGHT_MARK = { ok: '✓', warn: '!', no: '✕' };
+    const PREFLIGHT_SAID = { ok: '', warn: 'Worth knowing: ', no: 'In the way: ' };
+
+    /**
+     * The lines, drawn. `plan` is passed by renderPlan, which has just read
+     * the form; anything else that changes what the lines are derived from
+     * (the light, the head, the disk) calls with none and the form is read.
+     */
+    function renderPreflight(plan) {
+        const host = $('op-preflight');
+        if (!host) return;
+        if (_mode !== 'adaptive') {
+            // A tactic runs as it was saved: this form, and so its lines,
+            // do not apply to it.
+            _preflight = [];
+            host.hidden = false;
+            patchLines(host, ['<div class="op-pf-line is-ok" role="listitem"><span class="op-pf-mark" aria-hidden="true">·</span>' +
+                '<span class="op-pf-says">A saved tactic runs as it was saved. The form on the left is not what Start will run; ' +
+                'shut the Saved list to go back to it.</span></div>']);
+            const keptEl = $('op-plan-kept');
+            if (keptEl) keptEl.textContent = '';
+            renderRunButton();
+            return;
+        }
+        const ctx = preflightContext(plan || readPlan());
+        _preflight = RunPreflight.lines(ctx);
+        host.hidden = false;
+        // The mark is decoration; what kind of line it is, is said in words
+        // for a reader that does not see it.
+        patchLines(host, _preflight.map(l =>
+            `<div class="op-pf-line is-${l.kind}" role="listitem">` +
+            `<span class="op-pf-mark" aria-hidden="true">${PREFLIGHT_MARK[l.kind]}</span>` +
+            `<span class="op-pf-says"><span class="op-pf-kind">${PREFLIGHT_SAID[l.kind]}</span>${escapeHtml(l.text)}` +
+            (l.fix || []).map(f => ` <button type="button" class="op-btn op-btn-quiet op-pf-fix" ` +
+                `data-preflight-fix="${escapeHtml(f.action)}">${escapeHtml(f.label)}</button>`).join('') +
+            '</span></div>'));
+        const kept = $('op-plan-kept');
+        if (kept) kept.textContent = RunPreflight.keptWords(ctx.est);
+        renderRunButton();
+    }
+
+    /** The way past a line: each fix is one press, and says what it did. */
+    function preflightFix(action) {
+        const ids = new Set(subjectIds());
+        const subs = _embryos.filter(e => ids.has(e.id));
+        if (action === 'calibrate') {
+            // The instrument is pointed at the first embryo with no fit. The
+            // set a run images is left as it is: this is not a narrowing.
+            const first = subs.find(e => !hasFit(e));
+            if (first && _targets.includes(first.id)) {
+                _selected = first.id;
+                SharedState.set('selectedEmbryoId', _selected);
+                publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle();
+            } else if (first) {
+                selectEmbryo(first.id);
+            }
+            showPane('cal');
+        } else if (action === 'without') {
+            const keep = subs.filter(hasFit).map(e => e.id);
+            if (!keep.length) return;
+            _targets = keep.slice();
+            if (!keep.includes(_selected)) _selected = keep[0];
+            SharedState.set('selectedEmbryoIds', _targets.slice());
+            SharedState.set('selectedEmbryoId', _selected);
+            publishRoster(); renderSpimTarget(); renderCalTarget();
+            setTargetScope('selected');
+            renderPlan();
+            toast(`The run is the ${keep.length} calibrated embryo${keep.length === 1 ? '' : 's'}`);
+        } else if (action === 'head') {
+            const lo = gotoLimits().lo;
+            if (lo != null) headTo(lo);
+        } else if (action === 'overview') {
+            showPane('bottom');
+        }
     }
 
     /**
@@ -2802,12 +3422,16 @@ const OperateManager = (function () {
         host.dataset.lines = key;
         host.innerHTML = lines.map(wl => {
             const lim = (_laserLimits && _laserLimits[wl]) || null;
-            const range = lim ? `${lim.min}–${lim.max} %` : '%';
-            return `<div class="op-field"><label class="op-label" for="op-plan-power-${wl}">` +
-                `${wl} nm power <span class="op-cap">${range}</span></label>` +
-                `<input class="op-num-in" id="op-plan-power-${wl}" data-plan-power="${wl}" ` +
+            const range = lim ? `${lim.min}–${lim.max}` : '';
+            // The label is the line's number alone: a label is uppercased,
+            // and "405 nm" came out "405 NM".
+            return `<div class="op-row op-plan-line"><label class="op-label" for="op-plan-power-${wl}" ` +
+                `title="The ${wl} nm line">${wl}</label>` +
+                `<input class="op-numbox op-numbox-wide" id="op-plan-power-${wl}" data-plan-power="${wl}" ` +
                 `type="number" step="0.1"${lim ? ` min="${lim.min}" max="${lim.max}"` : ''} ` +
-                `value="${escapeHtml(typed[wl] || '')}" placeholder="as it is"></div>`;
+                `value="${escapeHtml(typed[wl] || '')}" placeholder="as it is" ` +
+                `aria-label="${wl} nm power, percent"><span class="op-unit">%</span>` +
+                `<span class="op-ext" title="The limits this line's power is held to on this rig">${range}</span></div>`;
         }).join('');
     }
 
@@ -2824,7 +3448,6 @@ const OperateManager = (function () {
         const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
         show('op-plan-spim-body', volumes);
         show('op-plan-bf-every-field', volumes);
-        show('op-plan-overrides', volumes);
         show('op-plan-watch-sec', volumes);
         show('op-plan-watch-field', volumes);
         const cap = $('op-plan-spim-cap');
@@ -2888,7 +3511,9 @@ const OperateManager = (function () {
                 rationale: AcquisitionPlan.describe(plan, planSubjects()),
                 source: 'operate',
             });
-            toast(`Saved “${d.name || name.trim()}” — it is under Saved tactic`);
+            toast(`Saved “${d.name || name.trim()}”. Load brings it back.`);
+            const box = $('op-panel-library');
+            if (box && !box.hidden) loadLibrary();
         } catch (e) { toastFail(`Save failed (${why(e)})`); }
     }
 
@@ -2900,9 +3525,195 @@ const OperateManager = (function () {
     function landOnRun(sentence) {
         const head = $('op-run-plan');
         if (head) { head.textContent = sentence; head.hidden = false; }
+        setAcqView('watch');
         renderRun();
-        const col = $('op-runspine');
-        if (col && col.scrollIntoView) col.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    // ══ TWO STATES ════════════════════════════════════════════════════════
+    // Designing a run and watching one never happen at once, so the surface
+    // is one or the other, each with the whole page (`data-acq` on the pane;
+    // the template says which parts belong to which). The state follows the
+    // run. With none going the operator may look back at the last one, or
+    // plan another, and that is the only time it is theirs to choose.
+    let _acqView = 'design';
+    let _runGoing = false;      // running, paused, or there to be carried on
+
+    function setAcqView(view) {
+        _acqView = view === 'watch' ? 'watch' : 'design';
+        const pane = $('op-pane-acquire');
+        if (pane) pane.dataset.acq = _acqView;
+        renderTiles();
+    }
+
+    // ══ THE PICTURES ══════════════════════════════════════════════════════
+    // Each embryo's latest volume, as its saved projection: one tile each,
+    // as large as the room allows. Before a run they are what a test volume
+    // took; during one they are what the run is seeing. The Embryos tab is
+    // the deep monitor (every timepoint, the film, the stage calls); this is
+    // the shallow one, beside the controls.
+    let _runRows = {};          // the run's rows as last read, by embryo id
+    let _runBrightfield = false;    // the run takes no volumes
+    let _runOverview = false;       // the run takes overview frames
+    let _tilesKind = 'volumes';     // which pictures, where there are both
+    let _bfFrames = [];             // the session's overview frames, as last listed
+    let _bfFramesAt = 0;
+
+    /** Which pictures the zone shows, and whether there is a choice. */
+    function picturesKind() {
+        const watching = _acqView === 'watch';
+        const plan = watching ? null : readPlan();
+        const volumes = watching ? !_runBrightfield : plan.spim.enabled !== false;
+        const overview = watching ? _runOverview : !!plan.bf.enabled;
+        return { volumes, overview, kind: !volumes ? 'overview' : !overview ? 'volumes' : _tilesKind };
+    }
+
+    /** The overview's frames, listed at most every few seconds. */
+    async function readOverviewFrames() {
+        if (Date.now() - _bfFramesAt < 4000) return;
+        _bfFramesAt = Date.now();
+        try {
+            const d = await getJSON('/api/bf/frames');
+            _bfFrames = (d && Array.isArray(d.frames)) ? d.frames : [];
+        } catch (_) { /* the frames already listed stand */ }
+        if (_pane === 'acquire') renderTiles();
+    }
+
+    /** The newest round of overview frames: one a field. */
+    function overviewTiles() {
+        if (!_bfFrames.length) return [];
+        const last = _bfFrames[_bfFrames.length - 1];
+        const perRound = Math.max(1, Number(last.fields) || 1);
+        return _bfFrames.slice(-perRound).map((f, i) => {
+            const at = f.captured_at ? new Date(f.captured_at) : null;
+            const when = at && !isNaN(at) ? at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const field = perRound > 1 ? `field ${Number(f.field) > 0 ? f.field : i + 1}` : 'overview';
+            return {
+                id: `bf:${f.stem}`, label: field,
+                src: `${f.url}?max=1200`,
+                said: [`frame ${f.frame != null ? f.frame : _bfFrames.length - perRound + i + 1}`, when].filter(Boolean).join(' · '),
+            };
+        });
+    }
+
+    function tilesModel() {
+        const sid = SharedState.get('sessionId');
+        const watching = _acqView === 'watch';
+        const ids = watching && Object.keys(_runRows).length ? Object.keys(_runRows) : subjectIds();
+        return ids.map(id => {
+            const emb = _embryos.find(e => e.id === id);
+            const row = _runRows[id] || {};
+            const t = Math.max(Number(row.timepoints) || 0, Number(emb && emb.timepoints_acquired) || 0);
+            const due = row.next_due_at ? (new Date(row.next_due_at) - Date.now()) / 1000 : null;
+            return {
+                id, label: emb ? labelFor(emb) : id, t,
+                src: sid && t > 0 ? `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(id)}&t=${t}` : null,
+                fit: !!emb && hasFit(emb),
+                // Due and not done: it is being imaged, or is next.
+                now: watching && _runBusy && !row.is_complete && due != null && due <= 0,
+                done: !!row.is_complete,
+                said: row.is_complete ? (row.completion_reason || 'done') : '',
+            };
+        });
+    }
+
+    function renderTiles() {
+        const host = $('op-tiles');
+        if (!host) return;
+        const watching = _acqView === 'watch';
+        const pics = picturesKind();
+        const kindSeg = $('op-tiles-kind');
+        if (kindSeg) {
+            kindSeg.hidden = !(pics.volumes && pics.overview);
+            kindSeg.querySelectorAll('[data-kind]').forEach(b => {
+                const on = b.dataset.kind === pics.kind;
+                b.classList.toggle('is-on', on);
+                b.setAttribute('aria-pressed', String(on));
+            });
+        }
+        const say = $('op-tiles-say');
+        if (pics.kind === 'overview') {
+            readOverviewFrames();
+            const frames = overviewTiles();
+            if (say) { say.textContent = 'The overview\'s latest frames'; say.title = ''; }
+            host.dataset.kind = 'overview';
+            patchLines(host, frames.length ? frames.map(t =>
+                `<button type="button" class="op-tile op-tile-bf" data-tile-frame="${escapeHtml(t.id)}" title="${escapeHtml(t.label)}, ${escapeHtml(t.said)}">` +
+                `<img loading="lazy" decoding="async" src="${escapeHtml(t.src)}" alt="The overview, ${escapeHtml(t.label)}, ${escapeHtml(t.said)}">` +
+                `<span class="op-tile-id">${escapeHtml(t.label)}</span><span class="op-tile-say">${escapeHtml(t.said)}</span></button>`)
+                : ['<div class="op-empty op-tiles-empty">No overview frame yet. The first is taken when the run starts.</div>']);
+            fitTiles();
+            return;
+        }
+        host.dataset.kind = 'volumes';
+        const tiles = tilesModel();
+        if (say) {
+            say.textContent = !tiles.length ? ''
+                : watching ? 'Each embryo\'s latest volume, as it lands'
+                    : 'Each embryo\'s latest volume';
+            say.title = watching ? '' : 'A test volume is taken with this plan\'s slices and exposure, and kept as the embryo\'s next timepoint.';
+        }
+        if (!tiles.length) {
+            patchLines(host, ['<div class="op-empty op-tiles-empty">No embryos in the run.</div>']);
+            return;
+        }
+        patchLines(host, tiles.map(t => {
+            const cls = (t.id === _selected ? ' is-sel' : '') + (t.now ? ' is-now' : '') + (t.src ? '' : ' is-none') + (t.done ? ' is-done' : '');
+            const said = t.now ? `imaging t${t.t + 1}…`
+                : t.src ? `t${t.t}${t.said ? ` · ${t.said}` : ''}`
+                    : t.fit || watching ? 'no volume yet' : 'needs a fit first';
+            return `<button type="button" class="op-tile${cls}" data-tile="${escapeHtml(t.id)}" ` +
+                `title="Embryo ${escapeHtml(t.label)}${t.src ? `, timepoint ${t.t}` : ''}">` +
+                (t.src ? `<img loading="lazy" decoding="async" src="${escapeHtml(t.src)}" alt="Embryo ${escapeHtml(t.label)}, timepoint ${t.t}">` : '') +
+                `<span class="op-tile-id">${escapeHtml(t.label)}</span><span class="op-tile-say">${escapeHtml(said)}</span></button>`;
+        }));
+        fitTiles();
+    }
+
+    /**
+     * As many tiles across as makes them largest in the room there is,
+     * without scrolling where that is possible. A projection is 1024 × 630.
+     */
+    function fitTiles() {
+        const host = $('op-tiles');
+        if (!host) return;
+        const n = host.querySelectorAll('.op-tile').length;
+        // The box, not what is left of it beside a scrollbar: asking the
+        // room inside a scrollbar for the size that needs no scrollbar goes
+        // round in a circle, and ends with a scrollbar and nothing to scroll.
+        const W = host.offsetWidth, H = host.offsetHeight;
+        if (!n || !W || !H) return;
+        // A projection is 1024 × 630; a frame of the bottom camera is square.
+        const gap = 8, ar = host.dataset.kind === 'overview' ? 1 : 1024 / 630, smallest = 132;
+        let best = 1, bestW = 0;
+        for (let across = 1; across <= n; across++) {
+            const rows = Math.ceil(n / across);
+            // As wide as the row allows, and no taller than the rows allow.
+            const w = Math.min((W - (across - 1) * gap) / across, ar * (H - (rows - 1) * gap) / rows);
+            if (w > bestW) { best = across; bestW = w; }
+        }
+        if (bestW >= smallest) {
+            host.style.setProperty('--across', String(best));
+            host.style.setProperty('--tile-w', `${Math.floor(bestW)}px`);
+            host.style.overflowY = 'hidden';
+        } else {
+            // Too many for the room at a size worth looking at: they scroll.
+            host.style.setProperty('--across', String(Math.max(1, Math.floor((W - 10 + gap) / (smallest + gap)))));
+            host.style.setProperty('--tile-w', '1fr');
+            host.style.overflowY = 'auto';
+        }
+    }
+
+    /** A tile pressed: the instrument is pointed at that embryo. The set a
+     *  run images is left as it is. */
+    function pointAt(id) {
+        if (!id || !_embryos.some(e => e.id === id)) return;
+        if (_targets.includes(id)) {
+            _selected = id;
+            SharedState.set('selectedEmbryoId', _selected);
+            publishRoster(); renderSpimTarget(); renderCalTarget(); renderSingle(); renderTiles();
+        } else {
+            selectEmbryo(id);
+        }
     }
 
     // ══ THE RUN ═══════════════════════════════════════════════════════════════
@@ -2938,17 +3749,24 @@ const OperateManager = (function () {
             : r.last_error ? 'error' : 'running';
         const cls = r.is_complete ? 'is-done' : r.last_error ? 'is-error' : live ? 'is-live' : 'is-waiting';
         const ending = r.stop_condition || 'manual';
+        // The table's row, with the run's columns: who, its timepoint, when
+        // it is next due, its ending, Stop. Under them, what its next
+        // acquisition uses (the agent changes these per embryo, and this is
+        // where that shows against the embryo it was made on).
+        const next = r.is_complete || !live ? state
+            : state !== 'running' ? state : `next ${fmtWhen(due)}`;
+        const every = r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : '';
+        const more = [every, paramsWords(r)].filter(Boolean).join(' · ');
         return `<div class="op-runrow ${cls}" data-run-id="${escapeHtml(id)}">` +
-            `<span class="op-runrow-who">embryo ${escapeHtml(label)}</span>` +
+            `<span class="op-runrow-who" title="Embryo ${escapeHtml(label)}">${escapeHtml(label)}</span>` +
             `<span class="op-runrow-n">t${r.timepoints}</span>` +
-            `<span class="op-runrow-next">${r.is_complete || !live ? '' : `next ${fmtWhen(due)}`}</span>` +
-            `<span class="op-runrow-int">${r.interval_seconds != null ? `every ${AcquisitionPlan.intervalWords(r.interval_seconds)}` : ''}</span>` +
-            `<span class="op-runrow-params" title="${escapeHtml(paramsTitle(r))}">${escapeHtml(paramsWords(r))}</span>` +
-            `<span class="op-runrow-state">${escapeHtml(state)}</span>` +
+            `<span class="op-runrow-next">${escapeHtml(next)}</span>` +
             (r.is_complete || !live ? '<span></span><span></span>' :
-                `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends">` +
-                    runStopOptions(ending) + '</select>' +
-                `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" title="Stop this embryo; the rest carry on">Stop</button>`) +
+                `<select class="op-sel op-runrow-stop" data-run-stop="${escapeHtml(id)}" title="How this embryo ends" ` +
+                    `aria-label="How embryo ${escapeHtml(label)} ends">` + runStopOptions(ending) + '</select>' +
+                `<button class="op-nbtn op-runrow-halt" type="button" data-run-halt="${escapeHtml(id)}" ` +
+                    `title="Stop this embryo; the rest carry on" aria-label="Stop embryo ${escapeHtml(label)}">Stop</button>`) +
+            `<span class="op-runrow-params" title="${escapeHtml(paramsTitle(r))}">${escapeHtml(more)}</span>` +
             '</div>';
     }
 
@@ -3002,6 +3820,7 @@ const OperateManager = (function () {
         if (wasBusy !== _runBusy && _pane === 'acquire') renderPlan();
         const rows = (st && st.embryos) || {};
         const ids = Object.keys(rows);
+        _runRows = rows;
         const live = tactics.filter(t => t.state === 'active' || t.state === 'paused');
         // A run restored from its checkpoint after a restart: idle, embryos
         // still going. The one button it needs is Resume — the same route a
@@ -3013,6 +3832,31 @@ const OperateManager = (function () {
         if (p) p.textContent = _runPaused ? (resumable ? 'Resume run' : 'Resume') : 'Pause';
         const stopb = $('op-run-stop');
         if (stopb) stopb.hidden = !running && live.length === 0;
+
+        // The surface follows the run: going, it watches; ended, the form is
+        // back. Only the change moves it, so with no run going the operator's
+        // own choice (look back, or plan another) is left alone.
+        // A run somebody stopped is one they are done with, so the form is
+        // back, with the way to look at it (and carry it on) under Start. One
+        // that was interrupted is still the business in hand.
+        const going = !!running || live.length > 0 || (resumable && st.ended !== 'stopped');
+        if (going !== _runGoing) { _runGoing = going; setAcqView(going ? 'watch' : 'design'); }
+        const anything = ids.length > 0 || tactics.length > 0;
+        _runBrightfield = !!(st && st.volumes === false && st.bf);
+        _runOverview = !!(st && st.bf);
+        const fresh = $('op-acq-new');
+        if (fresh) fresh.hidden = !!running;
+        const back = $('op-acq-show-run');
+        if (back) {
+            back.hidden = going || !anything;
+            back.textContent = st && st.ended ? `The last run (${st.ended}) →` : 'The last run →';
+        }
+        const stateEl = $('op-run-state');
+        if (stateEl) {
+            stateEl.textContent = running ? st.status
+                : resumable ? (st.ended === 'stopped' ? 'stopped' : 'interrupted')
+                    : (st && st.ended) || '';
+        }
 
         const parts = [];
         // A brightfield run has no embryo rows to be seen by.
@@ -3037,13 +3881,35 @@ const OperateManager = (function () {
                 bits.push(`brightfield ${st.bf.frames || 0} frame${st.bf.frames === 1 ? '' : 's'}` +
                     (st.bf.seconds_until_next != null && running ? `, next ${fmtWhen(st.bf.seconds_until_next)}` : ''));
             }
-            parts.push(`<div class="op-run-status">${escapeHtml(bits.join(' · '))}</div>`);
-            parts.push(`<div class="op-runrows">${ids.map(id => runRow(id, rows[id], running)).join('')}</div>`);
+            // The clock: what there is to wait for, large, then the rest.
+            const clock = running && st.status === 'running' && st.seconds_until_next_round != null
+                ? `<span class="op-run-clock">${escapeHtml(fmtWhen(st.seconds_until_next_round))}</span>` +
+                  '<span class="op-run-clock-say">to the next round</span>'
+                : '';
+            parts.push(`<div class="op-run-clockrow">${clock}</div>` +
+                `<div class="op-run-bits">${escapeHtml(bits.join(' · '))}</div>`);
         }
-        if (tactics.length) parts.push(tactics.map(tacticCard).join(''));
-        host.innerHTML = parts.length ? parts.join('') : '<div class="op-empty">Nothing running.</div>';
+        const status = $('op-run-status');
+        if (status) status.innerHTML = parts.join('');
+        // The rows, one at a time: a row whose ending is being chosen is not
+        // redrawn under the hand by the next poll.
+        patchLines(host, ids.length ? ids.map(id => runRow(id, rows[id], running))
+            : [`<div class="op-empty">${brightfield ? 'A brightfield run images no embryo.' : 'Nothing running.'}</div>`],
+        { keepFocused: true });
+        const tact = $('op-run-tactics');
+        if (tact) tact.innerHTML = tactics.map(tacticCard).join('');
         const head = $('op-run-plan');
-        if (head && !running && !ids.length) head.hidden = true;
+        if (head && !going) head.hidden = true;
+        // Reloaded over a run: the sentence Start was pressed on is gone
+        // with the page, but the form was filled from the session's own
+        // plan and nobody has typed over it, so it says the same thing.
+        if (head && going && head.hidden && _planRestored && !_planDirty && $('op-plan-say')) {
+            head.textContent = AcquisitionPlan.describe(readPlan(), planSubjects());
+            head.hidden = false;
+        }
+        const headBox = head && head.closest('.op-panel');
+        if (headBox) headBox.hidden = head.hidden;
+        if (_pane === 'acquire') renderTiles();
     }
 
     async function stopEmbryo(id) {
@@ -3078,8 +3944,10 @@ const OperateManager = (function () {
         const state = t.state || 'planned';
         const struct = t.structure || {};
         const meta = [];
-        if (struct.cadence_s != null) meta.push(`${struct.cadence_s}s`);
-        if (struct.interval != null) meta.push(`${struct.interval}s`);
+        // One cadence, in words: "30s · 30s" was the same number from two
+        // fields of the structure.
+        const cadence = struct.cadence_s != null ? struct.cadence_s : struct.interval;
+        if (cadence != null && Number.isFinite(Number(cadence))) meta.push(`every ${AcquisitionPlan.intervalWords(Number(cadence))}`);
         if (struct.status) meta.push(struct.status);
         if (struct.laser_config) meta.push(struct.laser_config);
         if (struct.volumes === false) meta.push('brightfield');
@@ -3091,13 +3959,19 @@ const OperateManager = (function () {
         if (live.started) when.push(`started ${live.started}`);
         if (live.ended) when.push(live.ended);
         if (live.acquired) when.push(live.acquired);
+        // The code's names for things are not the operator's: a plan started
+        // from this pane is `standing_timelapse`, "Started from the Operate
+        // Run step." The first is said by the card's own name and the second
+        // says nothing the card does not.
+        const kind = t.kind === 'standing_timelapse' ? '' : String(t.kind || '').replace(/_/g, ' ');
+        const why = /^Started from the Operate Run step\.?$/.test(String(t.rationale || '').trim()) ? '' : (t.rationale || '');
         return `<div class="op-tcard st-${escapeHtml(state)}">` +
             `<div class="op-tcard-head"><span class="op-tcard-name">${escapeHtml(t.name || t.id)}</span>` +
             `<span class="op-tcard-state">${escapeHtml(state)}</span></div>` +
-            `<div class="op-tcard-kind">${escapeHtml(t.kind || '')}</div>` +
+            (kind ? `<div class="op-tcard-kind">${escapeHtml(kind)}</div>` : '') +
             (meta.length ? `<div class="op-tcard-meta">${escapeHtml(meta.join(' · '))}</div>` : '') +
             (when.length ? `<div class="op-tcard-meta op-tcard-when">${escapeHtml(when.join(' · '))}</div>` : '') +
-            (t.rationale ? `<div class="op-tcard-meta">${escapeHtml(t.rationale)}</div>` : '') +
+            (why ? `<div class="op-tcard-meta">${escapeHtml(why)}</div>` : '') +
             '</div>';
     }
     async function pauseRun() {
@@ -3119,37 +3993,57 @@ const OperateManager = (function () {
     // contend for MMCore, and the client swaps .src per frame with no throttle,
     // so two live decoders is the condition that risks a Video-TDR freeze. "The
     // camera is live while you are looking at it" guarantees at most one.
-    // Workflow order, and the single list. It used to be spelled out in
-    // showPane and again in showPaneInitial, so adding a pane meant remembering
-    // both.
-    const PANE_ORDER = ['bottom', 'spim', 'cal', 'acquire'];
+    // Workflow order, and the single list: each surface, and the section of
+    // the page it is drawn in. The two camera surfaces and calibration are
+    // one section, Scope, and which of them its picture shows is `[data-src]`
+    // (paintPane). Calibration was a section of its own; what it needs (the
+    // sheet, the embryo list, the light-sheet camera, the laser) is on Scope
+    // and none of it was on that page.
+    // The list used to be spelled out in showPane and again in
+    // showPaneInitial, so adding a pane meant remembering both.
+    const PANE_SECTION = { bottom: 'scope', spim: 'scope', cal: 'scope', acquire: 'acquire' };
+    const SECTIONS = [...new Set(Object.values(PANE_SECTION))];
+    const inScope = name => PANE_SECTION[name] === 'scope';
+    // The instrument panels are on screen with either camera, so either
+    // camera's surface draws all of them.
+    function renderScope() {
+        renderMarkCount(); drawMarkers(); renderSpimTarget();
+        bz.render(); fd.render(); renderGoto(); renderFitRow();
+    }
 
     const PANES = {
         bottom: {
             // Leaving turns the camera off; coming back does not turn it on.
             onEnter() { drawMarkers(); },
             onLeave() { if (_bottomOn) stopBottom(); },
-            render() { renderMarkCount(); drawMarkers(); bz.render(); },
+            render() { renderScope(); },
         },
         spim: {
-            onEnter() {},
-            onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
-            render() { renderSpimTarget(); fd.render(); },
+            onEnter() { adoptLsParams(); },
+            // To the bottom camera the LED stays as it is: it lights that
+            // camera too, and the Light panel beside the frame goes on
+            // saying what it is. Leaving Scope closes it, as leaving the
+            // SPIM head always has.
+            // Fit is in Scope too, and going to it closes the LED as going
+            // to the Calibration page did: under the LED alone a calibration
+            // has no nuclei to find (#106).
+            onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to) || to === 'cal') forceLedOff(); },
+            render() { renderScope(); },
         },
         cal: {
             // Calibration takes its own frames; it never read the live view,
-            // and this pane has no image to show one on. Entering used to
+            // and Fit has no image to show one on. Entering used to
             // restart the stream anyway, unseen. Leaving closes the LED — the
             // calibrate path never did (#106).
             onEnter() { renderCalTarget(); },
             onLeave() { if (_spimOn) stopSpim(); forceLedOff(); },
-            render() { renderCalTarget(); },
+            render() { renderScope(); renderCalTarget(); },
         },
         acquire: {
             // The run is watched while this pane is open: a poll for the
             // clocks, and the events for the moments. Nothing polls when it
             // is not.
-            onEnter() { restorePlan(); renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
+            onEnter() { restorePlan(); readRoom(); renderRun(); clearInterval(_runPoll); _runPoll = setInterval(renderRun, 5000); },
             onLeave() { clearInterval(_runPoll); _runPoll = null; },
             render() { publishRoster(); renderSingle(); renderTargetScope(); renderPlan(); },
         },
@@ -3163,18 +4057,20 @@ const OperateManager = (function () {
         applySpim(false);
     }
 
-    // The Light panel is shared, so Operate only says where to draw it — see
-    // docs/architecture/PANELS.md. Mounted once; SharedState keeps it current.
     // Zoom/pan on the camera surfaces. Attached once each; the transform is
     // view state, not instrument state, so it stays local rather than going
     // into SharedState — two people looking at one scope still want their own
     // magnification.
     function attachImageViews() {
         if (typeof ImageView === 'undefined') return;
-        ImageView.attach('op-cam-bottom', { controlsHost: 'op-display-bottom' });
-        ImageView.attach('op-cam-spim', { controlsHost: 'op-display-spim' });
+        ImageView.attach('op-cam-bottom', { controlsHost: 'op-display-bottom', display: 'stacked' });
+        ImageView.attach('op-cam-spim', { controlsHost: 'op-display-spim', display: 'stacked' });
     }
 
+    // The Light panel is shared, so Operate only says where to draw it — see
+    // docs/architecture/PANELS.md. Mounted once, with the other panels;
+    // SharedState keeps it current. The whole panel beside either camera: the
+    // bottom camera used to get a card showing the LED alone, mounted apart.
     let _lightMounted = false;
     function mountLightPanel() {
         if (_lightMounted || typeof LightPanel === 'undefined') return;
@@ -3184,8 +4080,8 @@ const OperateManager = (function () {
     }
 
     // The dark/flat references for the overview frames sit under the plan's
-    // light, LED and exposure fields in the Bottom cam pane's Overview frames
-    // block, and read them (panels/brightfield-refs.js). When a reference
+    // light, LED and exposure fields in the rail's Overview frames box, and
+    // read them (panels/brightfield-refs.js). When a reference
     // lands, the Acquisition pane's summary line says so.
     let _bfRefsMounted = false;
     function mountBrightfieldRefs() {
@@ -3212,6 +4108,8 @@ const OperateManager = (function () {
         if (!$('op-stage-host')) return;
         _stagePadMounted = true;
         StagePad.mount('op-stage-host');
+        // The pad sends its own jogs, so it is told when to ask first.
+        StagePad.setGuard(() => mayTakeFromRun('Moving the stage'));
     }
 
     let _panelsMounted = false;
@@ -3243,17 +4141,20 @@ const OperateManager = (function () {
                     { actions: ['centre', 'remove'], showFit: true, compact: true });
             }
             if ($('op-roster')) {
-                RosterPanel.mount('op-roster',
-                    { actions: ['role', 'centre', 'remove'], emptyAction: 'bottom' });
+                // The fit is shown here too: this is the list a run is
+                // started from, and a run refuses an embryo without one.
+                // As a table: its role, its fit, how it ends. Centring and
+                // removing are Scope's, beside the picture they are judged on.
+                RosterPanel.mount('op-roster', {
+                    actions: [],
+                    table: true, emptyAction: 'bottom', showFit: true,
+                    cell: emb => endingCell(emb),
+                    out: emb => !inRun(emb),
+                });
             }
         }
         mountFieldsPanels();
-        // The bottom camera's LED card. Here rather than in mountLightPanel:
-        // that one waits for the SPIM pane, and this is the pane we start on.
-        if (typeof LightPanel !== 'undefined' && $('op-led-host')) {
-            // Untitled: the folding card above it draws the "LED" heading.
-            LightPanel.mount('op-led-host', { only: 'led', titled: false });
-        }
+        mountLightPanel();
         if (typeof CameraPanel !== 'undefined') {
             if ($('op-cam-panel-bottom')) {
                 CameraPanel.mount('op-cam-panel-bottom', { camera: 'bottom', titled: false });
@@ -3264,10 +4165,15 @@ const OperateManager = (function () {
         }
     }
 
-    // ══ THE RAIL'S FOLDING CARDS ═══════════════════════════════════════════
-    // Every card on the Bottom cam rail folds to its head row. One rule for all
-    // of them: `data-disclose` names the card, the head row and anything
-    // marked `.op-disc-keep` stay, the other direct children fold.
+    // ══ THE FOLDING CARDS ══════════════════════════════════════════════════
+    // A card that folds to its head row. One rule for all of them:
+    // `data-disclose` names the card, the head row and anything marked
+    // `.op-disc-keep` stay, the other direct children fold.
+    //
+    // On the old Bottom cam rail every card folded, because the rail was a
+    // 260 px strip that scrolled and folding was how it was made to fit. In
+    // the workspace the instrument panels have fixed places and do not fold;
+    // what still does is what is set once a night (the overview frames).
     //
     // The choice is the RIG's, not this browser's, and it is kept as it is
     // pressed: read from
@@ -3284,7 +4190,7 @@ const OperateManager = (function () {
     }
 
     function applyAllDisclosures() {
-        document.querySelectorAll('#op-pane-bottom [data-disclose]').forEach(block => {
+        document.querySelectorAll('#devices-view-operate [data-disclose]').forEach(block => {
             applyDisclosure(block, discloseState(block.dataset.disclose));
         });
     }
@@ -3321,7 +4227,7 @@ const OperateManager = (function () {
     }
 
     function wireDisclosures() {
-        document.querySelectorAll('#op-pane-bottom [data-disclose]').forEach(block => {
+        document.querySelectorAll('#devices-view-operate [data-disclose]').forEach(block => {
             const key = block.dataset.disclose;
             applyDisclosure(block, discloseState(key));
             const btn = block.querySelector('[data-disclose-toggle]');
@@ -3343,23 +4249,41 @@ const OperateManager = (function () {
     }
 
     function showPane(name) {
+        // "Scope" is the workspace; the camera it shows is the one it last did.
+        if (name === 'scope') name = _scope;
         if (!PANES[name] || name === _pane) return;
         const prev = _pane;
         _pane = name;
-        if (PANES[prev]) PANES[prev].onLeave();
-        PANE_ORDER.forEach(p => {
-            const el = $(`op-pane-${p}`);
-            if (el) el.hidden = p !== name;
-        });
-        // Drives the CSS that hides the shared rail on Acquisition (its own
-        // roster is richer) while keeping it on Bottom / SPIM.
-        const body = $('op-body'); if (body) body.dataset.pane = name;
-        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', name);
-        if (name === 'spim') mountLightPanel();
+        if (inScope(name)) _scope = name;
+        if (PANES[prev]) PANES[prev].onLeave(name);
+        paintPane();
         PANES[name].onEnter();
         PANES[name].render();
         publishRoster();
-        renderLock();
+    }
+
+    // What is on screen for the surface `_pane` names: its section of the
+    // page, and inside Scope the chosen camera's frame, caption, verbs and
+    // display panel (`[data-src]`). Render dispatch, in one place for
+    // showPane and showPaneInitial both.
+    function paintPane() {
+        const section = PANE_SECTION[_pane];
+        SECTIONS.forEach(s => {
+            const el = $(`op-pane-${s}`);
+            if (el) el.hidden = s !== section;
+        });
+        if (inScope(_pane)) {
+            document.querySelectorAll('#op-pane-scope [data-src]').forEach(el => {
+                el.hidden = el.dataset.src !== _pane;
+            });
+        }
+        // Drives the CSS that hides the shared rail on Acquisition (its own
+        // roster is richer) and, on Calibration, the rail's two panels that
+        // are about the bottom camera's picture.
+        const body = $('op-body'); if (body) body.dataset.pane = _pane;
+        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', section);
+        renderSource();
+        renderViewMeta();
     }
 
     function renderSubnavMeta() {
@@ -3369,8 +4293,25 @@ const OperateManager = (function () {
         if (_bottomOn) bits.push('BOTTOM ● LIVE');
         if (_spimOn) bits.push('SPIM ● LIVE');
         if (ledIsOpen()) bits.push('LED EMITTING');
-        if (_acquiring) bits.push('LASER EMITTING');
+        // Derived by the Light panel from what the hardware says (a beam
+        // armed, a line routed, its power above zero), so it is true with
+        // the live view as well as during a run. It used to be said only
+        // while this page had itself started an acquisition.
+        const light = SharedState.get('light');
+        const lasing = typeof LightPanel !== 'undefined' && light ? LightPanel.emitting(light) === true : false;
+        // The laser's word alone wears the hazard's colour: "the camera is
+        // live" beside it is not a hazard and must not look like one.
+        const key = bits.join('|') + (lasing || _acquiring ? '|LASER' : '');
+        if (el.dataset.says === key) return;
+        el.dataset.says = key;
         el.textContent = bits.join('  ·  ');
+        if (lasing || _acquiring) {
+            if (bits.length) el.append('  ·  ');
+            const hot = document.createElement('span');
+            hot.className = 'is-emitting';
+            hot.textContent = 'LASER EMITTING';
+            el.append(hot);
+        }
     }
 
     /**
@@ -3506,15 +4447,26 @@ const OperateManager = (function () {
         // frame behind whatever is on screen and races for stream ownership.
         if (!_active || _pane !== 'bottom' || !p || !p.jpeg_b64) return;
         _lastBottom = p;
+        noteFrame('bottom');
         showFrame('bottom', p);
         drawMarkers();
     }
     function onSpimFrame(p) {
         if (!_active || _pane !== 'spim' || !p || !p.jpeg_b64) return;
+        if (p.side && p.side !== _side) {
+            // Inside the switch window the frame is the old side's, grabbed
+            // before the switch: dropped. Outside it the device layer is on a
+            // side this pane never chose, and the pane follows it.
+            if (Date.now() - _sideChangedAt > SIDE_SWITCH_MS) adoptLsParams();
+            return;
+        }
+        noteFrame('spim');
         // The frame is of wherever the stage is, which is not necessarily the
         // embryo the caption names. Showing it there would be a false claim.
         if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
-        showFrame('spim', p);
+        // Multi is two cameras composed in colour, a rendering: it comes as its
+        // JPEG. A or B is one camera's frame, drawn from its counts.
+        showFrame('spim', p, p.side !== 'Multi');
     }
     function onEmbryosUpdate(p) {
         const hadAny = _embryos.length > 0;
@@ -3565,7 +4517,13 @@ const OperateManager = (function () {
             // app.js handles the keypress first and moves state.tab, so the
             // guard then correctly refuses. Three peer surfaces are fine to
             // click between; a shortcut would need a modifier to be honest.
-            initViewSwitcher('operate-subtab-switcher', showPane);
+            initViewSwitcher('operate-subtab-switcher', name => {
+                // The surfaces share the Devices toolbar with Map, Details,
+                // 3D and Manual. Pressed from one of those, the press comes
+                // back to Operate first, then goes to the surface.
+                if (!_active && typeof DevicesManager !== 'undefined') DevicesManager.switchView('operate');
+                showPane(name);
+            });
         }
 
         bz.wire(); fd.wire();
@@ -3621,12 +4579,24 @@ const OperateManager = (function () {
         if (anyway) anyway.addEventListener('click', () => calibrateSelected({ anyway: true }));
         wireCalForm();
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.mount('op-cal-progress');
-        document.querySelectorAll('[data-gv]').forEach(b =>
-            b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
-        document.querySelectorAll('[data-pz]').forEach(b =>
-            b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
-        document.querySelectorAll('[data-backoff]').forEach(b =>
-            b.addEventListener('click', backOff));
+        // The sheet's two axes: a line to drag and the same number to type.
+        // The line moves the sheet as it is dragged (the view is how the
+        // pose is judged); a typed number moves it on Enter.
+        const bindAxis = (key, line, box, decimals) => {
+            if (!line) return;
+            if (box && typeof NumRow !== 'undefined') {
+                _axisRow[key] = NumRow.bind(line, box, {
+                    decimals, onInput: v => setAxis(key, v), onCommit: v => setAxis(key, v),
+                });
+            } else {
+                line.addEventListener('input', () => setAxis(key, Number(line.value)));
+            }
+        };
+        bindAxis('galvo', $('op-gv-in'), $('op-gv'), 2);
+        bindAxis('piezo', $('op-pz-in'), $('op-pz'), 1);
+        adoptLsParams();
+        document.querySelectorAll('#op-source [data-source]').forEach(b =>
+            b.addEventListener('click', () => chooseSource(b.dataset.source)));
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
         const keptStrip = $('op-cal-kept-strip');
@@ -3636,16 +4606,54 @@ const OperateManager = (function () {
         });
         const keptOpen = $('op-cal-kept-open');
         if (keptOpen) keptOpen.addEventListener('click', openCalFolder);
+        // From what the last run kept to every run and every raw exposure.
+        const keptAll = $('op-cal-kept-all');
+        if (keptAll) keptAll.addEventListener('click', () => {
+            if (typeof switchTab === 'function') switchTab('calibration');
+            if (typeof CalibrationManager !== 'undefined') CalibrationManager.switchView('runs');
+        });
+        const to = $('op-fd-to');
+        if (to) to.addEventListener('click', () => headTo(Number(to.dataset.fdTo), to));
+        const go = $('op-fd-go');
+        if (go) go.addEventListener('click', goHeadTyped);
+        const goBox = $('op-fd-goto');
+        if (goBox) goBox.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); goHeadTyped(); }
+        });
+        renderGoto();
         const raise = $('op-fd-raise');
         if (raise) raise.addEventListener('click', raiseHead);
 
-        const modes = $('op-modes');
-        if (modes) {
-            modes.addEventListener('click', e => {
-                const b = e.target.closest('[data-mode]');
-                if (b) setMode(b.dataset.mode);
+        const test = $('op-test-one'); if (test) test.addEventListener('click', testVolume);
+        const agentBtn = $('op-run-agent'); if (agentBtn) agentBtn.addEventListener('click', handToAgent);
+        const loadBtn = $('op-plan-load');
+        if (loadBtn) loadBtn.addEventListener('click', () => {
+            const box = $('op-panel-library');
+            const open = !box || box.hidden;
+            // Shutting the list lets go of a tactic chosen in it: the form is
+            // the run again.
+            if (!open && _mode === 'library') setMode('adaptive');
+            showSaved(open);
+        });
+        const tiles = $('op-tiles');
+        if (tiles) {
+            tiles.addEventListener('click', e => {
+                const t = e.target.closest('[data-tile]');
+                if (t) pointAt(t.dataset.tile);
             });
+            if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => fitTiles()).observe(tiles);
         }
+        const monitor = $('op-acq-monitor');
+        if (monitor) monitor.addEventListener('click', () => {
+            if (typeof switchTab === 'function') switchTab('embryos');
+        });
+        const kindSeg = $('op-tiles-kind');
+        if (kindSeg) kindSeg.addEventListener('click', e => {
+            const b = e.target.closest('[data-kind]');
+            if (b) { _tilesKind = b.dataset.kind === 'overview' ? 'overview' : 'volumes'; renderTiles(); }
+        });
+        const fresh = $('op-acq-new'); if (fresh) fresh.addEventListener('click', () => setAcqView('design'));
+        const lastRun = $('op-acq-show-run'); if (lastRun) lastRun.addEventListener('click', () => setAcqView('watch'));
         // The acquisition plan. One listener on the pane re-says the plan for
         // every input, including the per-embryo rows that come and go with
         // the roster; the run's own stop select is populated here, once.
@@ -3655,9 +4663,11 @@ const OperateManager = (function () {
         if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('duration', false);
         const planPanel = $('op-panel-adaptive');
         if (planPanel) {
-            planPanel.addEventListener('input', () => { _planDirty = true; renderPlan(); });
+            planPanel.addEventListener('input', () => { planTouched(); renderPlan(); });
+            // (An embryo's own ending is on its row in the table, which is
+            // the roster's: it comes here through roster.cellChange.)
             planPanel.addEventListener('change', e => {
-                _planDirty = true;
+                planTouched();
                 // "Taken from the fields" with none in the list yet makes one
                 // from where the stage is, the way the rail's button does —
                 // the operator drove there and said so. Choosing the centroid
@@ -3675,7 +4685,7 @@ const OperateManager = (function () {
             });
             renderPlan();
         }
-        // The plan's overview fields live on the Bottom cam pane, beside the
+        // The plan's overview fields live in the rail on Scope, beside the
         // live view; a change there re-says the plan like one on Acquisition.
         const ov = $('op-overview-host');
         if (ov) {
@@ -3688,7 +4698,7 @@ const OperateManager = (function () {
         if (lib) {
             lib.addEventListener('click', e => {
                 const b = e.target.closest('[data-lib]');
-                if (b) { _selectedLib = b.dataset.lib; loadLibrary(); }
+                if (b) chooseSaved(b.dataset.lib);
             });
         }
         const scope = $('op-target-scope');
@@ -3697,6 +4707,13 @@ const OperateManager = (function () {
             if (b && !b.disabled) setTargetScope(b.dataset.scope);
         });
         const start = $('op-run-start'); if (start) start.addEventListener('click', startRun);
+        const pf = $('op-preflight');
+        if (pf) pf.addEventListener('click', e => {
+            const b = e.target.closest('[data-preflight-fix]');
+            if (b) preflightFix(b.dataset.preflightFix);
+        });
+        // The light is one of the lines: what it is read as changes them.
+        SharedState.on('light', () => { if (_pane === 'acquire') renderPreflight(); });
         const pause = $('op-run-pause'); if (pause) pause.addEventListener('click', pauseRun);
         const stopb = $('op-run-stop'); if (stopb) stopb.addEventListener('click', stopRun);
         const saveBtn = $('op-plan-save');
@@ -3739,6 +4756,8 @@ const OperateManager = (function () {
             // caption would still read "stage is elsewhere" after the move landed.
             renderSpimTarget();
         });
+        // What the Light panel reads back is what the toolbar says of it.
+        SharedState.on('light', () => renderSubnavMeta());
         SharedState.on('selectedEmbryoId', id => {
             if (id === _selected) return;      // our own publish, already applied
             _selected = id;
@@ -3788,12 +4807,11 @@ const OperateManager = (function () {
         if (_active) return;
         _active = true;
         showPaneInitial();
-        if (_pane === 'spim') mountLightPanel();
         try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) {}
         // The session's fields, then the session's last plan — in that
         // order, so a list the session holds outranks the run's positions.
         // The plan is restored HERE, not only on entering Acquisition: the
-        // plan's light, exposure and fields are on the Bottom cam pane now,
+        // plan's light, exposure and fields are on Scope now,
         // and the first thing typed there must not be what stops the rest
         // of the plan (cadence, ending) coming back.
         await loadFields();
@@ -3801,7 +4819,6 @@ const OperateManager = (function () {
         // The rig's choice of which rail cards are open.
         await loadRailCards();
         await Promise.all([bz.refresh(), fd.refresh()]);
-        renderLock();
         renderSubnavMeta();
     }
     // ---- a plan item, set up here ----------------------------------------
@@ -3820,7 +4837,9 @@ const OperateManager = (function () {
     }
 
     function renderSetupBanner() {
-        const pane = $('op-pane-acquire');
+        // In the run's column, over the sentence: as the pane's first child
+        // it was a row above three zones, and pushed every one of them down.
+        const pane = $('op-setup-host') || $('op-pane-acquire');
         if (!pane) return;
         let el = document.getElementById('op-setup-banner');
         if (!_setupItem) { if (el) el.remove(); return; }
@@ -3852,11 +4871,7 @@ const OperateManager = (function () {
     window.addEventListener('gently:setup-item', e => applySetupItem(e.detail));
 
     function showPaneInitial() {
-        PANE_ORDER.forEach(p => {
-            const el = $(`op-pane-${p}`);
-            if (el) el.hidden = p !== _pane;
-        });
-        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', _pane);
+        paintPane();
         if (PANES[_pane]) { PANES[_pane].onEnter(); PANES[_pane].render(); }
         const handed = takeSetupItem();
         if (handed) applySetupItem(handed);
@@ -3869,6 +4884,9 @@ const OperateManager = (function () {
         if (_bottomOn) stopBottom();
         if (_spimOn) stopSpim();
         forceLedOff();
+        // The surfaces' buttons sit in the Devices toolbar beside Map and the
+        // rest: with another of those up, none of these is the one on screen.
+        if (typeof updateViewButtons === 'function') updateViewButtons('operate-subtab-switcher', '');
     }
 
     // redraw: a CSS transform on an ancestor fires neither `resize` nor
@@ -3892,6 +4910,8 @@ const OperateManager = (function () {
             },
             toggleRole: id => toggleRole(id),
             goTo: pane => showPane(pane),
+            // A change in a row's own cell (the Acquisition table's ending).
+            cellChange: (id, control) => setEnding(id, control),
         },
         // panels/fields.js renders SharedState.overviewFields and calls
         // these. The list, the stage position and the plan stay here.

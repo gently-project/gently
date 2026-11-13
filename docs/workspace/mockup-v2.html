@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Operate as a workspace — mockup v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ── Mockup v2. Static: the controls move, nothing reaches a microscope. ──
+     Three zones inside the app's own shell:
+       the dish (left)  ·  what the rig sees (middle)  ·  the instrument (right)
+     The frame takes the height there is and its width from its aspect; the
+     instrument takes the rest, in one column or two. Every panel has one
+     place, and keeps it. */
+  :root, [data-theme="dark"] {
+    --bg: #0d1117; --panel: #12161d; --field: #0b0f14; --rule: #262c36; --rule2: #36404d;
+    --ink: #d7dee8; --dim: #7d8899; --accent: #60a5fa; --accent-soft: rgba(96,165,250,.16);
+    --green: #3ee6b0; --amber: #fbbf24; --red: #f0405a; --img: #04070b; --chrome: #0f141b;
+    --amber-soft: rgba(251,191,36,.12); --on-accent: #06101f;
+  }
+  [data-theme="light"] {
+    --bg: #f4f6f9; --panel: #ffffff; --field: #ffffff; --rule: #dfe4ea; --rule2: #c6ced8;
+    --ink: #1c2430; --dim: #667081; --accent: #2563eb; --accent-soft: #e8eefb;
+    --green: #138669; --amber: #a16207; --red: #b4143c; --img: #1b222c; --chrome: #ffffff;
+    --amber-soft: #fff7e6; --on-accent: #ffffff;
+  }
+  :root { --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+          --sans: 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 13px/1.3 var(--sans); color: var(--ink); background: var(--bg);
+         display: grid; grid-template-columns: 56px minmax(0, 1fr) 46px; grid-template-rows: 46px minmax(0, 1fr) 26px; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+
+  /* ── the app's shell, as it is today (header, collapsed nav, agent rail) ── */
+  .hdr { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--chrome); border-bottom: 1px solid var(--rule); }
+  .hdr .brand { font-weight: 700; font-size: 16px; color: var(--accent); }
+  .chip { font: 11px var(--mono); padding: 2px 8px; border: 1px solid var(--rule); border-radius: 10px; color: var(--dim); background: transparent; }
+  .hdr .sp { flex: 1; }
+  .avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #a855f7, #ec4899); color: #fff; font: 600 11px/26px var(--sans); text-align: center; }
+  .conn { display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); display: inline-block; }
+  .nav { grid-row: 2; background: var(--chrome); border-right: 1px solid var(--rule); display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0; }
+  .nav i { width: 34px; height: 30px; border-radius: 6px; display: grid; place-items: center; color: var(--dim); font: 600 10px var(--mono); font-style: normal; }
+  .nav i.on { background: var(--accent-soft); color: var(--accent); }
+  .nav hr { width: 28px; border: 0; border-top: 1px solid var(--rule); margin: 4px 0; }
+  .agent { grid-row: 2; grid-column: 3; border-left: 1px solid var(--rule); background: var(--chrome); display: grid; place-items: start center; padding-top: 12px; color: var(--accent); font-size: 18px; }
+  .sb { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 0 14px; font-size: 11px; color: var(--dim); background: var(--chrome); border-top: 1px solid var(--rule); }
+  .sb .sp { flex: 1; } .sb b { color: var(--ink); font-weight: 500; font-family: var(--mono); }
+  .sb .mock { color: var(--amber); font-weight: 600; }
+
+  /* ── main: one toolbar row, then the workspace ───────────────────────── */
+  main { grid-row: 2; grid-column: 2; display: grid; grid-template-rows: 38px minmax(0, 1fr); min-width: 0; min-height: 0; }
+  .tb { display: flex; align-items: center; gap: 4px; padding: 0 10px; border-bottom: 1px solid var(--rule); }
+  .tab { padding: 5px 10px; border: 0; border-radius: 4px; background: transparent; color: var(--dim); font-size: 12.5px; }
+  .tab.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .tb .div { width: 1px; height: 18px; background: var(--rule); margin: 0 6px; }
+  .tb .sp { flex: 1; }
+  .own { font: 11px var(--mono); color: var(--dim); display: inline-flex; align-items: center; gap: 6px; margin-right: 10px; }
+  .own.emit { color: var(--red); font-weight: 600; }
+  .halt { font: 700 12px var(--sans); letter-spacing: .08em; color: #fff; background: #b4143c; border: 0; border-radius: 4px; height: 26px; padding: 0 16px; }
+
+  .ws { display: grid; grid-template-columns: 280px auto minmax(300px, 1fr); gap: 10px; padding: 12px 10px 8px; min-height: 0; min-width: 0; container-type: size; }
+
+  /* ── the panel primitive: a group box ────────────────────────────────── */
+  .p { position: relative; min-width: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 9px 8px; }
+  .p > h3 { position: absolute; top: -7px; left: 8px; margin: 0; padding: 0 5px; background: var(--panel); border-radius: 2px;
+            font: 600 10px/13px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .p > h3 em { font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; margin-left: 6px; }
+  .r { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+  .r + .r, .line + .r, .r + .line, .line + .line { margin-top: 2px; }
+  .l { flex: 0 0 50px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); white-space: nowrap; }
+  .v { font: 12px var(--mono); }
+  .u { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .right { margin-left: auto; }
+  .num { width: 52px; height: 20px; padding: 0 5px; font: 12px var(--mono); text-align: right; color: var(--ink);
+         background: var(--field); border: 1px solid var(--rule2); border-radius: 3px; }
+  .num.w { width: 64px; } .num.n { width: 44px; }
+  .num:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+  .num.draft { color: var(--accent); font-style: italic; }
+  .num.flash { animation: flash .5s; } @keyframes flash { 30% { background: var(--amber-soft); border-color: var(--amber); } }
+  .num:disabled { opacity: .45; }
+  .btn { height: 22px; padding: 0 8px; font: 12px var(--sans); border: 1px solid var(--rule2); border-radius: 3px; background: var(--field); color: var(--ink); white-space: nowrap; }
+  .btn.q { color: var(--dim); } .btn.pri { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .btn.live { border-color: var(--green); color: var(--green); font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--rule2); border-radius: 3px; overflow: hidden; flex: 0 0 auto; }
+  .seg button { height: 20px; padding: 0 8px; font: 12px var(--sans); border: 0; border-left: 1px solid var(--rule2); background: var(--field); color: var(--dim); white-space: nowrap; }
+  .seg button:first-child { border-left: 0; }
+  .seg button.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .seg button.on.rest { background: var(--rule2); color: var(--ink); }
+  .seg.fill { display: flex; flex: 1 1 auto; } .seg.fill button { flex: 1 1 auto; padding: 0 4px; font: 11.5px var(--mono); }
+  input[type=range] { flex: 1 1 auto; min-width: 40px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .ext { font: 10px var(--mono); color: var(--dim); white-space: nowrap; }
+  select.sel { height: 22px; font: 12px var(--sans); background: var(--field); color: var(--ink); border: 1px solid var(--rule2); border-radius: 3px; min-width: 0; flex: 1 1 auto; }
+
+  /* ── left: the dish ──────────────────────────────────────────────────── */
+  .dish { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .pipe { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+  .stage-chip { padding: 1px 8px; border: 1px solid var(--rule2); border-radius: 10px; color: var(--dim); background: transparent; height: 20px; }
+  .stage-chip.on { border-color: var(--accent); color: var(--accent); }
+  .pipe span.a { color: var(--dim); }
+  .embryos { flex: 1 1 auto; min-height: 90px; display: flex; flex-direction: column; }
+  .list { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 -3px; }
+  .row { display: grid; grid-template-columns: 22px 1fr auto auto; align-items: center; gap: 6px; height: 26px; padding: 0 5px; border-radius: 3px; font-size: 12px; }
+  .row + .row { margin-top: 1px; }
+  .row.sel { background: var(--accent-soft); }
+  .row .id { font: 600 11px var(--mono); color: var(--accent); }
+  .row .xy { font: 11px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { font: 10px var(--mono); padding: 0 5px; border-radius: 8px; border: 1px solid var(--rule2); color: var(--dim); }
+  .tag.ok { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+  .tag.no { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
+  .ico { width: 20px; height: 20px; border: 0; border-radius: 3px; background: transparent; color: var(--dim); font-size: 12px; padding: 0; }
+  .ico:hover { background: var(--accent-soft); color: var(--accent); }
+  .note { font-size: 10.5px; color: var(--dim); margin: 3px 0 0; }
+
+  /* ── middle: what the rig sees ───────────────────────────────────────── */
+  .view { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+  .viewbar { display: flex; align-items: center; gap: 8px; height: 28px; }
+  .viewbar .fps { font: 11px var(--mono); color: var(--dim); margin-left: auto; white-space: nowrap; }
+  /* The frame: the height there is, less what sits above and below it. */
+  .img { position: relative; height: calc(100cqh - 28px - 18px - 112px - 3 * 6px); aspect-ratio: 1 / 1; max-width: calc(100cqw - 280px - 300px - 20px);
+         background: var(--img); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .img .blob { position: absolute; border-radius: 50%; background: radial-gradient(circle, #fff 0, #cfe3ff 30%, rgba(180,210,255,.25) 55%, rgba(255,255,255,0) 72%); }
+  .img .b1 { left: 22%; top: 46%; width: 12%; height: 12%; } .img .b2 { left: 66%; top: 44%; width: 8%; height: 8%; opacity: .75; }
+  .img .bf { position: absolute; inset: 0; background: radial-gradient(ellipse at 40% 45%, #8b949e 0, #5d6672 70%, #48505b 100%); display: none; }
+  .img .egg { position: absolute; width: 7%; height: 4.4%; border-radius: 50%; background: #2b3138; box-shadow: 0 0 0 2px rgba(20,24,28,.35); display: none; }
+  .img .mk { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 1.5px solid #60a5fa; border-radius: 50%; display: none; }
+  .img .mk::after { content: attr(data-n); position: absolute; left: 34px; top: 7px; font: 600 11px var(--sans); color: #93c5fd; }
+  .img .mk.pend { border-color: #4ade80; } .img .mk.pend::after { color: #4ade80; }
+  .img.bottom .bf, .img.bottom .egg, .img.bottom .mk { display: block; } .img.bottom .blob { display: none; }
+  .img.multi .b1 { background: radial-gradient(circle, #ff8a8a 0, rgba(255,60,60,.5) 45%, rgba(255,0,0,0) 72%); }
+  .img.multi .b2 { background: radial-gradient(circle, #9dffb0 0, rgba(60,255,90,.5) 45%, rgba(0,255,0,0) 72%); left: 25%; top: 47%; width: 12%; height: 12%; opacity: 1; mix-blend-mode: screen; }
+  .img .zoom { position: absolute; right: 8px; bottom: 6px; font: 11px var(--mono); color: #9fb3c8; }
+  .cap { display: flex; gap: 10px; height: 18px; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+  .cap b { font: 500 11px var(--mono); color: var(--ink); }
+  .cap .rd { margin-left: auto; font: 11px var(--mono); }
+  .disp { height: 112px; display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "m m a" "h h h" "lo . hi"; gap: 4px 8px; align-items: center; }
+  .disp .m { grid-area: m; font-size: 10.5px; color: var(--dim); } .disp .a { grid-area: a; display: flex; gap: 4px; }
+  .disp .h { grid-area: h; position: relative; height: 46px; border-radius: 3px; outline: 1px solid var(--rule);
+             background: linear-gradient(90deg, rgba(0,0,0,.5) 0 9%, transparent 9% 72%, rgba(0,0,0,.5) 72%),
+                         linear-gradient(to top, rgba(255,255,255,.72) 0 var(--hh, 60%), transparent 0), linear-gradient(90deg, #0b0f14, #2b3441); }
+  .disp .h .bars { position: absolute; inset: 0; background:
+             radial-gradient(ellipse 9% 96% at 7% 100%, rgba(255,255,255,.78) 0 60%, transparent 62%),
+             radial-gradient(ellipse 28% 34% at 30% 100%, rgba(255,255,255,.6) 0 60%, transparent 62%),
+             radial-gradient(ellipse 22% 12% at 62% 100%, rgba(255,255,255,.5) 0 60%, transparent 62%),
+             linear-gradient(90deg, #0b0f14, #2b3441); }
+  .disp .h .shade { position: absolute; top: 0; bottom: 0; background: rgba(0,0,0,.5); }
+  .disp .h .tl { position: absolute; left: 9%; bottom: 0; width: 63%; height: 100%;
+             background: linear-gradient(to top right, transparent calc(50% - 1px), #60a5fa calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)); }
+  .disp .h .k { position: absolute; top: -3px; bottom: -6px; width: 2px; margin-left: -1px; background: #60a5fa; }
+  .disp .h .k::after { content: ''; position: absolute; left: -5px; bottom: -1px; width: 12px; height: 8px; border-radius: 2px; background: #60a5fa; }
+  .disp .lo { grid-area: lo; } .disp .hi { grid-area: hi; justify-self: end; }
+  .disp .n { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+
+  /* ── right: the instrument. One column or two; the order never changes ── */
+  .inst { display: flex; flex-wrap: wrap; align-content: flex-start; gap: 12px 10px; min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; padding-top: 8px; margin-top: -8px; }
+  .inst > .col { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+  .line { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+  .sw { width: 10px; height: 10px; border-radius: 50%; background: var(--wl); opacity: .35; flex: 0 0 auto; }
+  .line.routed .sw { opacity: 1; box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); }
+  .line.lit .sw { box-shadow: 0 0 7px 2px var(--wl); }
+  .wl { flex: 0 0 28px; font: 12px var(--mono); color: var(--dim); } .line.routed .wl { color: var(--ink); font-weight: 600; }
+  .stat { margin-top: 6px; height: 22px; display: flex; align-items: center; gap: 7px; padding: 0 8px; border-radius: 3px; font-size: 11.5px; border: 1px dashed var(--rule2); color: var(--dim); }
+  .stat::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; flex: 0 0 auto; }
+  .stat.emit { border: 1px solid var(--red); background: var(--red); color: #fff; font-weight: 700; letter-spacing: .03em; }
+  .stat.emit::before { background: #fff; border-color: #fff; }
+  .stat.warn { border: 1px solid var(--amber); background: var(--amber-soft); color: var(--amber); }
+  .big { font: 500 16px var(--mono); }
+  .track { position: relative; height: 8px; margin: 8px 2px 16px; border-radius: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--amber) 55%, transparent), var(--rule) 22%, var(--rule)); }
+  .track i { position: absolute; top: -4px; width: 3px; height: 16px; margin-left: -1px; border-radius: 1px; background: var(--amber); }
+  .track b { position: absolute; top: 11px; transform: translateX(-50%); font: 9px var(--mono); color: var(--dim); font-weight: 400; }
+  .nudge { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; flex: 1 1 auto; }
+  .nudge .btn { padding: 0; font: 11px var(--mono); }
+  .pad { display: grid; grid-template-columns: repeat(3, 46px); grid-auto-rows: 22px; gap: 3px; }
+  .pad .btn { font: 11px var(--mono); padding: 0; } .pad .e { visibility: hidden; }
+  .steps { display: grid; grid-template-columns: 46px 46px; grid-auto-rows: 22px; gap: 3px; margin-left: 10px; }
+  .steps-cap { grid-column: 1 / -1; font-size: 10.5px; color: var(--dim); align-self: center; }
+  .steps .btn { padding: 0; font: 11px var(--mono); } .steps .btn.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+  .off .l, .off .ext, .off .u { opacity: .5; }
+
+  /* ── a small window: one column, and the page scrolls ────────────────────
+     Below about 1180 px there is no room for three zones side by side. The
+     frame comes first at the width there is, then the instrument (as many
+     columns as fit), then the dish. Nothing is squeezed and nothing hides:
+     the workspace scrolls, and its scrollbar says so. */
+  @media (max-width: 1180px) {
+    .ws { display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; container-type: inline-size; scrollbar-width: thin; }
+    .view { order: 1; flex: 0 0 auto; }
+    .inst { order: 2; flex: 0 0 auto; overflow: visible; }
+    .dish { order: 3; flex: 0 0 auto; }
+    .viewbar { height: auto; flex-wrap: wrap; row-gap: 4px; }
+    .img { height: auto; width: min(100%, calc(100vh - 150px)); max-width: none; }
+    .view > .cap, .view > .disp { width: min(100%, calc(100vh - 150px)); }
+    .embryos { min-height: 150px; }
+    .tb { overflow-x: auto; scrollbar-width: none; }
+  }
+</style>
+</head>
+<body>
+
+  <header class="hdr">
+    <span class="brand">Gently Microscopy</span>
+    <span class="chip">1f114be8</span>
+    <span class="sp"></span>
+    <button class="chip" id="theme" title="Dark for the microscope room; light for the office">◐ theme</button>
+    <span class="avatar">C</span>
+    <span class="chip conn"><span class="dot"></span>Connected ▾</span>
+  </header>
+
+  <nav class="nav" title="The app's navigation, collapsed to icons while the microscope is on screen">
+    <i>Ho</i><i>Op</i><i>Em</i><hr><i>Pr</i><i>Se</i><i>Nb</i><i>Ga</i><hr><i class="on">Dv</i><i>Ca</i><i>Lg</i><i>St</i>
+  </nav>
+
+  <main>
+    <div class="tb">
+      <button class="tab on">Scope</button><button class="tab">Calibration</button><button class="tab">Acquisition</button>
+      <span class="div"></span>
+      <button class="tab">Map</button><button class="tab">Details</button><button class="tab">3D</button><button class="tab">Manual</button>
+      <span class="sp"></span>
+      <span class="own" id="own-view"><span class="dot"></span>SPIM A live · 4.3 fps</span>
+      <span class="own" id="own-light">dark</span>
+      <button class="halt" title="Stop all stage motion now. One HALT, always here, on every Devices view.">HALT</button>
+    </div>
+
+    <div class="ws">
+
+      <!-- ── the dish: what is on it ─────────────────────────────────── -->
+      <aside class="dish">
+        <div class="p">
+          <h3>Find <em>on the bottom camera</em></h3>
+          <div class="pipe"><span class="stage-chip">Blobs</span><span class="a">›</span><button class="stage-chip on" data-toggle>Claude filter</button><span class="a">›</span><button class="stage-chip on" data-toggle>SAM outline</button></div>
+          <div class="r" style="margin-top:4px"><span class="l">Look</span><select class="sel"><option>Dark · LED</option><option>Bright · room light</option></select></div>
+          <div class="r"><span class="l">Sens.</span><select class="sel"><option>Balanced · ≥35 % of the best</option></select></div>
+          <div class="r"><button class="btn pri">Detect</button><label class="u"><input type="checkbox"> new capture</label><span class="u right">1 marked</span></div>
+          <div class="r"><button class="btn">Register 1</button><button class="btn q">Clear marks</button></div>
+        </div>
+
+        <div class="p embryos">
+          <h3>Embryos <em>3</em></h3>
+          <div class="list">
+            <div class="row sel"><span class="id">1</span><span class="xy">−124, −355</span><span class="tag ok" title="Calibrated on A: 12.4 µm/deg">cal A</span><span><button class="ico" title="Centre the stage on this embryo">◎</button><button class="ico" title="Remove">×</button></span></div>
+            <div class="row"><span class="id">2</span><span class="xy">−310, −402</span><span class="tag ok">cal A·B</span><span><button class="ico" title="Centre the stage on this embryo">◎</button><button class="ico">×</button></span></div>
+            <div class="row"><span class="id">3</span><span class="xy">−88, −511</span><span class="tag no" title="Not calibrated — a run will refuse this embryo">uncal</span><span><button class="ico" title="Centre the stage on this embryo">◎</button><button class="ico">×</button></span></div>
+          </div>
+        </div>
+
+        <div class="p">
+          <h3>Fields <em>1</em></h3>
+          <div class="row" style="grid-template-columns:22px 1fr auto"><span class="id">F1</span><span class="xy">−124, −355</span><button class="ico">×</button></div>
+          <div class="r" style="margin-top:4px"><button class="btn q grow">+ Add this view</button></div>
+        </div>
+
+        <div class="p">
+          <h3>Overview frames</h3>
+          <div class="r"><span class="u grow">LED 1 % · camera's exposure<br><span style="color:var(--amber)">no dark and flat yet</span></span><button class="btn q">Set up ▸</button></div>
+        </div>
+      </aside>
+
+      <!-- ── what the rig sees ───────────────────────────────────────── -->
+      <section class="view">
+        <div class="viewbar">
+          <span class="seg" id="src"><button data-src="bottom">Bottom cam</button><button data-src="A" class="on">SPIM A</button><button data-src="B">SPIM B</button><button data-src="multi">Multi</button></span>
+          <button class="btn live" id="live">● Stop view</button>
+          <span class="l" style="flex:none">Exposure</span><input class="num n" id="exp" value="20"><span class="u">ms</span>
+          <span class="fps" id="fps">4.3 fps · 2304²</span>
+        </div>
+        <div class="img" id="img">
+          <div class="bf"></div>
+          <div class="egg" style="left:27%;top:52%"></div><div class="egg" style="left:55%;top:38%;transform:rotate(30deg)"></div><div class="egg" style="left:64%;top:66%;transform:rotate(-20deg)"></div><div class="egg" style="left:40%;top:74%;transform:rotate(60deg)"></div>
+          <div class="mk" data-n="1" style="left:30.5%;top:54.2%"></div><div class="mk" data-n="2" style="left:58.5%;top:40.2%"></div><div class="mk" data-n="3" style="left:67.5%;top:68.2%"></div><div class="mk pend" data-n="+" style="left:43.5%;top:76.2%"></div>
+          <div class="blob b1"></div><div class="blob b2"></div>
+          <span class="zoom">1.0×</span>
+        </div>
+        <div class="cap"><span id="cap">Embryo <b>1</b> · at the stage · side A</span><span class="rd">x <b>1203</b> y <b>988</b> = <b>412</b></span></div>
+        <div class="p disp" style="padding-top:8px">
+          <span class="m"><b style="font:600 10px var(--sans);letter-spacing:.1em;text-transform:uppercase;margin-right:8px">Display</b>counts 83–4527 · log</span>
+          <span class="a"><button class="btn q">Auto</button><button class="btn q">Reset</button></span>
+          <div class="h"><div class="bars"></div><div class="shade" style="left:0;width:9%"></div><div class="shade" style="left:72%;right:0"></div><div class="tl"></div><span class="k" style="left:9%"></span><span class="k" style="left:72%"></span></div>
+          <label class="n lo">black <input class="num" value="120"></label>
+          <label class="n hi">white <input class="num" value="3800"></label>
+        </div>
+      </section>
+
+      <!-- ── the instrument: one panel per subsystem, one place each ──── -->
+      <aside class="inst">
+        <div class="col">
+
+          <div class="p" id="light">
+            <h3>Light <em>read 0 s ago</em></h3>
+            <div class="r pr"><span class="l">LED</span><span class="seg" data-radio id="led"><button class="on rest" data-v="closed">Closed</button><button data-v="open">Open</button></span><input type="range" min="1" max="100" step="1" value="12"><input class="num n" data-dec="0" value="12"><span class="u">%</span></div>
+            <div class="r"><span class="l">Laser</span><span class="seg fill" data-radio id="preset"><button data-lines="" class="on rest">Off</button><button data-lines="405">405</button><button data-lines="488">488</button><button data-lines="561">561</button><button data-lines="637">637</button><button data-lines="488,561">488+561</button><button data-lines="405,488,561,637">All</button></span></div>
+            <div class="line pr" data-wl="405"><span class="sw" style="--wl:#a78bfa"></span><span class="wl">405</span><input type="range" min="0" max="100" step="0.1" value="5"><input class="num n" data-dec="1" value="5.0"><span class="u">%</span><span class="ext" title="The limits this line's power is held to on this rig">0–100</span></div>
+            <div class="line pr" data-wl="488"><span class="sw" style="--wl:#38bdf8"></span><span class="wl">488</span><input type="range" min="2" max="6" step="0.1" value="3.1"><input class="num n" data-dec="1" value="3.1"><span class="u">%</span><span class="ext">2–6</span></div>
+            <div class="line pr" data-wl="561"><span class="sw" style="--wl:#a3e635"></span><span class="wl">561</span><input type="range" min="0" max="100" step="0.1" value="4.9"><input class="num n" data-dec="1" value="4.9"><span class="u">%</span><span class="ext">0–100</span></div>
+            <div class="line pr" data-wl="637"><span class="sw" style="--wl:#f87171"></span><span class="wl">637</span><input type="range" min="0" max="100" step="0.1" value="9.1"><input class="num n" data-dec="1" value="9.1"><span class="u">%</span><span class="ext">0–100</span></div>
+            <div class="r"><span class="l">Beam</span><span class="seg" id="beam"><button data-toggle data-side="A">A off</button><button data-toggle data-side="B">B off</button></span><span class="u">follows the view while armed</span></div>
+            <div class="stat" id="stat">Dark — nothing emits</div>
+          </div>
+
+          <div class="p" id="sheet">
+            <h3>Sheet <em id="sheet-side">side A · scanner AB · piezo P</em></h3>
+            <div class="r pr"><span class="l">Galvo</span><span class="ext">−4</span><input type="range" min="-4" max="4" step="0.01" value="0"><span class="ext">+4</span><input class="num" data-dec="2" value="0.00"><span class="u">°</span></div>
+            <div class="r pr"><span class="l">Piezo</span><span class="ext">−75</span><input type="range" min="-75" max="75" step="0.5" value="0"><span class="ext">+75</span><input class="num" data-dec="1" value="0.0"><span class="u">µm</span></div>
+          </div>
+        </div>
+
+        <div class="col">
+          <div class="p">
+            <h3>Head <em>sample → objective</em></h3>
+            <div class="r"><span class="big">114.6</span><span class="u">µm</span><span class="u right" style="color:var(--amber)">85 µm to floor</span></div>
+            <div class="track" title="Log scale, floor at the left"><i style="left:19%"></i><b style="left:0">30</b><b style="left:18%">100</b><b style="left:52%">1000</b><b style="left:86%">10000</b><b style="left:100%;transform:translateX(-100%)">25000</b></div>
+            <div class="r"><span class="l">Step</span><div class="nudge"><button class="btn">▲ 5</button><button class="btn">▲ 10</button><button class="btn">▲ 50</button><button class="btn">▼ 5</button><button class="btn">▼ 10</button><button class="btn">▼ 50</button></div></div>
+            <div class="r" style="margin-top:6px"><span class="l">Go to</span><input class="num w" value="1000"><span class="u">µm</span><button class="btn pri">Go</button><button class="btn q right" title="Raise the head fully, to its top limit (the load height)">Load · 25000</button></div>
+            <p class="note">fine — at the sample · typed heights stop at 1000 µm; below it, the steps</p>
+          </div>
+
+          <div class="p">
+            <h3>Stage</h3>
+            <div class="r" title="A readout. No typed XY position: the route that moves the stage to an absolute position is not fenced by the XY envelope (docs/workspace/README.md)."><span class="l">XY</span><span class="u">x</span><span class="v">−124</span><span class="u">y</span><span class="v">−355</span><span class="u">µm</span></div>
+            <div class="r" style="align-items:flex-start;margin-top:5px"><span class="l" style="padding-top:4px">Jog</span>
+              <div class="pad"><span class="e"></span><button class="btn">▲ +Y</button><span class="e"></span><button class="btn">◀ −X</button><span class="e"></span><button class="btn">+X ▶</button><span class="e"></span><button class="btn">▼ −Y</button><span class="e"></span></div>
+              <div class="steps" title="Arrow keys jog too; Shift for ten steps"><span class="steps-cap">step, µm</span><button class="btn">10</button><button class="btn">50</button><button class="btn on">200</button><button class="btn">1000</button></div>
+            </div>
+            <div class="r" style="margin-top:6px"><span class="l">Focus</span><input class="num" value="25.6"><span class="u">µm</span><span class="seg right"><button>▼ 10</button><button>▼ 1</button><button>▲ 1</button><button>▲ 10</button></span></div>
+            <div class="r"><span class="l">Centre</span><span class="u grow">SPIM centre offset: not measured</span><button class="btn q">Set here</button></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <aside class="agent" title="The agent, as it is today: opens over the workspace">✦</aside>
+
+  <footer class="sb">
+    <span><b>3</b> embryos · <b>0</b> images · <b>12</b> events</span>
+    <span>No run</span>
+    <span>water <b>20.0°</b> ▸</span>
+    <span id="msg">SPIM head at 1000 µm · 2 s ago</span>
+    <span class="sp"></span>
+    <span class="mock">Mockup v2 — the controls move, nothing reaches the microscope</span>
+  </footer>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const say = t => { $('#msg').textContent = t; };
+
+  // A slider and its number are one control: drag or type. A typed value is a
+  // draft (blue, italic) until Enter or leaving the box; out of range is pulled
+  // inside with a flash; ↑ ↓ step, Shift for ten steps; Esc puts it back.
+  $$('.pr').forEach(row => {
+    const s = $('input[type=range]', row), n = $('input.num', row); if (!s || !n) return;
+    const dec = +n.dataset.dec || 0, clamp = v => Math.min(+s.max, Math.max(+s.min, v));
+    const show = () => { n.value = (+s.value).toFixed(dec); n.classList.remove('draft'); derive(); };
+    s.addEventListener('input', () => { n.value = (+s.value).toFixed(dec); n.classList.add('draft'); derive(); });
+    s.addEventListener('change', show);
+    const commit = () => { const v = parseFloat(String(n.value).replace('−', '-')); if (!Number.isFinite(v)) return show();
+      if (clamp(v) !== v) { n.classList.remove('flash'); void n.offsetWidth; n.classList.add('flash'); }
+      s.value = clamp(v); show(); };
+    n.addEventListener('input', () => n.classList.add('draft'));
+    n.addEventListener('blur', commit);
+    n.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { commit(); n.select(); }
+      else if (e.key === 'Escape') { show(); n.blur(); }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault();
+        s.value = clamp(+s.value + (+s.step || 1) * (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1)); show(); }
+    });
+  });
+
+  // Segments: one of, or each its own switch.
+  $$('.seg[data-radio], #src').forEach(g => g.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $$('button', g).forEach(x => x.classList.toggle('on', x === b)); g.dispatchEvent(new Event('pick')); }));
+  // (Closed and Off keep their resting look when chosen: the class is on the button.)
+  $$('[data-toggle]').forEach(b => b.addEventListener('click', () => { b.classList.toggle('on'); derive(); }));
+  $$('.steps').forEach(g => g.addEventListener('click', e => { const b = e.target.closest('button'); if (b) $$('button', g).forEach(x => x.classList.toggle('on', x === b)); }));
+
+  // Light: routing is a preset; each line's power can be set before it is routed.
+  // "Emitting" is derived — a beam armed AND a line routed AND its power above 0.
+  $('#preset').addEventListener('pick', () => {
+    const lines = ($('#preset .on').dataset.lines || '').split(',').filter(Boolean);
+    $$('#light .line').forEach(l => l.classList.toggle('routed', lines.includes(l.dataset.wl)));
+    if (lines.length) $$('#led button').forEach(b => b.classList.toggle('on', b.dataset.v === 'closed'));   // one source at a time
+    derive();
+  });
+  $('#led').addEventListener('pick', () => { if ($('#led .on').dataset.v === 'open') $('#preset button').click(); derive(); });
+
+  function derive() {
+    const side = b => b.dataset.side, beams = $$('#beam button');
+    beams.forEach(b => { b.textContent = `${side(b)} ${b.classList.contains('on') ? 'on' : 'off'}`; });
+    const armed = beams.filter(b => b.classList.contains('on')).map(side);
+    const lit = $$('#light .line').filter(l => l.classList.contains('routed') && +$('input[type=range]', l).value > 0);
+    $$('#light .line').forEach(l => l.classList.toggle('lit', armed.length > 0 && lit.includes(l)));
+    const routed = $$('#light .line.routed').length, ledOpen = $('#led .on').dataset.v === 'open';
+    const stat = $('#stat'), own = $('#own-light');
+    let cls = '', txt = 'Dark — nothing emits';
+    if (armed.length && lit.length) { cls = 'emit'; txt = `EMITTING · ${lit.map(l => l.dataset.wl).join(' + ')} nm · side ${armed.join(' + ')}`; }
+    else if (routed && !armed.length) { cls = 'warn'; txt = 'Lines routed, beam off — will not emit'; }
+    else if (armed.length && !routed) { cls = 'warn'; txt = 'Beam armed, nothing routed — nothing emits'; }
+    else if (ledOpen) { txt = `LED open at ${$('#light .pr .num').value} %`; }
+    stat.className = 'stat ' + cls; stat.textContent = txt;
+    own.className = 'own ' + (cls === 'emit' ? 'emit' : ''); own.textContent = cls === 'emit' ? `● LASER ${lit.map(l => l.dataset.wl).join('+')}` : ledOpen ? 'LED open' : 'dark';
+  }
+
+  // The source strip chooses the camera the frame shows. The sheet's lines belong
+  // to the side on screen; an armed beam follows the view.
+  $('#src').addEventListener('pick', () => {
+    const v = $('#src .on').dataset.src, img = $('#img'), sheet = $('#sheet');
+    img.className = 'img ' + (v === 'bottom' ? 'bottom' : v === 'multi' ? 'multi' : '');
+    $('#cap').innerHTML = v === 'bottom' ? 'Click to mark · click a marker to remove · click an embryo to centre on it'
+      : v === 'multi' ? 'Embryo <b>1</b> · both sides, one exposure: A red, B green' : `Embryo <b>1</b> · at the stage · side ${v}`;
+    $('#live').textContent = v === 'bottom' ? '● Stop camera' : '● Stop view';
+    $('#exp').value = v === 'bottom' ? '11.2' : '20';
+    $('#fps').textContent = v === 'bottom' ? '4.0 fps · 2048²' : v === 'multi' ? '2.4 fps · 2 × 2304²' : '4.3 fps · 2304²';
+    $('#own-view').lastChild.textContent = (v === 'bottom' ? 'Bottom cam' : v === 'multi' ? 'Multi' : 'SPIM ' + v) + ' live';
+    const off = v === 'bottom' || v === 'multi';
+    sheet.classList.toggle('off', off); $$('input', sheet).forEach(i => { i.disabled = off; });
+    $('#sheet-side').textContent = v === 'B' ? 'side B · scanner CD · piezo Q' : v === 'A' ? 'side A · scanner AB · piezo P'
+      : v === 'multi' ? 'pick A or B to move a sheet' : 'belongs to the SPIM view';
+    if (v === 'A' || v === 'B') { const beams = $$('#beam button'); if (beams.some(b => b.classList.contains('on'))) beams.forEach(b => b.classList.toggle('on', b.dataset.side === v)); }
+    derive();
+  });
+
+  $('#theme').addEventListener('click', () => { const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'; });
+  $$('.btn, .ico').forEach(b => b.addEventListener('click', () => { if (b.title || b.textContent.trim()) say(`${(b.title || b.textContent).trim()} · just now (mockup)`); }));
+  derive();
+})();
+</script>
+</body>
+</html>

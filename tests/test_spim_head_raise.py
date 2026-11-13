@@ -61,6 +61,7 @@ def _dl(**devices) -> DeviceLayerServer:
     dl.devices = dict(devices)
     dl._state_pause_counter = 0
     dl._state_latest = {}
+    dl._state_subscribers = []
     return dl
 
 
@@ -145,11 +146,18 @@ def test_the_client_posts_to_the_device_layers_raise():
 # ── the pane ─────────────────────────────────────────────────────────────
 
 
-def test_the_button_sits_beside_halt_on_the_spim_head_gauge():
-    raise_at = HTML.index('id="op-fd-raise"')
-    halt_at = HTML.index('id="op-halt"')
-    assert 0 < halt_at - raise_at < 600, "Raise head is not beside HALT"
-    assert "25000" in HTML[raise_at - 200 : raise_at + 200]
+def test_the_button_is_on_the_head_panel_and_halt_is_on_every_view():
+    """Raise head sat beside HALT inside the SPIM head's gauge, "where the
+    hand goes when the head must get out of the way". The gauge is the Head
+    panel now, on screen with either camera, and Raise head is on it. HALT is
+    in the Devices toolbar, once, on every view of the tab: a stop that is
+    only on one pane is not there when the hand reaches for it from another."""
+    head = HTML[HTML.index('id="op-gauge-fd"') : HTML.index('id="op-stage-panel"')]
+    raise_at = head.index('id="op-fd-raise"')
+    assert "25000" in head[raise_at - 200 : raise_at + 200]
+    bar = HTML[HTML.index('class="devices-header-bar"') : HTML.index('id="devices-view-operate"')]
+    assert 'id="op-halt"' in bar, "HALT is not in the toolbar"
+    assert HTML.count('id="op-halt"') == 1
 
 
 def test_the_button_is_wired_in_wire_and_says_it_is_travelling():
@@ -158,5 +166,4 @@ def test_the_button_is_wired_in_wire_and_says_it_is_travelling():
     fn = OPERATE[OPERATE.index("async function raiseHead()") :][:900]
     assert "postJSON('/api/devices/spim/fdrive/raise', {})" in fn
     assert "b.textContent = 'Raising…'" in fn
-    assert "setHeadLowered(false)" in fn, "a raised head is not a lowered one"
     assert "fd.refresh()" in fn

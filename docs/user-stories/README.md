@@ -54,7 +54,7 @@ fan-out user-story audit + live browser walkthroughs).
 | 11 Memory/campaigns | learnings · active mind · campaigns |
 | 12 Notebook | read · ask |
 | 13 Agent chat | chat/delegate · answer ask · steer/interrupt |
-| 14 Config/session/mesh | settings · sessions · mesh · auth/control |
+| 14 Config/session | settings · sessions · auth/control |
 
 *Individual story files are being generated from the audit; the verified exemplar
 is [`US-06-new-plan-from-workspace.md`](US-06-new-plan-from-workspace.md).*

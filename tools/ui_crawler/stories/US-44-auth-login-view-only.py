@@ -7,7 +7,7 @@ from _harness import count_text, exists, goto
 META = {
     "id": "US-44",
     "title": "Auth: log in / gain control / view-only",
-    "cluster": "14 Config, session & mesh",
+    "cluster": "14 Config & session",
     "mode": "headless",
     "needs_account": True,
 }

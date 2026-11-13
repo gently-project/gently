@@ -6,7 +6,6 @@ Provides:
 - Local single-GPU trainer (subprocess-based)
 - Dataset loading from FileStore
 - Evaluation metrics and reporting
-- Federated averaging for distributed training
 """
 
 from .architectures import ARCHITECTURE_REGISTRY, get_suitable_architectures

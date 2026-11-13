@@ -184,7 +184,7 @@ Three processes; the agent is the hub:
 - **Device layer** (`start_device_layer.py`) — separate **manual** launch, HTTP :60610 (MMCore/Bluesky/SAM). The agent connects to it; does not spawn it. **Isolation is a safety feature — keep it.**
 - **Node TUI** — auto-spawned subprocess, connects back to `:8080/ws/agent`. (Retiring under web-only.)
 
-Ports (all in `settings.py`, env-overridable): viz **8080** (`viz_host` defaults to `0.0.0.0`), device **60610**, mesh UDP **19547**, transfer 19548.
+Ports (all in `settings.py`, env-overridable): viz **8080** (`viz_host` defaults to `localhost`; set `GENTLY_VIZ_HOST=0.0.0.0` to serve the network), device **60610**, mesh UDP **19547**, transfer 19548.
 
 ### Startup feedback fixes (keep 2 processes)
 - **Fix V5** (silent device-down) → loud message + persistent banner: *"Microscope offline — start it with `python start_device_layer.py`. I can plan/review but can't image."*

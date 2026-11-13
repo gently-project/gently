@@ -8,8 +8,8 @@ took **eight** unrelated handlers with it:
 
     op-spim-toggle    start/stop the light-sheet view
     op-calibrate      run the calibration
-    [data-gv]         galvo nudges
-    [data-pz]         piezo nudges
+    [data-gv]         galvo nudges (since then the galvo line, op-gv-in)
+    [data-pz]         piezo nudges (since then the piezo line, op-pz-in)
     [data-backoff]    the interlock banner's "Back off 100 µm"
     op-modes          the run-mode chooser
     op-tl-stop        the stop-condition select
@@ -40,8 +40,18 @@ INDEX = WEB / "templates" / "index.html"
 CONTROLS = {
     "op-spim-toggle": "$('op-spim-toggle')",
     "op-halt": "$('op-halt')",
+    "op-fd-to": "$('op-fd-to')",
     "op-calibrate": "$('op-calibrate')",
-    "op-modes": "$('op-modes')",
+    # A test volume, the agent, the Saved list, the pictures and the two
+    # states: Acquisition's controls that are not the form's.
+    "op-test-one": "$('op-test-one')",
+    "op-run-agent": "$('op-run-agent')",
+    "op-plan-load": "$('op-plan-load')",
+    "op-tiles": "$('op-tiles')",
+    "op-tiles-kind": "$('op-tiles-kind')",
+    "op-acq-monitor": "$('op-acq-monitor')",
+    "op-acq-new": "$('op-acq-new')",
+    "op-acq-show-run": "$('op-acq-show-run')",
     "op-tl-stop": "$('op-tl-stop')",
     "op-lib-list": "$('op-lib-list')",
     "op-run-start": "$('op-run-start')",
@@ -52,11 +62,17 @@ CONTROLS = {
     "op-clear": "$('op-clear')",
     "op-cam-toggle": "$('op-cam-toggle')",
     "op-target-scope": "$('op-target-scope')",
-    "[data-gv]": "[data-gv]",
-    "[data-pz]": "[data-pz]",
-    "[data-backoff]": "[data-backoff]",
-    "[data-mode]": "[data-mode]",
+    "op-gv-in": "$('op-gv-in')",
+    "op-pz-in": "$('op-pz-in')",
+    # The same two numbers, typed (panels/numrow.js binds each to its line).
+    "op-gv": "$('op-gv')",
+    "op-pz": "$('op-pz')",
+    # The head, to a typed height.
+    "op-fd-go": "$('op-fd-go')",
+    "op-fd-goto": "$('op-fd-goto')",
     "[data-lib]": "[data-lib]",
+    # Which camera is on screen: the strip above the frame.
+    "[data-source]": "#op-source [data-source]",
 }
 
 
@@ -89,18 +105,21 @@ def test_every_control_is_wired_in_wire() -> None:
 
 
 def test_the_safety_control_is_wired() -> None:
-    """`[data-backoff]` retracts the objective from the sample.
+    """`op-halt` stops all stage motion.
 
-    Called out separately because it was among the eight, and because a dead
-    button on an interlock banner is the worst case: it is pressed exactly when
-    something is already wrong.
+    Called out separately because a dead safety button is the worst case: it
+    is pressed exactly when something is already wrong. It used to be the
+    interlock banner's Back off; that banner and the XY lock behind it were
+    removed on 2026-11-08 at the operator's request, and HALT is the one left.
     """
     src = OPERATE.read_text(encoding="utf-8")
-    hook = re.search(r"\[data-backoff\][^;]*addEventListener\('click',\s*(\w+)", src, re.S)
-    assert hook, "[data-backoff] is not bound to a click handler"
+    hook = re.search(
+        r"\$\('op-halt'\)[^;]*;\s*if \(halt\) halt\.addEventListener\('click',\s*(\w+)", src
+    )
+    assert hook, "op-halt is not bound to a click handler"
     handler = hook.group(1)
     assert f"function {handler}" in src or f"async function {handler}" in src, (
-        f"[data-backoff] is bound to {handler!r}, which is not defined"
+        f"op-halt is bound to {handler!r}, which is not defined"
     )
 
 
@@ -121,3 +140,37 @@ def test_the_controls_the_markup_offers_are_the_ones_js_knows() -> None:
         assert f"$('{i}')" in body, (
             f"{i} exists in the markup but wire() never binds it — it will render and do nothing"
         )
+
+
+def test_the_view_takes_its_side_from_the_device_layer() -> None:
+    """The device layer outlives the page and keeps the live side. A pane that
+    assumed A dropped every frame of a stream on B as the other side's and sat
+    blank; so the pane asks before its first frame, on entering, and when the
+    stream disagrees with it."""
+    src = OPERATE.read_text(encoding="utf-8")
+    assert "if (!_spimOn) await adoptLsParams();" in src, "view start does not adopt the side"
+    assert "onEnter() { adoptLsParams(); }" in src, "entering the pane does not adopt the side"
+    assert "getJSON('/api/devices/lightsheet/live/params')" in src, "no read of the live params"
+    assert "if (Date.now() - _sideChangedAt > SIDE_SWITCH_MS) adoptLsParams();" in src, (
+        "a stream on another side is dropped for good instead of followed"
+    )
+
+
+def test_a_side_pressed_outranks_a_read_that_was_already_in_flight() -> None:
+    """The read of the device layer's side takes a moment. A side pressed in
+    that moment is newer than the answer on its way; without asking again
+    after the wait, the answer put the strip back on the side just left. The
+    strip made this easy to hit: it enters the surface and chooses the side
+    in one press."""
+    src = OPERATE.read_text(encoding="utf-8")
+    fn = src[src.index("    function adoptLsParams() {") :]
+    fn = fn[: fn.index("\n    }")]
+    guard = "if (Date.now() - _sideChangedAt < SIDE_SWITCH_MS) return;"
+    assert fn.count(guard) == 2, "the switch window is not asked about again after the read"
+    first = fn.index(guard)
+    read = fn.index("await getJSON('/api/devices/lightsheet/live/params')")
+    assert first < read < fn.index(guard, first + 1)
+    # And the strip tells the device layer before it enters the surface.
+    choose = src[src.index("    function chooseSource(src) {") :]
+    choose = choose[: choose.index("\n    }")]
+    assert choose.index("setSpimSide(src)") < choose.index("showPane('spim')")

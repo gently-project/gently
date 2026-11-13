@@ -1,8 +1,7 @@
 """
-DataAssessmentEngine — Cross-network data inventory.
+DataAssessmentEngine — Local data inventory.
 
 Local data: direct GentlyStore SQL queries (fast, full detail).
-Remote data: PeerClient → data catalog API (metadata only).
 Aggregates into NetworkDataInventory.
 """
 
@@ -14,22 +13,16 @@ logger = logging.getLogger(__name__)
 
 
 class DataAssessmentEngine:
-    """Builds a unified inventory of datasets across the mesh.
+    """Builds an inventory of local datasets.
 
     Parameters
     ----------
     gently_store : optional
         Local GentlyStore for direct SQL queries.
-    peer_client : optional
-        PeerClient for querying remote peers.
-    verse_map : optional
-        VerseMap for finding online peers with data.
     """
 
-    def __init__(self, gently_store=None, peer_client=None, verse_map=None):
+    def __init__(self, gently_store=None):
         self._store = gently_store
-        self._peer_client = peer_client
-        self._verse_map = verse_map
 
     def inventory_local(self) -> list:
         """Inventory datasets from the local GentlyStore."""
@@ -82,72 +75,15 @@ class DataAssessmentEngine:
 
         return sessions
 
-    async def inventory_remote(self) -> tuple:
-        """Inventory datasets from remote peers via data catalog API.
-
-        Returns (sessions_list, peers_queried, peers_failed).
-        """
-        if self._peer_client is None or self._verse_map is None:
-            return [], 0, 0
-
-        sessions = []
-        peers_queried = 0
-        peers_failed = 0
-
-        for peer_entry in self._verse_map.get_online_peers():
-            peers_queried += 1
-            try:
-                # Build a PeerInfo-like object for PeerClient
-                from ..mesh.models import PeerInfo
-
-                peer = PeerInfo(
-                    instance_id=peer_entry.instance_id,
-                    hostname=peer_entry.hostname,
-                    ip_address=peer_entry.ip_address,
-                    viz_port=peer_entry.viz_port,
-                    is_trusted=peer_entry.is_trusted,
-                    tls_enabled=peer_entry.tls_enabled,
-                )
-                peer_sessions = await self._peer_client.fetch_peer_sessions(peer)
-                if peer_sessions is None:
-                    peers_failed += 1
-                    continue
-                for s in peer_sessions:
-                    sessions.append(
-                        SessionSummary(
-                            session_id=s.get("session_id", ""),
-                            session_name=s.get("name", ""),
-                            source_peer=peer_entry.instance_id,
-                            embryo_count=s.get("embryo_count", 0),
-                            volume_count=s.get("volume_count", 0),
-                            is_remote=True,
-                        )
-                    )
-            except Exception as e:
-                logger.debug(f"Remote inventory failed for {peer_entry.hostname}: {e}")
-                peers_failed += 1
-
-        return sessions, peers_queried, peers_failed
-
-    async def build_inventory(self, include_remote: bool = True) -> NetworkDataInventory:
-        """Build a complete network-wide data inventory."""
+    async def build_inventory(self) -> NetworkDataInventory:
+        """Build a complete data inventory from the local store."""
         local = self.inventory_local()
 
-        remote = []
-        peers_queried = 0
-        peers_failed = 0
-        if include_remote:
-            remote, peers_queried, peers_failed = await self.inventory_remote()
-
-        all_sessions = local + remote
         inventory = NetworkDataInventory(
             local_sessions=local,
-            remote_sessions=remote,
-            total_embryos=sum(s.embryo_count for s in all_sessions),
-            total_volumes=sum(s.volume_count for s in all_sessions),
-            total_annotated=sum(s.annotated_embryos for s in all_sessions),
-            total_ground_truth=sum(s.ground_truth_count for s in all_sessions),
-            peers_queried=peers_queried,
-            peers_failed=peers_failed,
+            total_embryos=sum(s.embryo_count for s in local),
+            total_volumes=sum(s.volume_count for s in local),
+            total_annotated=sum(s.annotated_embryos for s in local),
+            total_ground_truth=sum(s.ground_truth_count for s in local),
         )
         return inventory

@@ -276,6 +276,14 @@ def _registry_category_label(category_id: str) -> str:
     return next((c["label"] for c in CATEGORIES if c["id"] == category_id), category_id)
 
 
+# An absolute SPIM-head height asked for from the page stops here. Below it
+# the head is brought down by the steps, each checked against the floor while
+# the operator watches the picture: the rig images about 85 µm above the
+# F-drive's floor, so a typed 100 for 1000 would put the objectives on the
+# sample in one move. The page reads this with the F-drive (`goto_min`).
+FDRIVE_GOTO_MIN_UM = 1000.0
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -353,6 +361,8 @@ def create_router(server) -> APIRouter:
         from gently.calibration import METHODS
 
         args: dict = {}
+        if payload.get("side") in ("A", "B"):
+            args["side"] = payload["side"]
         if payload.get("method") is not None:
             if payload["method"] not in METHODS:
                 raise HTTPException(status_code=400, detail=f"method must be one of {METHODS}")
@@ -1063,7 +1073,6 @@ def create_router(server) -> APIRouter:
                 "viz_port": S.network.viz_port,
                 "device_host": S.network.device_host,
                 "device_port": S.network.device_port,
-                "mesh_port": S.network.mesh_port,
             },
             "models": {
                 "main": S.models.main,
@@ -1083,16 +1092,6 @@ def create_router(server) -> APIRouter:
                 "default_epochs": S.ml.default_epochs,
                 "default_lr": S.ml.default_lr,
                 "model_cache_dir": str(S.ml.model_cache_dir),
-            },
-            "transfer": {
-                "transfer_port": S.transfer.transfer_port,
-                "chunk_size": S.transfer.chunk_size,
-                "max_concurrent_transfers": S.transfer.max_concurrent_transfers,
-            },
-            "mesh": {
-                "broadcast_interval_s": S.mesh.broadcast_interval_s,
-                "stale_threshold_s": S.mesh.stale_threshold_s,
-                "dead_threshold_s": S.mesh.dead_threshold_s,
             },
             "ui": {"ux_v2": S.ui.ux_v2},
             "api": {"ncbi_tool": S.api.ncbi_tool},
@@ -1410,6 +1409,34 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
         return res
 
+    @router.get("/api/devices/lightsheet/live/params")
+    async def lightsheet_live_params_get():
+        """The live sheet's side, galvo, piezo and exposure as the device layer
+        holds them. Read-only: an empty params post is how the device layer
+        answers with what it has, unchanged. It keeps them across an app
+        restart or a page reload, which is when the pane has to ask rather
+        than assume."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_lightsheet_live_params()
+        except Exception as exc:
+            logger.exception("lightsheet live params read failed")
+            raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
+
+    @router.get("/api/devices/lightsheet/live/range")
+    async def lightsheet_live_range(side: str = "A"):
+        """The galvo and piezo extents of a side, from the controller. Read-only."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_lightsheet_live_range(side)
+        except Exception as exc:
+            logger.exception("lightsheet range read failed")
+            raise HTTPException(status_code=502, detail=f"range failed: {exc}") from exc
+
     # ------------------------------------------------------------------
     # LED / laser / camera
     # ------------------------------------------------------------------
@@ -1713,17 +1740,20 @@ def create_router(server) -> APIRouter:
             logger.exception("Stage move command failed")
             raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
 
-    # The pane calls the sample "at the objective" when the F-drive is within
-    # this of its floor (operate-math.js ENGAGED_WITHIN_UM); an XY move then
-    # drags the sample across the head. The jog refuses under the same rule.
-    ENGAGED_WITHIN_UM = 1000.0
+    # The jog used to refuse (409, "XY is locked") while the F-drive was
+    # within 1000 µm of its floor. That was the page's XY lock, which the
+    # operator had taken out on 2026-11-08: the rig images at about 85 µm to
+    # floor, so the lock was engaged for the whole of a run. This copy of it
+    # was missed then and went on 2026-11-13, when the pad came to sit beside
+    # the light-sheet view, where every press at imaging height hit it.
+    # Nothing interlocks XY against the F-drive, here or on the move route
+    # above; what is kept is the XY envelope, below.
 
     @router.post("/api/devices/stage/jog", dependencies=[Depends(require_control)])
     async def stage_jog(payload: dict = Body(...)):  # noqa: B008
-        """Move the stage by {"dx", "dy"} µm from where it is — the bottom
-        camera's pad. Refuses while the sample is at the objective (409),
-        and keeps the target inside the XY envelope when one is enforced
-        (said back as ``clamped``). Returns where the stage went."""
+        """Move the stage by {"dx", "dy"} µm from where it is — the Stage
+        panel's pad. Keeps the target inside the XY envelope when one is
+        enforced (said back as ``clamped``). Returns where the stage went."""
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
@@ -1736,17 +1766,6 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=400, detail="a jog is at most 20 mm")
         if dx == 0 and dy == 0:
             raise HTTPException(status_code=400, detail="nothing to move by")
-        try:
-            fd = await client.get_fdrive()
-        except Exception:
-            fd = None
-        floor = (fd or {}).get("distance_to_floor") if isinstance(fd, dict) else None
-        if isinstance(floor, (int, float)) and floor < ENGAGED_WITHIN_UM:
-            raise HTTPException(
-                status_code=409,
-                detail=f"the sample is at the objective ({floor:.0f} µm to floor): XY is locked. "
-                "Back the head off first.",
-            )
         try:
             x0, y0 = await client.get_stage_position()
         except Exception as exc:
@@ -2591,6 +2610,21 @@ def create_router(server) -> APIRouter:
             logger.exception("bottom_z nudge failed")
             raise HTTPException(status_code=502, detail=f"bottom_z nudge failed: {exc}") from exc
 
+    @router.get("/api/devices/state")
+    async def device_state(refresh: bool = False):
+        """Positions and properties of every device, as the device layer holds
+        them. The properties are not polled: ``?refresh=1`` has every one read
+        now (a couple of seconds on the Tiger) and the device layer broadcasts
+        the result, so the Details table on every screen follows. Read-only."""
+        client = _resolve_client()
+        if client is None or not client.is_connected:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_device_state(refresh=refresh)
+        except Exception as exc:
+            logger.debug("device state read failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"device state failed: {exc}") from exc
+
     @router.get("/api/devices/spim/fdrive")
     async def get_fdrive():
         """SPIM-head F-drive position + limits + distance-to-floor (read-only)."""
@@ -2598,10 +2632,15 @@ def create_router(server) -> APIRouter:
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
-            return await client.get_fdrive()
+            state = await client.get_fdrive()
         except Exception as exc:
             logger.debug("fdrive read failed: %s", exc)
             raise HTTPException(status_code=502, detail=f"fdrive read failed: {exc}") from exc
+        # The floor for a typed height travels with the read, so the page
+        # shows the server's number and keeps none of its own.
+        if isinstance(state, dict):
+            state = {**state, "goto_min": FDRIVE_GOTO_MIN_UM}
+        return state
 
     @router.get("/api/devices/stage/envelope")
     async def stage_envelope_get():
@@ -2832,6 +2871,32 @@ def create_router(server) -> APIRouter:
         except Exception as exc:
             logger.exception("fdrive raise failed")
             raise HTTPException(status_code=502, detail=f"fdrive raise failed: {exc}") from exc
+
+    @router.post("/api/devices/spim/fdrive/goto", dependencies=[Depends(require_control)])
+    async def goto_fdrive(payload: dict = Body(...)):  # noqa: B008
+        """The SPIM head to an absolute height {position} µm: 1000 µm by its
+        button (the clean stop on the way down from the load height), or a
+        height typed into the Head panel. Fenced by the device layer to the
+        F-drive's own limits, and here to FDRIVE_GOTO_MIN_UM from below."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        position = _num(payload.get("position"))
+        if position is None:
+            raise HTTPException(status_code=400, detail="position required")
+        if position < FDRIVE_GOTO_MIN_UM:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"a typed height stops at {FDRIVE_GOTO_MIN_UM:.0f} µm; "
+                    "below that, bring the head down with the steps"
+                ),
+            )
+        try:
+            return await client.goto_fdrive(position)
+        except Exception as exc:
+            logger.exception("fdrive goto failed")
+            raise HTTPException(status_code=502, detail=f"fdrive goto failed: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Acquisition
@@ -3158,6 +3223,10 @@ def create_router(server) -> APIRouter:
             # volume routes its own lines, so without this the preset chosen
             # on the pane lasted until the first volume.
             start_kwargs["laser_config"] = str(preset)
+        # Which imaging paths a round takes; absent is a run on A, as ever.
+        sides = payload.get("sides")
+        if isinstance(sides, list) and sides and volumes:
+            start_kwargs["sides"] = [str(x) for x in sides]
         try:
             result = await orchestrator.start(**start_kwargs)
         except Exception as exc:
@@ -3183,6 +3252,7 @@ def create_router(server) -> APIRouter:
                     "laser_powers": {str(wl): pct for wl, pct in laser_powers.items()} or None,
                     "bf": bf_cfg,
                     "volumes": volumes,
+                    "sides": start_kwargs.get("sides") or ["A"],
                     "stop_conditions": stop_overrides or None,
                     "embryo_ids": list(embryo_ids or []),
                     # "What to run": the pane's set and mode, so a resumed
@@ -3456,6 +3526,40 @@ def create_router(server) -> APIRouter:
             logger.debug("timelapse plan read failed", exc_info=True)
             plan, source = None, None
         return {"plan": plan, "source": source, "session_id": sid}
+
+    @router.get("/api/devices/timelapse/room")
+    async def timelapse_room():
+        """What the disk a run writes to has free.
+
+        For the line the pane says before Start: what the run will write
+        against the room there is for it. The default plan for three embryos
+        is about 576 GB a night, and nothing on the page said so.
+        {free_bytes, total_bytes, path}, each null when the storage root
+        cannot be read. Never errors: an unread disk is a line left out, not
+        a page that will not draw."""
+        import os
+        import shutil
+
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        store = getattr(agent, "store", None) if agent else None
+        where = getattr(store, "root", None)
+        if not isinstance(where, (str, os.PathLike)):
+            # No session is live yet: the server's own store is the same disk.
+            where = getattr(getattr(server, "gently_store", None), "root", None)
+        usage = None
+        if isinstance(where, (str, os.PathLike)):
+            try:
+                usage = shutil.disk_usage(os.fspath(where))
+            except Exception:
+                logger.debug("disk usage read failed", exc_info=True)
+        if usage is None:
+            return {"free_bytes": None, "total_bytes": None, "path": None}
+        return {
+            "free_bytes": int(usage.free),
+            "total_bytes": int(usage.total),
+            "path": os.fspath(where),
+        }
 
     @router.get("/api/devices/timelapse/status")
     async def timelapse_status():

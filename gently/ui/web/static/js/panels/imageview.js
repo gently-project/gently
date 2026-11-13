@@ -132,7 +132,7 @@ const ImageView = (() => {
         // the image is the instrument, and an overlay both hides data and eats
         // clicks meant for markers.
         const host = opts && opts.controlsHost && document.getElementById(opts.controlsHost);
-        if (host) buildPanel(v, containerId, host);
+        if (host) buildPanel(v, containerId, host, opts);
         apply(v);
     }
 
@@ -165,29 +165,34 @@ const ImageView = (() => {
      * raw camera counts, and it is labelled as such — the honest fix for that
      * is #149, and this panel is what will make the case visible.
      */
-    function buildPanel(v, containerId, host) {
+    function buildPanel(v, containerId, host, opts) {
         ensureFilter(v);
 
         // One row, not three. The display range is set once and then watched;
         // as a stacked panel (heading, 60px histogram, its own button row) it
         // took ~132px directly under the camera — more area than the image it
         // describes, on the page whose subject is that image.
+        // One DOM, two shapes (operate.css, .iv-panel): a strip under the bottom
+        // camera, stacked at the frame's width under the light-sheet view.
         host.innerHTML = `
-          <div class="lp lp-compact">
-            <div class="iv-row">
-              <span class="lp-title">Display</span>
+          <div class="lp lp-compact iv-panel${opts && opts.display === 'stacked' ? ' iv-stacked' : ''}">
+            <span class="lp-title">Display</span>
+            <span class="iv-meta">
               <span class="iv-src" data-src title="Histogram of the displayed 8-bit frame, which the device layer has already percentile-stretched. Not raw camera counts (#149).">as displayed</span>
-              <div class="iv-hist" data-hist>
-                <canvas class="iv-hist-c" data-hist-c width="512" height="96"></canvas>
-                <div class="iv-h iv-h-lo" data-h="lo" role="slider" tabindex="0"
-                     aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
-                <div class="iv-h iv-h-hi" data-h="hi" role="slider" tabindex="0"
-                     aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
-              </div>
-              <div class="iv-acts">
-                <button type="button" class="lp-btn" data-auto>Auto</button>
-                <button type="button" class="lp-btn" data-reset>Reset</button>
-              </div>
+              <span class="iv-src" title="Bar heights are log counts: background dominates a microscopy histogram, and on a linear scale the signal is a flat line at zero.">· log</span>
+            </span>
+            <label class="iv-num iv-num-lo"><span>black</span><input type="number" step="1" data-num="lo" aria-label="Black point value"></label>
+            <div class="iv-hist" data-hist>
+              <canvas class="iv-hist-c" data-hist-c width="512" height="96"></canvas>
+              <div class="iv-h iv-h-lo" data-h="lo" role="slider" tabindex="0"
+                   aria-label="Black point" aria-valuemin="0" aria-valuemax="100"></div>
+              <div class="iv-h iv-h-hi" data-h="hi" role="slider" tabindex="0"
+                   aria-label="White point" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <label class="iv-num iv-num-hi"><span>white</span><input type="number" step="1" data-num="hi" aria-label="White point value"></label>
+            <div class="iv-acts">
+              <button type="button" class="lp-btn" data-auto title="Black and white from the data itself: the 0.1st and 99.9th percentiles, so a few hot pixels do not set white. Pressed again, a tighter cut.">Auto</button>
+              <button type="button" class="lp-btn" data-reset title="The whole range, and the zoom back to 1×.">Reset</button>
             </div>
           </div>`;
 
@@ -226,6 +231,12 @@ const ImageView = (() => {
         host.querySelector('[data-reset]').addEventListener('click', () => {
             v.lo = 0; v.hi = 1;
             reset(containerId);
+        });
+        // Typed: a count (or a level) is the window's end, exactly. A value past
+        // the axis widens the axis, so the handle can stand where the number is.
+        host.querySelectorAll('[data-num]').forEach(inp => {
+            inp.addEventListener('change', () => setFromNumber(v, inp.dataset.num, Number(inp.value)));
+            inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
         });
 
         v.panel = host;
@@ -341,11 +352,16 @@ const ImageView = (() => {
             let max = 0;
             for (let i = 0; i < 256; i++) max = Math.max(max, v.hist[i]);
             const norm = Math.log1p(max) || 1;
-            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
             for (let i = 0; i < 256; i++) {
                 const h = (Math.log1p(v.hist[i]) / norm) * (H - 2);
                 if (h > 0) ctx.fillRect((i / 256) * W, H - h, Math.ceil(W / 256), h);
             }
+            // What the window leaves out is dimmed, so the data that will show
+            // is the part that stands out — the picture is the readout.
+            ctx.fillStyle = 'rgba(0,0,0,0.45)';
+            ctx.fillRect(0, 0, v.lo * W, H);
+            ctx.fillRect(v.hi * W, 0, W - v.hi * W, H);
         } else {
             ctx.fillStyle = 'rgba(255,255,255,0.25)';
             ctx.font = '11px system-ui, sans-serif';
@@ -466,13 +482,41 @@ const ImageView = (() => {
 
     function positionHandles(v) {
         if (!v.panel) return;
-        // The handles are the only numeric readout there is, and the transfer
-        // line over the histogram is the rest — ImageJ's B&C carries no status
-        // text either, because the picture already says it.
         const lo = v.panel.querySelector('[data-h="lo"]');
         const hi = v.panel.querySelector('[data-h="hi"]');
         if (lo) { lo.style.left = `${v.lo * 100}%`; lo.setAttribute('aria-valuenow', Math.round(v.lo * 100)); }
         if (hi) { hi.style.left = `${v.hi * 100}%`; hi.setAttribute('aria-valuenow', Math.round(v.hi * 100)); }
+        // The numbers say what the handles stand at: counts when the frame came
+        // as counts, 0–255 levels when it came as a JPEG. A field being typed in
+        // is left alone until the operator is done with it.
+        const [a, b] = numbersOf(v);
+        const nLo = v.panel.querySelector('[data-num="lo"]'), nHi = v.panel.querySelector('[data-num="hi"]');
+        if (nLo && document.activeElement !== nLo) nLo.value = a;
+        if (nHi && document.activeElement !== nHi) nHi.value = b;
+    }
+    const numbersOf = v => u16Of(v)
+        ? [toCounts(v, v.lo), toCounts(v, v.hi)]
+        : [Math.round(v.lo * 255), Math.round(v.hi * 255)];
+    function setFromNumber(v, which, value) {
+        if (!Number.isFinite(value)) { positionHandles(v); return; }
+        let f;
+        if (u16Of(v)) {
+            const a = axisOf(v);
+            const val = Math.max(0, Math.min(65535, Math.round(value)));
+            if (val < a.min || val > a.max) {
+                // The window is in counts; the handles are fractions of the
+                // axis. Widen the axis under them and the other end must keep
+                // its count, not its fraction (black went 90 → 268 once).
+                const loC = toCounts(v, v.lo), hiC = toCounts(v, v.hi);
+                v.axis = { min: Math.min(a.min, val), max: Math.max(a.max, val) };
+                v.lo = toFraction(v, loC); v.hi = toFraction(v, hiC);
+                scheduleHistogram(v);   // the axis moved under the bars
+            }
+            f = toFraction(v, val);
+        } else {
+            f = Math.max(0, Math.min(255, value)) / 255;
+        }
+        moveHandle(v, which, f);
     }
 
     const clamp = z => Math.min(MAX_Z, Math.max(MIN_Z, z));

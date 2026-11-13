@@ -93,19 +93,6 @@ Multi-embryo adaptive acquisition that runs in the background.
 - Confirmation timepoints after detection to verify events
 - Live VLM classification at each acquisition
 
-## Mesh Networking
-
-Multi-instrument coordination for distributed experiments.
-
-**How it works:**
-- UDP broadcast discovery finds other gently instances on the network
-- Bluetooth-style pairing with PIN verification
-- Scope-based access control (status, campaigns, data, ML models)
-- Shared campaigns — claim and execute plan items across instruments
-- Append-only audit log for security
-
-**Commands:** `/peers`, `/pair`, `/campaign share`, `/join-campaign`, `/claim`
-
 ## Safety Stack
 
 Five independent layers of protection:

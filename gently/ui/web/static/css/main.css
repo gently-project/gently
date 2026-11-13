@@ -4180,6 +4180,11 @@ kbd {
 }
 
 /* Timelapse Status Badge */
+/* The run's controls on the tab it is watched on (shell.js). */
+.run-controls { display: inline-flex; align-items: center; gap: 4px; }
+.run-controls [hidden] { display: none; }
+.run-controls .run-plan-link { color: var(--text-muted); }
+
 .timelapse-status {
     display: flex;
     align-items: center;
@@ -9259,6 +9264,7 @@ body.modal-open {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.6rem;
     padding: 0.6rem 0.85rem;
     border-bottom: 1px solid var(--border);
 }
@@ -9269,6 +9275,23 @@ body.modal-open {
     font-weight: 500;
     color: var(--text);
 }
+
+.devices-props-age {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.devices-props-read {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+}
+.devices-props-read:hover { border-color: var(--accent); color: var(--accent); }
 
 .devices-filter {
     background: var(--bg);

@@ -48,8 +48,32 @@ def test_entering_a_surface_never_starts_a_camera():
 
 def test_leaving_a_camera_surface_stops_its_view():
     assert "onLeave() { if (_bottomOn) stopBottom(); }" in _pane("bottom")
-    assert "onLeave() { if (_spimOn) stopSpim(); forceLedOff(); }" in _pane("spim")
+    assert "if (_spimOn) stopSpim();" in _pane("spim")
     assert "onLeave() { if (_spimOn) stopSpim(); forceLedOff(); }" in _pane("cal")
+
+
+def test_choosing_the_other_camera_stops_this_one_and_starts_nothing():
+    """The two cameras are one workspace now, and one strip chooses between
+    them. Choosing is leaving one surface for the other: the view that was
+    live stops, and the one arrived at waits for its Start."""
+    fn = OPERATE[OPERATE.index("    function chooseSource(src) {") :]
+    fn = fn[: fn.index("\n    }")]
+    assert "showPane('bottom')" in fn and "showPane('spim')" in fn
+    assert "toggleSpim" not in fn and "toggleBottomCam" not in fn
+    assert "live/start" not in fn and "stream/start" not in fn
+    show = OPERATE[OPERATE.index("    function showPane(name) {") :]
+    show = show[: show.index("\n    }")]
+    assert "PANES[prev].onLeave(name);" in show
+
+
+def test_the_led_is_left_alone_between_the_cameras_and_closed_on_leaving_scope():
+    """It lights the bottom camera too, and the Light panel beside the frame
+    goes on saying what it is. Leaving Scope closes it, as leaving the SPIM
+    head always did. So does going to Fit, which is on Scope now: under the
+    LED alone a calibration has no nuclei to find."""
+    assert (
+        "onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to) || to === 'cal') forceLedOff(); }"
+    ) in _pane("spim")
 
 
 def test_leaving_operate_altogether_stops_both():

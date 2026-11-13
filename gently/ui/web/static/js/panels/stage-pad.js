@@ -1,18 +1,27 @@
 /**
- * The XY stage, from the bottom camera's pane.
+ * The XY stage, in the Stage panel.
  *
  *     StagePad.mount('op-stage-host');
  *
  * Four buttons and a step. Each press asks the server to move by that much
- * from where the stage is (POST /api/devices/stage/jog); the server refuses
- * while the sample is at the objective and keeps the target inside the XY
- * envelope. The buttons are named by stage axis, not by screen direction:
- * which way +X moves in the picture depends on how the camera is mounted,
- * and a pad that says "left" and moves the picture right is worse than one
- * that says "−X". Watch the image; after one press you know.
+ * from where the stage is (POST /api/devices/stage/jog); the server keeps
+ * the target inside the XY envelope. The buttons are named by stage axis,
+ * not by screen direction: which way +X moves in the picture depends on how
+ * the camera is mounted, and a pad that says "left" and moves the picture
+ * right is worse than one that says "−X". Watch the image; after one press
+ * you know.
  *
  * Arrow keys work while the pad has focus; Shift multiplies the step by ten.
  * The readout follows the stage, driven from here or from the joystick.
+ *
+ * The pad used to grey itself out, and the server to refuse, while the SPIM
+ * head was within 1000 µm of its floor ("XY locked — sample at objective").
+ * That lock was taken out of the page on 2026-11-08 at the operator's
+ * request and its last pieces, here and on the jog route, on 2026-11-13.
+ *
+ * Laid out for a panel: the pad and its step sizes side by side, three rows
+ * tall. The sentence about axis names is the pad's tooltip and one short
+ * line; spelled out under the buttons it cost the panel three lines.
  */
 const StagePad = (() => {
     'use strict';
@@ -29,37 +38,43 @@ const StagePad = (() => {
     const fmt = v => (v == null || !Number.isFinite(v)) ? '—' : Math.round(v).toLocaleString();
     const toast = (m, bad) => { if (typeof showGentlyToast === 'function') showGentlyToast(m, null, null, bad ? 8000 : 2500, bad ? 'error' : undefined); };
 
-    function locked() {
-        const cam = $('op-cam-bottom');
-        return !!(cam && cam.classList.contains('is-locked'));
-    }
+    const NOTE = 'Named by stage axis: which way +X moves in the picture depends on the camera\'s mounting. '
+        + 'Arrow keys move too while the pad has focus; Shift = ×10.';
 
     function render() {
         if (!host) return;
-        const off = busy || locked();
+        const off = busy;
+        // A press re-draws the pad; the pad keeps the focus it had, or the
+        // arrow keys would work once and stop.
+        const hadFocus = host.contains(document.activeElement);
         host.innerHTML = `
-            <div class="sp" tabindex="0" aria-label="XY stage pad: arrow keys move the stage by the chosen step, Shift for ten times">
+            <div class="sp" tabindex="0" title="${NOTE}" aria-label="XY stage pad: arrow keys move the stage by the chosen step, Shift for ten times">
                 <div class="sp-row sp-head">
+                    <span class="op-label">XY</span>
                     <span class="sp-pos" title="Where the stage is, µm">x <b class="op-num">${fmt(pos.x)}</b> &nbsp; y <b class="op-num">${fmt(pos.y)}</b> <i>µm</i></span>
-                    ${locked() ? '<span class="sp-locked">XY locked — sample at objective</span>' : ''}
+                    <span class="sp-said">${busy ? 'moving…' : lastSaid}</span>
                 </div>
-                <div class="sp-grid">
-                    <span></span>
-                    <button class="op-nbtn sp-btn" type="button" data-dx="0" data-dy="1" title="Move +Y by ${step} µm" ${off ? 'disabled' : ''}>▲ +Y</button>
-                    <span></span>
-                    <button class="op-nbtn sp-btn" type="button" data-dx="-1" data-dy="0" title="Move −X by ${step} µm" ${off ? 'disabled' : ''}>◀ −X</button>
-                    <span class="sp-mid">${busy ? '…' : lastSaid}</span>
-                    <button class="op-nbtn sp-btn" type="button" data-dx="1" data-dy="0" title="Move +X by ${step} µm" ${off ? 'disabled' : ''}>+X ▶</button>
-                    <span></span>
-                    <button class="op-nbtn sp-btn" type="button" data-dx="0" data-dy="-1" title="Move −Y by ${step} µm" ${off ? 'disabled' : ''}>▼ −Y</button>
-                    <span></span>
+                <div class="sp-jog">
+                    <span class="op-label">Jog</span>
+                    <div class="sp-grid">
+                        <span></span>
+                        <button class="op-nbtn sp-btn" type="button" data-dx="0" data-dy="1" title="Move +Y by ${step} µm" ${off ? 'disabled' : ''}>▲ +Y</button>
+                        <span></span>
+                        <button class="op-nbtn sp-btn" type="button" data-dx="-1" data-dy="0" title="Move −X by ${step} µm" ${off ? 'disabled' : ''}>◀ −X</button>
+                        <span></span>
+                        <button class="op-nbtn sp-btn" type="button" data-dx="1" data-dy="0" title="Move +X by ${step} µm" ${off ? 'disabled' : ''}>+X ▶</button>
+                        <span></span>
+                        <button class="op-nbtn sp-btn" type="button" data-dx="0" data-dy="-1" title="Move −Y by ${step} µm" ${off ? 'disabled' : ''}>▼ −Y</button>
+                        <span></span>
+                    </div>
+                    <div class="sp-steps" role="group" aria-label="Step size">
+                        <span class="op-cap sp-steps-cap">step</span>
+                        ${STEPS.map(v => `<button class="op-nbtn sp-step${v === step ? ' is-on' : ''}" type="button" data-step="${v}" aria-pressed="${v === step}">${v >= 1000 ? (v / 1000) + ' mm' : v + ' µm'}</button>`).join('')}
+                    </div>
                 </div>
-                <div class="sp-row sp-steps">
-                    <span class="op-cap">step</span>
-                    ${STEPS.map(v => `<button class="op-nbtn sp-step${v === step ? ' is-on' : ''}" type="button" data-step="${v}">${v >= 1000 ? (v / 1000) + ' mm' : v + ' µm'}</button>`).join('')}
-                </div>
-                <div class="op-cap sp-note">Named by stage axis: which way +X moves in the picture depends on the camera's mounting. Arrow keys move too; Shift = ×10.</div>
+                <div class="op-cap sp-note">Named by stage axis · arrow keys jog, Shift ×10</div>
             </div>`;
+        if (hadFocus) { const pad = host.querySelector('.sp'); if (pad) pad.focus({ preventScroll: true }); }
         host.querySelectorAll('.sp-btn').forEach(b => b.addEventListener('click', () => jog(Number(b.dataset.dx) * step, Number(b.dataset.dy) * step)));
         host.querySelectorAll('.sp-step').forEach(b => b.addEventListener('click', () => { step = Number(b.dataset.step); render(); }));
         const pad = host.querySelector('.sp');
@@ -74,8 +89,13 @@ const StagePad = (() => {
         jog(dir[0] * step * k, dir[1] * step * k);
     }
 
+    // Whoever mounts the pad may say when a move has to be asked about first
+    // (Operate: while a run is going). No guard, no question.
+    let guard = null;
+
     async function jog(dx, dy) {
-        if (busy || locked() || (!dx && !dy)) return;
+        if (busy || (!dx && !dy)) return;
+        if (guard && !guard()) return;
         busy = true;
         lastSaid = '';
         render();
@@ -120,14 +140,9 @@ const StagePad = (() => {
         refresh();
         clearInterval(timer);
         timer = setInterval(refresh, 1500);
-        // The lock banner comes and goes with the F-drive; follow it.
-        const cam = $('op-cam-bottom');
-        if (cam && typeof MutationObserver !== 'undefined') {
-            new MutationObserver(() => render()).observe(cam, { attributes: true, attributeFilter: ['class'] });
-        }
     }
 
-    return { mount, jog, refresh, STEPS };
+    return { mount, jog, refresh, STEPS, setGuard: fn => { guard = fn; } };
 })();
 
 if (typeof module !== 'undefined') module.exports = StagePad;

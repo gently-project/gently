@@ -1,5 +1,5 @@
 """Dark and flat-field references for brightfield frames, taken from the
-Bottom cam pane and filed in the live session (see gently.app.brightfield);
+Scope surface and filed in the live session (see gently.app.brightfield);
 and the fields of view the overview is taken from, kept with the session.
 
     GET  /api/brightfield/references?light=&led_intensity_pct=&exposure_ms=
@@ -186,7 +186,7 @@ def create_router(server) -> APIRouter:
         return await _take("flat", body or {})
 
     # ── the fields of view ──────────────────────────────────────────────
-    # The operator builds this list on the Bottom cam pane, where the stage
+    # The operator builds this list on the Scope surface, where the stage
     # pad and the live view are; the Acquisition pane reads it as "taken
     # from the fields". It lives in the session so a reload, or the other
     # pane, finds the same list. It is not a plan: nothing here starts a run.

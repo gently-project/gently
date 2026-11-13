@@ -14,9 +14,7 @@ from gently.harness.tools.registry import ToolCategory, ToolParameter
 logger = logging.getLogger(__name__)
 
 
-def register_ml_tools(
-    registry, context_store=None, gently_store=None, verse_map=None, peer_client=None
-):
+def register_ml_tools(registry, context_store=None, gently_store=None):
     """Register ML tools on a tool registry.
 
     Parameters
@@ -25,37 +23,23 @@ def register_ml_tools(
         Registry to register tools on.
     context_store : ContextStore, optional
     gently_store : GentlyStore, optional
-    verse_map : VerseMap, optional
-    peer_client : PeerClient, optional
     """
 
     @registry.register(
         name="inventory_datasets",
         description=(
-            "Survey all datasets across the mesh (local + remote peers). "
+            "Survey all local datasets. "
             "Returns a NetworkDataInventory with session summaries, "
             "embryo counts, volume counts, and annotation status."
         ),
         category=ToolCategory.ML,
-        parameters=[
-            ToolParameter(
-                name="include_remote",
-                type="boolean",
-                description="Include remote peer datasets (default true)",
-                required=False,
-                default=True,
-            ),
-        ],
+        parameters=[],
     )
-    async def inventory_datasets(include_remote: bool = True, **kwargs) -> str:
+    async def inventory_datasets(**kwargs) -> str:
         from gently.data_reasoning.assessment import DataAssessmentEngine
 
-        engine = DataAssessmentEngine(
-            gently_store=gently_store,
-            peer_client=peer_client,
-            verse_map=verse_map,
-        )
-        inventory = await engine.build_inventory(include_remote=include_remote)
+        engine = DataAssessmentEngine(gently_store=gently_store)
+        inventory = await engine.build_inventory()
         return json.dumps(inventory.to_dict(), indent=2)
 
     @registry.register(

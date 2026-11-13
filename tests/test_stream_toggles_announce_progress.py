@@ -80,19 +80,31 @@ def test_a_pending_control_does_not_render_as_a_forbidden_one() -> None:
 
 
 def test_the_stacked_layout_does_not_bury_the_instrument_rail() -> None:
-    """The camera must not overflow its column onto the controls beside it."""
+    """The camera must not overflow its column onto the controls beside it.
+
+    Stacked, the frame and the instrument once shared a grid cell: the
+    camera's placeholder painted over the rail and swallowed every click on
+    "Start camera". In the workspace's small-window layout the two are items
+    of a flex column, which cannot share a cell, and neither may be squashed
+    below its content.
+    """
     css = OPERATE_CSS.read_text(encoding="utf-8")
-    stacked = re.search(r"@container operate \(max-width: 900px\) \{(.*?)\n\}", css, re.S)
-    assert stacked, "the stacked-layout container query is gone"
+    stacked = re.search(r"@container operate \(max-width: 1060px\) \{(.*?)\n\}", css, re.S)
+    assert stacked, "the workspace's small-window container query is gone"
     body = stacked.group(1)
-    assert re.search(r"\.op-main\s*\{[^}]*grid-row:\s*2", body), (
-        "stacked, .op-main no longer claims its own row"
+    pane = re.search(r"\.op-pane-scope\s*\{([^}]*)\}", body, re.S)
+    assert pane, "stacked, the workspace is not laid out at all"
+    assert "display: flex" in pane.group(1) and "flex-direction: column" in pane.group(1), (
+        "stacked, the frame and the instrument are grid items again and can share a cell"
     )
-    assert re.search(r"\.op-inst\s*\{[^}]*grid-row:\s*3", body), (
-        "stacked, the instrument rail shares a cell with the camera again — "
-        "the camera's placeholder will swallow its clicks"
+    assert re.search(r"\.op-pane-scope \.op-inst\s*\{[^}]*flex:\s*0 0 auto", body), (
+        "stacked, the instrument can be squashed under the frame"
     )
-    assert re.search(r"\.op-main\s*\{\s*min-height:\s*auto", body), (
-        "stacked, .op-main can be squashed below its content again, so the camera "
-        "overflows its column and covers whatever is beneath it"
+    assert re.search(r"\.op-pane-scope \.op-cam\s*\{[^}]*height:\s*auto", body), (
+        "stacked, the frame still takes its height from a row that is no longer there"
+    )
+    # The surfaces that still use the two-column grid keep their own guard.
+    old = re.search(r"@container operate \(max-width: 900px\) \{(.*?)\n\}", css, re.S)
+    assert old and re.search(r"\.op-main\s*\{\s*min-height:\s*auto", old.group(1)), (
+        "stacked, .op-main can be squashed below its content again"
     )

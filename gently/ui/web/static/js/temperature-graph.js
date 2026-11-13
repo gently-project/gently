@@ -46,6 +46,10 @@ const TemperatureGraph = (() => {
     function setWrapVisible(on) {
         const w = wrap();
         if (w) w.hidden = !on;
+        // The reading, and the button that opens the chart, are in the
+        // Devices toolbar rather than inside the fold: they come and go with it.
+        const btn = document.getElementById("devices-tempwrap-toggle");
+        if (btn) btn.hidden = !on;
     }
 
     function setCollapsed(collapsed) {

@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Operate as a workspace — mockup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ── A static mockup. Nothing is wired. ──────────────────────────────────
+     The proposal: one workspace for Operate. The viewer in the middle, sized
+     by the window; a fixed instrument sidebar on the right, one panel per
+     subsystem, each in a fixed slot with a declared size. No reflow. */
+  :root {
+    --bg: #f5f7fa; --panel: #ffffff; --rule: #dfe4ea; --ink: #1c2430; --dim: #667081;
+    --accent: #2563eb; --red: #b91c1c; --amber: #b45309; --img: #1f2733;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 13px/1.3 var(--sans); color: var(--ink); background: var(--bg);
+    display: grid; grid-template-rows: 36px minmax(0, 1fr) 22px;
+  }
+
+  /* ── toolbar: the only chrome above the viewer ───────────────────────── */
+  .tb { display: flex; align-items: center; gap: 10px; padding: 0 10px; background: var(--panel); border-bottom: 1px solid var(--rule); }
+  .tb .brand { font-weight: 700; color: var(--accent); margin-right: 2px; }
+  .tb .pill { font: 11px var(--mono); padding: 2px 7px; border: 1px solid var(--rule); border-radius: 10px; color: var(--dim); }
+  .tabs { display: flex; gap: 2px; margin-left: 12px; }
+  .tabs a { padding: 5px 10px; border-radius: 4px; color: var(--dim); text-decoration: none; font-size: 12.5px; }
+  .tabs a.on { background: #e8eefb; color: var(--accent); font-weight: 600; }
+  .tb .sp { flex: 1; }
+  .live { display: inline-flex; align-items: center; gap: 6px; font: 11px var(--mono); color: var(--dim); }
+  .live i { width: 8px; height: 8px; border-radius: 50%; background: #16a34a; box-shadow: 0 0 5px #16a34a; }
+  .halt { font: 700 12px var(--sans); letter-spacing: .06em; color: #fff; background: var(--red); border: 0; border-radius: 4px; padding: 6px 14px; }
+
+  /* ── the workspace ───────────────────────────────────────────────────── */
+  .ws { display: grid; grid-template-columns: minmax(0, 1fr) 616px; gap: 8px; padding: 8px; min-height: 0; }
+
+  /* the viewer column: source tabs, image (height-driven), caption, display, detect */
+  .view { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; container-type: size; }
+  /* the frame's column: image, caption, display, detect — all at the image's width */
+  .stagecol { display: flex; flex-direction: column; gap: 6px; width: max-content; max-width: 100%; min-height: 0; }
+  .src { display: flex; align-items: center; gap: 4px; }
+  .src .seg { margin-right: 8px; }
+  .src .fps { font: 11px var(--mono); color: var(--dim); margin-left: auto; }
+  .img { position: relative; height: calc(100cqh - 28px - 18px - 108px - 36px - 4 * 6px); aspect-ratio: 1 / 1; max-width: 100%;
+         background: var(--img); border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .img .blob { position: absolute; border-radius: 50%; background: radial-gradient(circle, #fff 0, #cfe3ff 35%, rgba(255,255,255,0) 72%); }
+  .img .b1 { left: 22%; top: 48%; width: 11%; height: 11%; }
+  .img .b2 { left: 68%; top: 46%; width: 7%; height: 7%; opacity: .7; }
+  .img .mark { position: absolute; left: 27.5%; top: 53.5%; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 1.5px solid #93c5fd; border-radius: 50%; }
+  .img .mark::after { content: '1'; position: absolute; left: 30px; top: 4px; font: 600 11px var(--sans); color: #93c5fd; }
+  .img .zoom { position: absolute; right: 8px; bottom: 8px; font: 11px var(--mono); color: #9fb3c8; }
+  .cap { font-size: 11.5px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cap b { font: 11px var(--mono); color: var(--ink); font-weight: 500; }
+
+  /* ── group boxes: the panel primitive ────────────────────────────────── */
+  .p { position: relative; min-width: 0; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 10px 8px 8px; min-height: 0; }
+  .p > h3 { position: absolute; top: -7px; left: 8px; margin: 0; padding: 0 4px; background: var(--panel);
+            font: 600 10px/1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .p > h3 .h { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--dim); margin-left: 6px; }
+  .r { display: flex; align-items: center; gap: 6px; height: 22px; }
+  .r + .r { margin-top: 2px; }
+  .l { flex: 0 0 58px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  .v { font: 12px var(--mono); color: var(--ink); }
+  .u { font-size: 10.5px; color: var(--dim); }
+  .num { width: 58px; height: 20px; padding: 0 5px; font: 12px var(--mono); text-align: right; border: 1px solid var(--rule); border-radius: 3px; background: var(--panel); color: var(--ink); }
+  .num.w { width: 70px; }
+  .btn { height: 22px; padding: 0 8px; font: 12px var(--sans); border: 1px solid var(--rule); border-radius: 3px; background: var(--panel); color: var(--ink); white-space: nowrap; }
+  .btn.q { color: var(--dim); }
+  .btn.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .btn.warn { color: var(--red); border-color: #f1c1c1; }
+  .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+  .seg button { height: 20px; padding: 0 8px; font: 12px var(--sans); border: 0; border-left: 1px solid var(--rule); background: var(--panel); color: var(--dim); }
+  .seg button:first-child { border-left: 0; }
+  .seg button.on { background: var(--accent); color: #fff; font-weight: 600; }
+  .range { flex: 1 1 auto; min-width: 60px; height: 20px; margin: 0; accent-color: var(--accent); }
+  .ext { font: 10px var(--mono); color: var(--dim); white-space: nowrap; }
+  .note { font-size: 10.5px; color: var(--dim); margin: 2px 0 0; }
+
+  /* ── the sidebar: fixed slots, declared heights, no reflow ───────────── */
+  .side { display: grid; grid-template-columns: 300px 300px; grid-template-rows: auto auto auto minmax(0, 1fr); gap: 10px 8px;
+          grid-template-areas: "camera light" "sheet light" "head stage" "embryos embryos"; align-content: start; min-height: 0; }
+  .camera { grid-area: camera; } .light { grid-area: light; } .sheet { grid-area: sheet; }
+  .head { grid-area: head; } .stage { grid-area: stage; } .embryos { grid-area: embryos; display: flex; flex-direction: column; }
+
+  /* light: the lines */
+  .line { display: flex; align-items: center; gap: 6px; height: 22px; }
+  .line.off { opacity: .5; }
+  .sw { width: 10px; height: 10px; border-radius: 50%; background: var(--wl); box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); flex: 0 0 auto; }
+  .line.lit .sw { box-shadow: 0 0 6px 1px var(--wl); }
+  .wl { flex: 0 0 30px; font: 12px var(--mono); }
+  .warn { font-size: 10.5px; color: var(--amber); background: #fff7ed; border: 1px solid #fed7aa; border-radius: 3px; padding: 2px 6px; margin-top: 4px; }
+
+  /* head: a log track */
+  .gauge { display: grid; grid-template-columns: 40px 1fr; gap: 8px; margin-top: 2px; }
+  .track { position: relative; height: 92px; width: 14px; margin: 0 auto; border-radius: 3px; background: linear-gradient(180deg, #e8eefb, #f8fafc); border: 1px solid var(--rule); }
+  .track i { position: absolute; left: -3px; right: -3px; height: 2px; background: var(--amber); }
+  .track b { position: absolute; left: 18px; font: 9px var(--mono); color: var(--dim); font-weight: 400; }
+  .nudge { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .nudge .btn { padding: 0 4px; font: 11px var(--mono); }
+  .verbs { display: flex; gap: 6px; margin-top: 6px; }
+  .foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10.5px; color: var(--dim); }
+
+  /* stage pad */
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 180px; margin: 4px 0; }
+  .pad .btn { font: 11px var(--mono); padding: 0; }
+  .pad .e { visibility: hidden; }
+
+  /* embryos */
+  .roster { flex: 1 1 auto; min-height: 0; overflow: auto; border-top: 1px solid var(--rule); margin-top: 4px; }
+  .row { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 8px; height: 26px; padding: 0 4px; border-bottom: 1px solid #eef1f5; font-size: 12px; }
+  .row.sel { background: #e8eefb; }
+  .row .id { font: 600 11px var(--mono); color: var(--accent); }
+  .row .xy { font: 11px var(--mono); color: var(--dim); }
+  .row .st { font-size: 10.5px; color: var(--dim); }
+
+  /* display panel */
+  .disp { height: 108px; display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "t m a" "h h h" "lo . hi"; gap: 4px 8px; align-items: center; }
+  .disp .t { grid-area: t; font: 600 10px var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+  .disp .m { grid-area: m; font-size: 10.5px; color: var(--dim); }
+  .disp .a { grid-area: a; display: flex; gap: 4px; }
+  .disp .h { grid-area: h; position: relative; height: 48px; border-radius: 3px; border: 1px solid var(--rule);
+             background:
+               linear-gradient(90deg, rgba(0,0,0,.45) 0 9%, transparent 9% 72%, rgba(0,0,0,.45) 72%),
+               repeating-linear-gradient(90deg, transparent 0 2px, rgba(255,255,255,.6) 2px 3px),
+               linear-gradient(180deg, #2b3441 0, #0b0f14 100%); }
+  .disp .h::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 48px;
+             background: linear-gradient(90deg, #0b0f14 0 4%, transparent 4% 10%, #0b0f14 10% 100%); opacity: 0; }
+  .disp .h .hist { position: absolute; left: 0; right: 0; bottom: 0; height: 100%;
+             -webkit-mask: linear-gradient(90deg, transparent 0 6%, #000 6% 8%, transparent 8% 100%); }
+  .disp .h .tl { position: absolute; left: 9%; bottom: 0; width: 63%; height: 100%;
+             background: linear-gradient(to top right, transparent calc(50% - 1px), #60a5fa calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)); }
+  .disp .h .k { position: absolute; top: -3px; bottom: -6px; width: 2px; margin-left: -1px; background: #60a5fa; }
+  .disp .h .k::after { content: ''; position: absolute; left: -5px; bottom: -1px; width: 12px; height: 8px; border-radius: 2px; background: #60a5fa; }
+  .disp .lo { grid-area: lo; } .disp .hi { grid-area: hi; justify-self: end; }
+  .disp .n { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+
+  /* detect strip */
+  .det { height: 36px; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--dim); flex-wrap: wrap; overflow: hidden; }
+  .cap { height: 18px; }
+  .det .t { font: 600 10px var(--sans); letter-spacing: .1em; text-transform: uppercase; }
+  .det .chip { padding: 1px 8px; border: 1px solid #bfd3f7; border-radius: 10px; color: var(--accent); font-size: 11px; }
+  .det .arrow { color: #a8b3c0; }
+  .det select { font: 11.5px var(--sans); height: 22px; border: 1px solid var(--rule); border-radius: 3px; background: var(--panel); }
+
+  /* status bar */
+  .sb { display: flex; align-items: center; gap: 14px; padding: 0 10px; font-size: 11px; color: var(--dim); background: var(--panel); border-top: 1px solid var(--rule); }
+  .sb .sp { flex: 1; }
+  .sb .mock { color: var(--amber); font-weight: 600; }
+</style>
+</head>
+<body>
+
+  <header class="tb">
+    <span class="brand">Gently</span>
+    <span class="pill">1f114be8</span>
+    <nav class="tabs">
+      <a class="on" href="#">Operate</a><a href="#">Calibration</a><a href="#">Acquisition</a><a href="#">Map</a><a href="#">3D</a><a href="#">Manual</a>
+    </nav>
+    <span class="sp"></span>
+    <span class="live"><i></i>LIVE · Δt 0.2 s · Connected</span>
+    <span class="pill">Claude</span>
+    <button class="halt" title="Stop all stage motion now">HALT</button>
+  </header>
+
+  <main class="ws">
+
+    <!-- ── the viewer: what the rig sees, as big as the window allows ── -->
+    <section class="view">
+      <div class="src">
+        <span class="seg"><button>Bottom cam</button><button class="on">SPIM A</button><button>SPIM B</button><button>Multi</button></span>
+        <button class="btn on">● Live</button>
+        <button class="btn q">Snap</button>
+        <span class="fps">4.3 fps · 2304×2304 · 20 ms</span>
+      </div>
+      <div class="stagecol">
+      <div class="img">
+        <div class="blob b1"></div><div class="blob b2"></div>
+        <div class="mark"></div>
+        <span class="zoom">1×</span>
+      </div>
+      <div class="cap">Embryo <b>1</b> · stage <b>−124, −355</b> µm · side A, beam armed · 488 only at 3.1 % · counts <b>83–4527</b></div>
+
+      <div class="p disp" style="padding-top:10px">
+        <span class="t">Display</span>
+        <span class="m">counts 83–4527 · log</span>
+        <span class="a"><button class="btn q">Auto</button><button class="btn q">Reset</button></span>
+        <div class="h"><div class="tl"></div><span class="k" style="left:9%"></span><span class="k" style="left:72%"></span></div>
+        <label class="n lo">black <input class="num" value="120"></label>
+        <label class="n hi">white <input class="num" value="3800"></label>
+      </div>
+
+      <div class="det">
+        <span class="t">Detect</span>
+        <span class="chip">Blobs</span><span class="arrow">›</span><span class="chip">Claude filter</span><span class="arrow">›</span><span class="chip">SAM outline</span>
+        <button class="btn on">Detect</button>
+        <span>Embryos look</span><select><option>Dark · LED</option></select>
+        <span>Sensitivity</span><select><option>Balanced · ≥35 % of the best</option></select>
+        <label><input type="checkbox"> New capture</label>
+      </div>
+      </div>
+    </section>
+
+    <!-- ── the instrument sidebar: one panel per subsystem, fixed slots ── -->
+    <aside class="side">
+
+      <div class="p camera">
+        <h3>Camera</h3>
+        <div class="r"><span class="l">Bottom</span><input class="num" value="11.2"><span class="u">ms</span><button class="btn q">Start</button><span class="u">PCO · off</span></div>
+        <div class="r"><span class="l">SPIM</span><input class="num" value="20"><span class="u">ms</span><button class="btn on">Stop</button><span class="u">HamCam1 · live</span></div>
+        <p class="note">What the viewer shows is chosen above the image.</p>
+      </div>
+
+      <div class="p light">
+        <h3>Light <span class="h">read 0 s ago</span></h3>
+        <div class="r"><span class="l">Mode</span><span class="seg"><button>LED</button><button class="on">Laser</button><button>Off</button></span></div>
+        <div class="r"><span class="l">Routed</span><select class="btn" style="flex:1"><option>488 only</option></select></div>
+        <div class="line off"><span class="sw" style="--wl:#8b5cf6"></span><span class="wl">405</span><input class="range" type="range" disabled><span class="v">— %</span><span class="ext">0–100</span></div>
+        <div class="line lit"><span class="sw" style="--wl:#38bdf8"></span><span class="wl">488</span><input class="range" type="range" min="2" max="6" step="0.1" value="3.1"><span class="v">3.1 %</span><span class="ext">2–6</span></div>
+        <div class="line off"><span class="sw" style="--wl:#a3e635"></span><span class="wl">561</span><input class="range" type="range" disabled><span class="v">— %</span><span class="ext">0–100</span></div>
+        <div class="line off"><span class="sw" style="--wl:#ef4444"></span><span class="wl">637</span><input class="range" type="range" disabled><span class="v">— %</span><span class="ext">0–100</span></div>
+        <div class="r"><span class="l">Beam</span><span class="seg"><button class="on">A on</button><button>B off</button></span><button class="btn warn">Off</button></div>
+        <div class="r"><span class="l">LED</span><button class="btn q">Open</button><input class="range" type="range" value="12"><span class="v">12 %</span></div>
+        <div class="warn">EMITTING · 488 at 3.1 % on side A</div>
+      </div>
+
+      <div class="p sheet">
+        <h3>Sheet <span class="h">side A · scanner AB · piezo P</span></h3>
+        <div class="r"><span class="l">Galvo</span><span class="ext">−4</span><input class="range" type="range" min="-4" max="4" step="0.01" value="0"><span class="ext">+4</span><span class="v">0.00</span><span class="u">°</span></div>
+        <div class="r"><span class="l">Piezo</span><span class="ext">−75</span><input class="range" type="range" min="-75" max="75" step="0.5" value="0"><span class="ext">+75</span><span class="v">0.0</span><span class="u">µm</span></div>
+      </div>
+
+      <div class="p head">
+        <h3>Head <span class="h">sample → objective</span></h3>
+        <div class="r"><span class="l">F-drive</span><span class="v" style="font-size:14px">114.6</span><span class="u">µm</span><span class="u" style="margin-left:auto">85 µm to floor</span></div>
+        <div class="gauge">
+          <div class="track"><b style="top:-2px">25000</b><b style="top:28px">1000</b><b style="top:56px">100</b><b style="top:80px">30</b><i style="top:62px"></i></div>
+          <div>
+            <div class="nudge"><button class="btn">▲ +50</button><button class="btn">▲ +10</button><button class="btn">▲ +5</button><button class="btn">▼ −50</button><button class="btn">▼ −10</button><button class="btn">▼ −5</button></div>
+            <div class="verbs"><button class="btn q">Raise head</button><button class="btn q">To 1000 µm</button></div>
+          </div>
+        </div>
+        <div class="foot"><span>fine — at sample</span><span>log scale</span></div>
+      </div>
+
+      <div class="p stage">
+        <h3>Stage</h3>
+        <div class="r"><span class="l">XY</span><span class="v">x −124</span><span class="v">y −355</span><span class="u">µm</span><span class="u" style="margin-left:auto">step</span><span class="seg"><button>10</button><button>50</button><button class="on">200</button><button>1 mm</button></span></div>
+        <div class="pad"><span class="e"></span><button class="btn">▲ +Y</button><span class="e"></span><button class="btn">◀ −X</button><span class="e"></span><button class="btn">+X ▶</button><span class="e"></span><button class="btn">▼ −Y</button><span class="e"></span></div>
+        <div class="r"><span class="l">Bottom Z</span><span class="v">25.6</span><span class="u">µm</span><span class="seg"><button>▲10</button><button>▲1</button><button>▼1</button><button>▼10</button></span></div>
+      </div>
+
+      <div class="p embryos">
+        <h3>Embryos <span class="h">3 · 1 field</span></h3>
+        <div class="r"><button class="btn q">Register marked</button><button class="btn q">Clear</button><span class="u" style="margin-left:auto">click the image to mark</span></div>
+        <div class="roster">
+          <div class="row sel"><span class="id">1</span><span class="xy">−124, −355 · calibrated A</span><span class="st">selected · at stage</span></div>
+          <div class="row"><span class="id">2</span><span class="xy">−310, −402 · calibrated A</span><span class="st">142 µm away</span></div>
+          <div class="row"><span class="id">3</span><span class="xy">−88, −511 · not calibrated</span><span class="st">160 µm away</span></div>
+          <div class="row"><span class="id">F1</span><span class="xy">field · −124, −355</span><span class="st">overview</span></div>
+        </div>
+      </div>
+
+    </aside>
+  </main>
+
+  <footer class="sb">
+    <span>3 embryos · 0 images · 12 events</span>
+    <span>water 20.0 °C</span>
+    <span class="sp"></span>
+    <span class="mock">Mockup — nothing here is wired</span>
+  </footer>
+
+</body>
+</html>

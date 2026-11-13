@@ -19,7 +19,6 @@ All commands are registered in `gently/harness/commands.py`.
 | `/embryos [ID]` | List embryos or show details for a specific embryo |
 | `/timelapse [watch]` | Timelapse acquisition status; `watch` for live countdown view |
 | `/timeline [clear] [--filter TYPE] [--embryo ID] [--since TIME] [--all]` | Event timeline with filtering and multiple view modes (`--letters`, `--log`, `--table`, `--axis`) |
-| `/peers [HOSTNAME] [campaigns]` | Show mesh peers on the network (alias: `/mesh`) |
 
 ## Session
 
@@ -37,10 +36,7 @@ All commands are registered in `gently/harness/commands.py`.
 | Command | Description |
 |---------|-------------|
 | `/plan [status\|exit]` | Enter plan mode for experimental design, or show plan status |
-| `/campaign [delete\|share\|unshare] [ID]` | View, manage, and share campaigns (alias: `/campaigns`) |
-| `/join-campaign <HOSTNAME> <CAMPAIGN_ID>` | Join a shared campaign on a peer |
-| `/claim <ITEM_ID>` | Claim a plan item from a joined remote campaign |
-| `/pair [accept\|reject\|list\|unpair\|scopes] [target]` | Bluetooth-style pairing with mesh peers |
+| `/campaign [delete] [ID]` | View and manage campaigns (alias: `/campaigns`) |
 
 ## Appearance
 

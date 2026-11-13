@@ -724,12 +724,15 @@ class TestThePane:
         for host in (
             "op-plan-spim-body",
             "op-plan-bf-every-field",
-            "op-plan-overrides",
             "op-plan-watch-sec",
             "op-plan-watch-field",
         ):
             assert f"show('{host}', volumes)" in body, host
             assert f'id="{host}"' in INDEX, host
+        # An embryo's own ending is the ending of its volumes: its cell in
+        # the table is there, and cannot be set, without them.
+        cell = OPERATE[OPERATE.index("    function endingCell(emb) {") :][:1200]
+        assert "${volumes ? '' : ' disabled'}" in cell
 
     def test_the_endings_on_offer_are_the_ones_the_run_can_have(self):
         body = _js("renderChannels")

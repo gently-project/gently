@@ -73,5 +73,4 @@ RAM: {hardware_info.get("ram_gb", 0)}GB
 - Use mixed precision (AMP) on A5000 GPUs.
 - For small datasets (<200 samples), use transfer learning with frozen backbone.
 - Report progress and any issues back via events.
-- If data is split across multiple mesh nodes, consider federated averaging.
 """

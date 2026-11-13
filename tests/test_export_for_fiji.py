@@ -110,7 +110,7 @@ def _session(store, sid="s1"):
                 },
                 {
                     "event_type": "STATUS_CHANGED",
-                    "data": {"service": "mesh"},
+                    "data": {"service": "device_layer"},
                     "timestamp": "2026-10-04T21:00:01",
                 },
                 {
