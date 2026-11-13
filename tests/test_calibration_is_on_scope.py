@@ -144,6 +144,7 @@ def test_the_fit_view_holds_what_a_run_looks_at() -> None:
         'id="op-cal-progress"',  # the frames, as they land
         'id="op-preview"',
         'id="op-cal-kept"',  # what the last run kept
+        'id="op-cal-kept-all"',  # and the way to every run: the archive
         'id="cal-adv"',  # the settings behind More…
     ):
         assert part in FIT, part

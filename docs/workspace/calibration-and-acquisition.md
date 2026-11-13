@@ -1,9 +1,12 @@
 # Calibration and Acquisition: a study
 
-What the two surfaces beside Scope are for, what is wrong with them today, and
+What the two surfaces beside Scope are for, what was wrong with them, and
 what they should become. `mockup-run-v1.html` in this folder draws the
-proposal. Nothing here is built, apart from one fix made along the way (the
-last section).
+proposal. The owner agreed the drawing ("agreed with the mockup, you can make
+them") and it is built: "What is built", near the end, says which parts, how
+each was checked, and where the page differs from the drawing. The sections
+before it are the study as it was written, so "today" in them is the page
+before this work.
 
 ## The short version
 
@@ -321,11 +324,76 @@ Beside these, and small: **every stage as an ending** (A16), which is four
 lines in the organism's table (bean, 1.5-fold, 2-fold, pretzel) and the page
 asking for the list.
 
+## What is built
+
+The ten steps above, less one part of step 6 (below, "Not built"). Each is a
+commit with its tests.
+
+| Step | On the page |
+|---|---|
+| 1, 2, 4 | Before a run starts, beside Start, in a foot that does not scroll: what stands in the way with the press that puts it right, the round's length, the cadence that will be kept, the volumes and gigabytes against the disk's free room |
+| 3 | Pause and Stop on the Embryos tab and Pause beside the toolbar's run words, on every view |
+| 5, 6, 7 | Acquisition as one surface in two states, in Scope's three zones: the plan as a grid with each embryo's ending in the dish list and a saved plan as Load; a test volume's picture on its tile; while a run is going, the form is put away and the tiles show the run |
+| 8 | The Calibration tab opens on Runs: every run the session kept on disk, one raw exposure large over the run's strip, the run's record |
+| 9 | Calibration on Scope: a Fit row in the Sheet panel, Fit as the strip's fifth entry, the Calibration entry gone from the toolbar |
+| 10 | On Scope, while a run is running, the stage, the head, starting a live view and a calibration ask first |
+
+### Where the page differs from the drawing
+
+- **The Calibration tab keeps Profile and Gallery** as its second and third
+  views. They show what a calibration pushes to the page while it runs, and
+  that could not be checked without a calibration that finishes, which the
+  simulated rig cannot do. Runs is the first view and the only one with
+  anything in it after a restart. Whether the other two go is a decision for
+  after a calibration has been watched on the rig.
+- **The Fit view is the run's own panels, not a new picture.** The drawing
+  had one frame with the focus curves beside it. The page puts the existing
+  progress panel (the frames as they land), the refusal and the last run's
+  kept strip in the frame's place. Every element kept its id, so none of the
+  calibration functions changed. The curves are in the archive, one press
+  away ("All runs").
+- **The box is square.** The drawing gave Fit the light sheet's wide frame.
+  The bottom camera's shape keeps the instrument's columns where they are
+  when Fit is chosen from the bottom camera, which is where it is chosen
+  from.
+- **The question while a run is going is the browser's own**, and one yes
+  holds for a minute. The drawing had a line on the page. A paused run asks
+  nothing.
+- **A refusal points with what the page can read.** The drawing pointed at
+  the Light status only. The page reads the laser, the LED, the head's
+  height and whether the stage is at the embryo, says which it can see to be
+  wrong, and outlines that panel.
+
+### Not built
+
+- **Presets as buttons**, the one part of step 6 not done: the cadence is a
+  number and a unit.
+- **Every stage as an ending** (A16).
+- **The cadence** (A14). The page says the cadence that will be kept; the
+  scheduler is unchanged.
+- **HALT** is unchanged. It is the owner's decision, below.
+- **Scope's sheet pose does not ask during a run.** The galvo and piezo
+  lines move the sheet, and a run sets them itself for each volume. They
+  were not in the list of verbs agreed and were left.
+
+### How it was checked
+
+On the simulated rig and on a copy of the rig's last session, in a browser at
+1920×889 and 1440×920. A calibration pressed from the bottom camera's view
+with the laser dark: Fit came up, the run counted, it was refused with its
+frames shown, the page said no laser line was emitting and outlined Light.
+The archive on the four runs of 8 November with their 157 exposures. The
+question while a run is going with every device request intercepted, so
+nothing reached even the simulated rig. **Nothing was driven on hardware,
+and no calibration was watched to a fit**: what the page shows after one is
+from the code and from the rig's kept runs.
+
 ## Decisions that are the owner's
 
-- Whether the Calibration entry leaves the Devices toolbar (step 9), or stays
-  as a surface rebuilt in Scope's idiom. Either way the tab in the left
-  navigation can become the archive (step 8).
+- ~~Whether the Calibration entry leaves the Devices toolbar (step 9).~~
+  Decided and built: it left.
+- Whether Profile and Gallery leave the Calibration tab now that Runs is
+  there ("Where the page differs from the drawing").
 - What an uncalibrated embryo does to Start: refuse the run (today), or offer
   to run without it.
 - The cadence. Either the page says the cadence that will be kept, or the

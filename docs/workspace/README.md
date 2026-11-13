@@ -1,14 +1,19 @@
 # Operate as a workspace
 
-The Devices tab's Operate view is one workspace, **Scope**, with Calibration
-and Acquisition as surfaces beside it. This is why, what it is, and how it was
-checked. The two mockups in this folder are the drawings it was built from.
+The Devices tab's Operate view is one workspace, **Scope**, with Acquisition
+as the surface beside it. This is why, what it is, and how it was checked.
+The mockups in this folder are the drawings it was built from.
+
+Calibration was a third surface when this was written. It is on Scope now: a
+Fit row in the Sheet panel and Fit as the fifth entry of the strip above the
+picture (`calibration-and-acquisition.md`). Where the text below says
+"Calibration" as a surface, read that.
 
 | | |
 |---|---|
 | `mockup-v1.html` | the first drawing: three zones, group boxes, dense rows |
 | `mockup-v2.html` | after the audit below: number boxes, a real small-window layout, both themes |
-| `calibration-and-acquisition.md` | the study of the two surfaces beside Scope, and what is proposed for them. Not built. |
+| `calibration-and-acquisition.md` | the study of the two surfaces beside Scope, what was proposed for them, and what of it is built ("What is built" lists the steps and what is left) |
 | `mockup-run-v1.html` | that proposal drawn: calibration on Scope, Acquisition before a run and during one, the Calibration tab as the archive of raw exposures |
 | `sessions.md` | the study of the Sessions tab: what was measured, the loading work that is built, and the redesign that is proposed and not built |
 | `mockup-sessions-v1.html` | that proposal drawn: the sessions as a log-book table, and a session opened in the same three zones as Scope |

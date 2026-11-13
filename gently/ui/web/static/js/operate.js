@@ -1832,9 +1832,12 @@ const OperateManager = (function () {
         if (b && b.disabled) return;
         let says = 'no embryo selected';
         if (emb && hasFit(emb)) {
-            const r2 = (emb.calibration || {}).r_squared;
-            says = `embryo ${labelFor(emb)} · ${Number(emb.calibration.slope_um_per_deg).toFixed(1)} µm/deg`
-                + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
+            // A fit records an R² for each end of the sheet; the weaker one
+            // decides, as it does when a fit is borrowed (fitScore).
+            const c = emb.calibration || {};
+            const known = [c.r_squared_top, c.r_squared_bottom, c.r_squared].some(v => v != null);
+            says = `embryo ${labelFor(emb)} · ${Number(c.slope_um_per_deg).toFixed(1)} µm/deg`
+                + (known ? ` · R² ${fitScore(emb).toFixed(2)}` : '');
         } else if (emb) {
             says = `embryo ${labelFor(emb)} · not calibrated`;
         }
@@ -4603,6 +4606,12 @@ const OperateManager = (function () {
         });
         const keptOpen = $('op-cal-kept-open');
         if (keptOpen) keptOpen.addEventListener('click', openCalFolder);
+        // From what the last run kept to every run and every raw exposure.
+        const keptAll = $('op-cal-kept-all');
+        if (keptAll) keptAll.addEventListener('click', () => {
+            if (typeof switchTab === 'function') switchTab('calibration');
+            if (typeof CalibrationManager !== 'undefined') CalibrationManager.switchView('runs');
+        });
         const to = $('op-fd-to');
         if (to) to.addEventListener('click', () => headTo(Number(to.dataset.fdTo), to));
         const go = $('op-fd-go');

@@ -218,16 +218,17 @@ instrument state, so they stay per-mount. Two people looking at one microscope
 still want their own magnification.
 
 CalProgress is rule 6 at its most literal: it is **absent** until frames
-arrive, and an idle Calibration pane is 0px taller for its presence. It is
+arrive, and an idle Fit view (calibration, on Scope) is 0px taller for its presence. It is
 also the panel that owns the least — it starts nothing and stops nothing. It
 subscribes to `IMAGE_RECEIVED`, the broadcast every pushed image already rode,
 and narrates whatever calibration frames go past. That is why it also shows a
 calibration the AGENT started from chat, which the pane itself never knew
 about: the panel is watching the instrument, not the button.
 
-The Calibration pane's verbs are worth reading together, because each one
-answers "how do I get a fit?" differently and the pane shows only the ones
-that apply:
+Calibration's verbs are worth reading together, because each one answers
+"how do I get a fit?" differently and the page shows only the ones that
+apply. Calibrate is in Scope's Sheet panel; the rest are under the picture
+when Fit is chosen in the strip:
 
 | Verb | When it appears | What it costs |
 |---|---|---|
