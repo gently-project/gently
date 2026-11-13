@@ -2604,3 +2604,70 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
     .op-tiles { overflow: visible; flex: 0 0 auto; }
     .op-acq-table { max-height: 320px; }
 }
+
+/* ── The Calibration tab's archive (calibration-archive.js) ───────────────
+   Every run this session kept on disk: the runs, one raw exposure over the
+   run's strip, the run's record. The same three zones as Scope, in the
+   same panels. The class rules that set a display would outrank the hidden
+   attribute, so each says so. */
+.calibration-container[hidden], .cal-archive[hidden] { display: none; }
+.cal-archive {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr) 310px;
+    gap: 10px;
+    padding: 12px 10px 8px;
+    min-width: 0;
+    height: 100%;
+    box-sizing: border-box;
+}
+.cal-archive[data-runs="none"] { grid-template-columns: minmax(0, 1fr); }
+.cal-archive[data-runs="none"] > aside, .cal-archive[data-runs="none"] > section { display: none; }
+.cal-archive[data-runs="some"] > .cal-arc-empty { display: none; }
+.cal-arc-empty { align-self: center; justify-self: center; max-width: 460px; text-align: center; color: var(--op-ink-dim); font-size: 13px; line-height: 1.5; }
+.cal-arc-empty b { color: var(--op-ink); }
+
+.cal-arc-runs { min-height: 0; }
+.cal-arc-thead, .cal-arc-run { display: grid; grid-template-columns: 34px 92px minmax(0, 1fr); align-items: center; gap: 6px; padding: 0 6px; }
+.cal-arc-thead { flex: 0 0 auto; height: 18px; border-bottom: 1px solid var(--op-rule); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--op-ink-dim); }
+.cal-arc-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 1px; }
+.cal-arc-run { flex: 0 0 auto; height: 26px; border: 0; border-radius: 3px; background: transparent; color: var(--op-ink); font: 12px var(--op-ui); text-align: left; cursor: pointer; }
+.cal-arc-run:hover { background: var(--op-field); }
+.cal-arc-run.is-on { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.cal-arc-run:focus-visible, .cal-arc-cell:focus-visible, .cal-arc-raw:focus-visible, .cal-arc-plot:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cal-arc-id { font: 600 11px var(--op-mono); color: var(--accent); }
+.cal-arc-at { font: 11px var(--op-mono); color: var(--op-ink-dim); white-space: nowrap; }
+.cal-arc-out { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-arc-out.is-fit { font: 11px var(--op-mono); }
+.cal-arc-out.is-no { color: var(--op-warn); }
+.cal-arc-refresh { flex: 0 0 auto; align-self: flex-start; }
+
+.cal-arc-view { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+.cal-arc-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.cal-arc-file { flex: 1 1 auto; min-width: 0; font: 12px var(--op-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-arc-raw { flex: 1 1 auto; min-height: 120px; padding: 0; border: 1px solid var(--op-rule); border-radius: 4px; background: #04070b; cursor: zoom-in; overflow: hidden; display: grid; place-items: center; }
+.cal-arc-raw img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+.cal-arc-cap { flex: 0 0 auto; min-height: 15px; font: 11.5px var(--op-mono); color: var(--op-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-arc-filmbox { flex: 0 0 auto; }
+.cal-arc-film { display: flex; gap: 3px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+.cal-arc-cell { position: relative; flex: 0 0 auto; width: 76px; height: 56px; padding: 0; border: 1px solid var(--op-rule); border-radius: 3px; background: #04070b; overflow: hidden; cursor: pointer; }
+.cal-arc-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cal-arc-cell.is-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cal-arc-score { position: absolute; left: 2px; top: 2px; bottom: 2px; width: 4px; display: flex; align-items: flex-end; }
+.cal-arc-score i { display: block; width: 100%; background: var(--op-live); border-radius: 1px; }
+.cal-arc-n { position: absolute; right: 3px; bottom: 1px; font: 9.5px var(--op-mono); color: rgba(255, 255, 255, .8); }
+
+.cal-arc-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; }
+/* The plots take the room that is left and scroll inside it, so the run's
+   two verbs stay on screen under them. */
+.cal-arc-plotbox { flex: 1 1 auto; min-height: 90px; }
+.cal-arc-plotbox .cal-arc-plots { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.cal-arc-v { min-width: 0; font: 12px var(--op-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-arc-msg { margin: 6px 0 0; font-size: 11px; line-height: 1.4; color: var(--op-ink-dim); white-space: pre-wrap; }
+.cal-arc-plots { display: flex; flex-direction: column; gap: 6px; }
+.cal-arc-plot { flex: 0 0 auto; padding: 0; border: 1px solid var(--op-rule); border-radius: 3px; background: #fff; cursor: zoom-in; overflow: hidden; }
+.cal-arc-plot img { width: 100%; display: block; }
+.cal-arc-foot { flex: 0 0 auto; display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 1200px) {
+    .cal-archive { grid-template-columns: 240px minmax(0, 1fr); overflow-y: auto; }
+    .cal-arc-side { grid-column: 1 / -1; overflow: visible; }
+}

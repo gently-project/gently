@@ -934,20 +934,45 @@ const CalibrationProfileView = {
 
 const CalibrationManager = {
     selectedEmbryoId: null,
-    currentView: 'profile',  // 'profile' | 'gallery'
+    // 'runs' is the archive read from disk (calibration-archive.js) and is
+    // where the tab opens: it is the only view with anything in it after a
+    // restart. 'profile' and 'gallery' show what a run pushes while it goes.
+    currentView: 'runs',  // 'runs' | 'profile' | 'gallery'
     _lastImageCount: 0,
 
     render() {
+        this.showView();
         this.renderSidebar();
         this.renderPanel();
         this._lastImageCount = state.calibration.length;
     },
 
+    /** One of the archive and the pushed-image views is on the page. */
+    showView() {
+        const runs = this.currentView === 'runs';
+        const archive = document.getElementById('cal-archive');
+        const live = document.getElementById('calibration-live');
+        if (archive) archive.hidden = !runs;
+        if (live) live.hidden = runs;
+        if (typeof updateViewButtons === 'function') updateViewButtons('calibration-view-switcher', this.currentView);
+    },
+
+    /**
+     * The tab has been come to, or the archive chosen in it: read the runs on
+     * disk now. Not from render(), which every pushed image calls: a read
+     * there would put the archive back on its first exposure mid-look.
+     */
+    entered() {
+        if (this.currentView === 'runs' && typeof CalibrationArchive !== 'undefined') CalibrationArchive.show();
+    },
+
     switchView(viewName) {
-        if (!['profile', 'gallery'].includes(viewName)) return;
+        if (!['runs', 'profile', 'gallery'].includes(viewName)) return;
         this.currentView = viewName;
         CalibrationProfileView.selectedSliceIndex = null;
+        this.showView();
         this.renderPanel();
+        this.entered();
     },
 
     handleNewImage(newImage) {
@@ -1234,7 +1259,7 @@ const CalibrationManager = {
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof initViewSwitcher === 'function') {
         initViewSwitcher('calibration-view-switcher', (view) => CalibrationManager.switchView(view), {
-            views: ['profile', 'gallery'],
+            views: ['runs', 'profile', 'gallery'],
             guard: () => typeof state !== 'undefined' && state.tab === TABS.CALIBRATION
         });
     }

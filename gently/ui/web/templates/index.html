@@ -150,11 +150,57 @@
         <div class="calibration-header-bar">
             <h2 class="calibration-title">Calibration</h2>
             <div class="view-switcher" id="calibration-view-switcher">
-                <button class="view-btn active" data-view="profile" title="Profile view (1)">Profile</button>
-                <button class="view-btn" data-view="gallery" title="Gallery view (2)">Gallery</button>
+                <button class="view-btn active" data-view="runs" title="Every run this session kept on disk, with its raw exposures (1)">Runs</button>
+                <button class="view-btn" data-view="profile" title="The run in progress, as it is pushed to the page (2)">Profile</button>
+                <button class="view-btn" data-view="gallery" title="The pushed images as a gallery (3)">Gallery</button>
             </div>
         </div>
-        <div class="calibration-container">
+        {# The archive (calibration-archive.js): every calibration run this
+           session kept, read from disk through /api/calibration/records, so
+           it is here after a restart and holds the refused and aborted runs
+           too. Three zones, as Scope has them: the runs, one raw exposure
+           over the run's strip, the run's record. `operate` is on the root
+           for the workspace's panel, row and button styles. #}
+        <div class="operate cal-archive" id="cal-archive" data-runs="none">
+            <aside class="op-panel cal-arc-runs">
+                <div class="op-panel-name">Runs <em id="cal-arc-count"></em></div>
+                <div class="cal-arc-thead"><span title="Embryo">emb</span><span>at</span><span>came to</span></div>
+                <div class="cal-arc-list" id="cal-arc-list" role="listbox" aria-label="Calibration runs kept on disk"></div>
+                <button type="button" class="op-btn cal-arc-refresh" id="cal-arc-refresh" title="Read the runs on disk again">Read again</button>
+            </aside>
+            <section class="cal-arc-view">
+                <div class="cal-arc-bar">
+                    <span class="cal-arc-file" id="cal-arc-file" title="The file on disk"></span>
+                    <button type="button" class="op-btn" id="cal-arc-show" title="Show this exposure's file in the file manager">Show in folder</button>
+                    <button type="button" class="op-btn" id="cal-arc-fiji" title="Open this exposure in Fiji">Open in Fiji</button>
+                </div>
+                <button type="button" class="cal-arc-raw" id="cal-arc-raw" title="Open it large, with its counts"><img id="cal-arc-img" alt=""></button>
+                <div class="cal-arc-cap" id="cal-arc-cap"></div>
+                <div class="op-panel cal-arc-filmbox">
+                    <div class="op-panel-name">Every exposure of this run <em>in the order taken · the bar is its score within its sweep · ← → steps</em></div>
+                    <div class="cal-arc-film" id="cal-arc-film"></div>
+                </div>
+            </section>
+            <aside class="cal-arc-side">
+                <div class="op-panel">
+                    <div class="op-panel-name">This run</div>
+                    <div class="cal-arc-kv" id="cal-arc-kv"></div>
+                </div>
+                <div class="op-panel cal-arc-plotbox">
+                    <div class="op-panel-name">Its plots</div>
+                    <div class="cal-arc-plots" id="cal-arc-plots"></div>
+                </div>
+                <div class="cal-arc-foot">
+                    <button type="button" class="op-btn" id="cal-arc-folder" title="Show the run's folder in the file manager">Open the run's folder</button>
+                    <button type="button" class="op-btn op-btn-primary" id="cal-arc-recal" title="Go to the instrument with this embryo selected">Recalibrate ▸</button>
+                </div>
+            </aside>
+            <div class="cal-arc-empty">
+                <p><b>No calibration has been kept in this session yet.</b></p>
+                <p>Every run is kept with the exposures it took, the refused and aborted ones too. Calibrate an embryo from Devices and it is here, and still here after a restart.</p>
+            </div>
+        </div>
+        <div class="calibration-container" id="calibration-live" hidden>
             <!-- Left sidebar: Embryo list -->
             <div class="calibration-sidebar" id="calibration-sidebar">
                 <div class="calibration-sidebar-header">Embryos</div>
@@ -2028,6 +2074,7 @@
     <script src="/static/js/stage-colors.js"></script>
     <script src="/static/js/timepoint-player.js"></script>
     <script src="/static/js/viewer.js"></script>
+    <script src="/static/js/calibration-archive.js"></script>
     <script src="/static/js/gallery.js"></script>
     <script src="/static/js/control-auth.js"></script>
     <script src="/static/js/events.js"></script>

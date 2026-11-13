@@ -48,6 +48,7 @@ const Atrium = (() => {
               // a real fact that genuinely goes stale: the scope dropped off
               tol: 20, pressWhen: () => !ConnectionStatus.get().microscopeConnected },
             { tab: 'calibration', title: 'CALIBRATION', x: 540, y: 700, w: 700, h: 460, crit: 0.85, children: [
+                { key: 'runs', title: 'runs', go: () => CalibrationManager.switchView('runs') },
                 { key: 'profile', title: 'profile', go: () => CalibrationManager.switchView('profile') },
                 { key: 'gallery', title: 'gallery', go: () => CalibrationManager.switchView('gallery') },
               ] },
