@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from gently.core.file_store import _read_yaml, _write_yaml
+from gently.core.file_store import _read_yaml, _write_yaml, one_writer
 from gently.settings import settings
 
 NOT_PEOPLE = {"agent", "backfill", "perception"}
@@ -79,6 +79,7 @@ def names_of(store: Any = None) -> dict[str, str]:
     return {o["id"]: o["name"] for o in list_operators(store)}
 
 
+@one_writer
 def remember_operator(name: str) -> dict:
     """A name given at the landing: the person it names is seen now. A new
     name makes a new person; a known one, by id, keeps its display name."""
@@ -100,6 +101,7 @@ def remember_operator(name: str) -> dict:
     return {"id": pid, "name": name}
 
 
+@one_writer
 def touch_operator(pid: str) -> dict:
     """A known person, by id, is here now."""
     pid = (pid or "").strip()
@@ -112,6 +114,7 @@ def touch_operator(pid: str) -> dict:
     raise KeyError(pid)
 
 
+@one_writer
 def rename_operator(pid: str, name: str) -> dict:
     """The display name changes; the id, and so every record, stays."""
     name = (name or "").strip()[:40]

@@ -42,6 +42,8 @@ from typing import Any
 
 import yaml
 
+from gently.core.file_store import one_writer
+
 from .model import (
     Attention,
     BenchSpec,
@@ -2154,6 +2156,7 @@ class FileContextStore:
         except Exception:
             pass
 
+    @one_writer
     def add_expectation(self, exp: Expectation):
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
@@ -2212,6 +2215,7 @@ class FileContextStore:
         candidates.sort(key=lambda e: e.expected_time)
         return candidates[0]
 
+    @one_writer
     def resolve_expectation(self, exp_id: str, status: ExpectationStatus):
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
@@ -2325,6 +2329,7 @@ class FileContextStore:
         except Exception:
             logger.exception("Question %s was not marked answered in the notebook", q_id)
 
+    @one_writer
     def add_question(
         self, q: Question, *, by: str | None = None, mentions: list[str] | None = None
     ):
@@ -2371,6 +2376,7 @@ class FileContextStore:
         items.sort(key=lambda q: q.created_at)
         return items
 
+    @one_writer
     def resolve_question(self, q_id: str, resolution: str, *, by: str | None = None):
         self._question_answered(q_id, resolution or "", by)
         path = self.agent_dir / "active" / "questions.yaml"
@@ -2482,6 +2488,7 @@ class FileContextStore:
             return None
         return data.get(key)
 
+    @one_writer
     def set_state(self, key: str, value: str):
         path = self.agent_dir / "state.yaml"
         data = self._read_yaml(path)

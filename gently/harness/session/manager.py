@@ -32,7 +32,13 @@ class SessionManager:
 
     def create_session(self):
         """Create a new session in FileStore."""
+        # Eight characters of a uuid are not unique for ever, and a session
+        # made under an id already in use is given that session's folder.
         self._session_id = str(uuid.uuid4())[:8]
+        for _ in range(8):  # one clash is rare; eight in a row is not chance
+            if self.store.get_session(self._session_id) is None:
+                break
+            self._session_id = str(uuid.uuid4())[:8]
         self.store.create_session(self._session_id)
         logger.info(f"Created new session: {self._session_id}")
 

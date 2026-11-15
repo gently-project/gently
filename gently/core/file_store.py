@@ -56,6 +56,7 @@ Usage::
 
 import base64
 import copy
+import functools
 import json
 import logging
 import os
@@ -63,6 +64,7 @@ import re
 import shutil
 import socket
 import tempfile
+import threading
 import time
 from collections.abc import Mapping
 from datetime import datetime
@@ -222,6 +224,25 @@ _LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 # copy, so what they do to the document stays theirs.
 # ponytail: unbounded; a rig holds tens of thousands of small yaml files at most.
 _YAML_MEMO: dict[str, tuple[int, int, Any]] = {}
+
+# The small files (session.yaml, state.yaml, operators.yaml ...) are changed
+# by reading the whole file, changing it and writing the whole file. Two of
+# those at once, a request thread and the run's round, and one change is
+# written over by the other: a tag or a project link saved while the run
+# touched the session was lost. One lock for the lot. They are short, and the
+# writes themselves are already atomic.
+_ONE_WRITER = threading.RLock()
+
+
+def one_writer(fn):
+    """Run a read-change-write of a shared file with no other beside it."""
+
+    @functools.wraps(fn)
+    def held(*args, **kwargs):
+        with _ONE_WRITER:
+            return fn(*args, **kwargs)
+
+    return held
 
 
 def _read_yaml(path: Path) -> Any:
@@ -595,6 +616,7 @@ class FileStore:
             items = items[:limit]
         return [sid for sid, _ in items]
 
+    @one_writer
     def touch_session(self, session_id: str) -> None:
         """Update last_active timestamp."""
         sd = self._session_dir(session_id)
@@ -607,6 +629,7 @@ class FileStore:
         data["last_active"] = _now()
         _write_yaml(yaml_path, data)
 
+    @one_writer
     def update_session(
         self, session_id: str, *, name: str | None = None, description: str | None = None
     ) -> SessionInfo | None:
@@ -653,6 +676,7 @@ class FileStore:
     def session_links(self, session_id: str) -> list[dict]:
         return self.links_of(self.get_session(session_id))
 
+    @one_writer
     def _write_links(self, session_id: str, links: list[dict]) -> SessionInfo | None:
         sd = self._session_dir(session_id)
         if sd is None or not sd.exists():
@@ -710,6 +734,7 @@ class FileStore:
         self._write_links(session_id, links)
         return links
 
+    @one_writer
     def add_session_operator(self, session_id: str, operator_id: str | None) -> list[str]:
         """Who has worked this session: ids, in order of first appearance.
         Stamped when a session is opened, resumed or started at the gate."""
@@ -743,6 +768,7 @@ class FileStore:
             self.unlink_session(session_id)
         return self.get_session(session_id)
 
+    @one_writer
     def note_session_edit(self, session_id: str, by: str | None, what: str) -> None:
         """A person changed the session's own record: name, description,
         tags or tools. ``edited: {by, at, what}`` says who did it last."""
@@ -756,6 +782,7 @@ class FileStore:
         data["edited"] = {"by": by, "at": _now(), "what": what}
         _write_yaml(yaml_path, data)
 
+    @one_writer
     def set_session_tags(self, session_id: str, tags: list[str]) -> SessionInfo | None:
         """Tag a session: short words in its ``session.yaml`` that a selector
         can pool by (``control``, ``25C``). Replaces the whole list."""
