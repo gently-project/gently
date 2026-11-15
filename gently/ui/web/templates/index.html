@@ -429,6 +429,8 @@
                     <button class="nb-kind" data-nb-kind="finding">Findings</button>
                     <button class="nb-kind" data-nb-kind="question">Questions</button>
                 </div>
+                <input id="nb-search" class="nb-search" type="search" autocomplete="off"
+                       placeholder="Find in these notes" aria-label="Find in these notes">
                 <div class="nb-shelves" title="The notebook is what the agent reads. A note set aside stays in the stream and the inbox.">
                     <button class="nb-kind active" data-nb-shelf="notebook">In the notebook</button>
                     <button class="nb-kind" data-nb-shelf="aside">Set aside</button>
@@ -443,14 +445,16 @@
                 </aside>
                 <div class="nb-main">
                     <div class="nb-page-head" id="nb-page-head"></div>
-                    <div class="nb-notes" id="nb-notes"></div>
-                    <section class="nb-conv" id="nb-conv" aria-label="Conversation on this page"></section>
+                    <!-- The box, and what the agent said, above the notes: with twenty
+                         notes on the page the box was three screens down. -->
                     <div class="nb-ask">
                         <input id="nb-ask-input" class="nb-ask-input"
                                placeholder="Ask the agent about these notes…  (Shift+Enter files it as a line instead)">
                         <button id="nb-ask-go" class="nb-ask-go">Ask</button>
                         <button id="nb-note-go" class="nb-note-go" title="File this as a line on this page, in your words">Note it</button>
                     </div>
+                    <section class="nb-conv" id="nb-conv" aria-label="Conversation on this page"></section>
+                    <div class="nb-notes" id="nb-notes"></div>
                 </div>
             </div>
         </div>
