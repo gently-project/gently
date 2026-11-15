@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import traceback
 from collections import deque
 from collections.abc import Callable
@@ -79,6 +80,11 @@ def reporter_pseudo_stage(intensity_level: str | None, has_hatched: bool) -> str
     if intensity_level == "NONE":
         return "no_signal"
     return intensity_level or "unknown"
+
+
+# The most a laser line may stand at when a run begins and the plan gives it
+# no power of its own. GENTLY_UNPLANNED_LASER_MAX_PCT changes it.
+UNPLANNED_POWER_AT_MOST_PCT = float(os.environ.get("GENTLY_UNPLANNED_LASER_MAX_PCT", "10"))
 
 
 class TimelapseOrchestrator:
@@ -181,6 +187,8 @@ class TimelapseOrchestrator:
         # tube, the LED a shutter. Short, and the tests set it to nothing.
         self._bf_light_settle_s: float = 1.0
         self._bf_next_due_at: datetime | None = None
+        # The wall clock as last read by the round picker (_mind_the_clock).
+        self._clock_seen: datetime | None = None
         self._bf_frames = 0
         self._bf_last_at: datetime | None = None
 
@@ -809,6 +817,31 @@ class TimelapseOrchestrator:
             return "Photodose budget enforcement disabled."
         return f"Photodose budget set: {base_dose_budget_ms:.0f} ms base (scaled per role)."
 
+    def _mind_the_clock(self, now: datetime) -> None:
+        """Carry the round times back when the wall clock is put back.
+
+        Times here are the PC's local time with no zone. When the clocks go
+        back an hour in the autumn, at two in the morning, "now" is an hour
+        earlier than it was and every embryo's next round is an hour and
+        five minutes away: an hour's gap in an overnight timelapse. The
+        clock going forward needs nothing: everything is overdue once, is
+        imaged, and the cadence carries on from there.
+        """
+        last = self._clock_seen
+        self._clock_seen = now
+        if last is None:
+            return
+        back = (last - now).total_seconds()
+        if back < 60:
+            return
+        shift = timedelta(seconds=back)
+        for e in self._embryo_states.values():
+            if e.next_due_at is not None:
+                e.next_due_at -= shift
+        if self._bf_next_due_at is not None:
+            self._bf_next_due_at -= shift
+        logger.warning("The clock went back %.0f s; every round due is carried back with it", back)
+
     def _pick_next_due(self) -> tuple:
         """Pick the most-overdue eligible embryo.
 
@@ -821,6 +854,7 @@ class TimelapseOrchestrator:
             responsiveness). When (embryo, 0.0), acquire immediately.
         """
         now = datetime.now()
+        self._mind_the_clock(now)
         eligible = [e for e in self._embryo_states.values() if self._is_eligible(e)]
         if not eligible:
             return None, 5.0  # nothing to do; check back later
@@ -1643,6 +1677,7 @@ class TimelapseOrchestrator:
                         # written for one view keeps working.
                         extra = {"side": side} if side != "A" else {}
                         # Likewise the stack's own time, when the device gave one.
+                        # The store writes it in local time and in UTC.
                         if r.get("acquired_at_epoch"):
                             extra["acquired_at"] = datetime.fromtimestamp(
                                 float(r["acquired_at_epoch"])
@@ -1759,19 +1794,55 @@ class TimelapseOrchestrator:
         moved mid-run changed it under the run. Read at the start, it is
         logged, and sent with every volume so it cannot drift.
         """
-        self._powers_at_start = {}
+        self._powers_at_start = await self._read_unplanned_powers()
+        if self._powers_at_start:
+            logger.info(
+                "Laser powers held for this run where the plan sets none: %s",
+                ", ".join(f"{wl} nm {pct:g} %" for wl, pct in self._powers_at_start.items()),
+            )
+
+    async def _read_unplanned_powers(self) -> dict[int, float]:
+        """Each line's power as it stands, for the lines read here."""
+        out: dict[int, float] = {}
         for wl in (561, 405, 637):
             try:
                 got = await self.client.get_laser_power(wl)
             except Exception:
                 continue
             if isinstance(got, dict) and got.get("success") and got.get("pct") is not None:
-                self._powers_at_start[wl] = float(got["pct"])
-        if self._powers_at_start:
-            logger.info(
-                "Laser powers held for this run where the plan sets none: %s",
-                ", ".join(f"{wl} nm {pct:g} %" for wl, pct in self._powers_at_start.items()),
-            )
+                out[wl] = float(got["pct"])
+        return out
+
+    async def left_high_by_hand(self, laser_config: str | None, embryos: list[Any]) -> str | None:
+        """Why this run should not start as it is, or None.
+
+        488 is bounded at 6 %. The other lines are allowed anything up to
+        100 %, and a line the plan gives no power runs at whatever it was
+        last set to by hand. So: a line this run's preset turns on, with no
+        power in the plan, standing above ``UNPLANNED_POWER_AT_MOST_PCT``,
+        is refused, and the message says which line and what to do. A power
+        the plan states is the operator's choice and is not questioned here.
+        """
+        used = {int(n) for n in re.findall(r"\d{3}", str(laser_config or "488 and 561"))}
+        if str(laser_config or "").strip().upper() == "ALL":
+            used = {405, 488, 561, 637}
+        standing = await self._read_unplanned_powers()
+        high = [
+            (wl, pct)
+            for wl, pct in sorted(standing.items())
+            if wl in used
+            and pct > UNPLANNED_POWER_AT_MOST_PCT
+            and any(getattr(e, f"laser_power_{wl}_pct", None) is None for e in embryos)
+        ]
+        if not high:
+            return None
+        lines = ", ".join(f"{wl} nm is at {pct:g} %" for wl, pct in high)
+        return (
+            f"{lines}, set by hand and not by this plan. Lower it in Light, or give the "
+            f"line a power in the plan, then start again "
+            f"(a line the plan does not set may stand at "
+            f"{UNPLANNED_POWER_AT_MOST_PCT:g} % at most)."
+        )
 
     async def _check_stop_condition(self, embryo_state: EmbryoState):
         """

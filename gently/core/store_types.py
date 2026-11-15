@@ -49,6 +49,7 @@ class VolumeInfo(TypedDict):
     shape: list[int] | None
     dtype: str | None
     acquired_at: str
+    acquired_at_utc: NotRequired[str]
     metadata: dict | None
 
 
