@@ -94,6 +94,16 @@
             </button>
             <div class="status-popover rig-menu hidden" id="status-popover" role="dialog" aria-label="Rig">
 
+                {# HALT, from every tab. It was on Scope only, and the thing it
+                   stops may have been started from anywhere. First in the
+                   menu, and never asks twice: a stop that hesitates is worse
+                   than one pressed by mistake. #}
+                <div class="rig-sec rig-sec-halt">
+                    <button type="button" class="rig-halt" id="rig-halt"
+                            title="Stop every stage and piezo now, and put out the lasers, the LED and the scan">HALT</button>
+                    <span class="rig-halt-says" id="rig-halt-says">stops every stage · lasers, LED and scan off</span>
+                </div>
+
                 <div class="rig-sec">
                     <div class="rig-sec-head">
                         <span class="rig-sec-label">Device layer</span>

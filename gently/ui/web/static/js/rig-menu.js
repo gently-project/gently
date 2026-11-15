@@ -261,8 +261,32 @@ const RigMenu = (function () {
         } catch (e) { say('Could not switch the room light (' + e.message + ')', true); }
     }
 
+    // HALT: every positioner stopped, everything that lights the sample off.
+    // What did not stop or go out is named; that is the point of the reply.
+    async function halt() {
+        const says = $('rig-halt-says');
+        const idle = 'stops every stage · lasers, LED and scan off';
+        const tell = (msg, bad) => {
+            if (says) { says.textContent = msg; says.classList.toggle('is-bad', !!bad); }
+            say(msg, bad);
+            setTimeout(() => { if (says) { says.textContent = idle; says.classList.remove('is-bad'); } }, 8000);
+        };
+        try {
+            const r = await post('/api/devices/motion/halt', {});
+            const stopped = (r.halted || []).join(', ');
+            tell(stopped ? `Halted: ${stopped}${(r.dark || []).length ? ' · light off' : ''}`
+                : 'HALT reached no positioners', !stopped);
+        } catch (e) {
+            const d = (e && e.data) || {};
+            const failed = Object.keys(d.errors || {});
+            tell(failed.length ? `HALT: ${failed.join(', ')} did NOT stop` : `HALT failed (${e.message})`, true);
+        }
+    }
+
     function init() {
         if (!cacheDom()) return;
+        const haltBtn = $('rig-halt');
+        if (haltBtn) haltBtn.addEventListener('click', halt);
 
         _el.start.addEventListener('click', startLayer);
         _el.stop.addEventListener('click', stopLayer);
