@@ -1454,6 +1454,7 @@ const OperateManager = (function () {
     // ── which camera is on screen ───────────────────────────────────────────
     // The strip above the frame. The bottom camera is its own surface; the
     // three light-sheet choices are the SPIM surface on a side.
+    let _beforeFit = 'bottom';   // the camera on screen before the fit's graphs
     function renderSource() {
         const on = _pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : _pane === 'cal' ? 'fit' : null;
         document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b => {
@@ -1464,8 +1465,14 @@ const OperateManager = (function () {
     }
     function chooseSource(src) {
         if (src === 'bottom') { showPane('bottom'); return; }
-        // Not a camera: what the selected embryo's calibration looks at.
-        if (src === 'fit') { showPane('cal'); return; }
+        // Not a camera: what the selected embryo's calibration looks at. The
+        // button is a toggle: pressed while the graphs are up, it goes back
+        // to the camera that was on screen before them.
+        if (src === 'fit') {
+            if (_pane === 'cal') chooseSource(_beforeFit);
+            else showPane('cal');
+            return;
+        }
         // A side pressed is the side wanted. It is told to the device layer
         // BEFORE the surface is entered, so the read on entering finds this
         // page's own switch a moment old and leaves it be (adoptLsParams).
@@ -4382,6 +4389,9 @@ const OperateManager = (function () {
         if (name === 'scope') name = _scope;
         if (!PANES[name] || name === _pane) return;
         const prev = _pane;
+        // What the graphs are shown over, however they came up (the button,
+        // or pressing Calibrate): the camera to go back to.
+        if (name === 'cal') _beforeFit = prev === 'spim' ? _side : 'bottom';
         _pane = name;
         if (inScope(name)) _scope = name;
         if (PANES[prev]) PANES[prev].onLeave(name);
