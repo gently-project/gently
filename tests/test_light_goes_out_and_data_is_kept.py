@@ -164,3 +164,61 @@ def test_a_stack_already_on_disk_is_moved_aside_not_written_over(tmp_path):
     store.register_volume("s1", "embryo_1", 3, incoming_path=incoming)
     assert len(list(path.parent.glob("t0003.was_*.tif"))) == 2
     assert (tifffile.imread(path) == 11).all()
+
+
+def test_a_camera_that_never_answers_does_not_keep_the_lasers_on(monkeypatch):
+    """The whole path, with a real hang: the stack's own thread is stuck in
+    a call to the camera that never returns, so nothing it would do next
+    runs. The lasers are put out all the same, from the other thread."""
+    import threading
+
+    from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+
+    monkeypatch.setattr(acquisition, "LASERS_ON_AT_MOST_S", 0.3)
+    stuck = threading.Event()
+    presets: list[str] = []
+
+    class Core:
+        def setConfig(self, group, preset):
+            presets.append(preset)
+
+        def popNextImage(self):
+            stuck.wait(20)  # the camera never answers
+            raise RuntimeError("released by the test")
+
+        def getRemainingImageCount(self):
+            return 1
+
+        def isSequenceRunning(self, *a):
+            return False
+
+        def getBufferTotalCapacity(self):
+            return 1000
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    lasers = SimpleNamespace(group_name="Laser", set_power_pct=lambda *a: None)
+    vs = DiSPIMVolumeScanner(
+        scanner=MagicMock(),
+        camera=MagicMock(),
+        piezo=MagicMock(),
+        laser_control=lasers,
+        core=Core(),
+    )
+    vs.configure(
+        num_slices=2,
+        exposure_ms=10.0,
+        galvo_amplitude=0.5,
+        galvo_center=0.0,
+        piezo_amplitude=25.0,
+        piezo_center=50.0,
+    )
+    vs.trigger()
+    try:
+        time.sleep(1.0)
+        # Still stuck in the camera, and the lasers are already out.
+        assert not stuck.is_set()
+        assert presets[0] != "ALL OFF" and "ALL OFF" in presets
+    finally:
+        stuck.set()

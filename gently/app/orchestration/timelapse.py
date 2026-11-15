@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 
 from gently.core import EventType, get_event_bus, spim_alignment
+from gently.core.file_store import utc_of_epoch
 from gently.core.imaging import (
     apply_crop_bounds,
     compute_crop_bounds,
@@ -1682,6 +1683,7 @@ class TimelapseOrchestrator:
                             extra["acquired_at"] = datetime.fromtimestamp(
                                 float(r["acquired_at_epoch"])
                             ).isoformat()
+                            extra["acquired_at_utc"] = utc_of_epoch(r["acquired_at_epoch"])
                         callback_result = await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,

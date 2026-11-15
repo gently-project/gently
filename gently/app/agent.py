@@ -1732,6 +1732,7 @@ class MicroscopyAgent:
         volume_path=None,
         side: str = "A",
         acquired_at: str | None = None,
+        acquired_at_utc: str | None = None,
     ):
         """Callback when a volume is acquired. ``side`` is the imaging path it
         came from; A is the canonical view and lands where volumes always have,
@@ -1779,6 +1780,7 @@ class MicroscopyAgent:
                         volume_data=volume,
                         side=side,
                         acquired_at=acquired_at,
+                        acquired_at_utc=acquired_at_utc,
                     )
                 else:
                     stored_path = self.store.put_volume(
@@ -1789,6 +1791,7 @@ class MicroscopyAgent:
                         metadata=acq_metadata,
                         side=side,
                         acquired_at=acquired_at,
+                        acquired_at_utc=acquired_at_utc,
                     )
             except StorageError:
                 raise

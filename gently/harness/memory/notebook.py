@@ -20,7 +20,7 @@ from typing import Any
 
 import yaml
 
-from gently.core.file_store import _YAML_MEMO
+from gently.core.file_store import _YAML_MEMO, utc_now
 from gently.core.file_store import _read_yaml as _read_yaml_memo
 
 from .model import Confidence, Learning, Observation
@@ -127,6 +127,9 @@ class Note:
     # notebook", and the agent's own reading of its findings.
     in_notebook: bool = True
     created_at: datetime = field(default_factory=datetime.now)
+    # The same moment in UTC, read from the clock when the note is first
+    # written. None on notes written before it was kept.
+    created_at_utc: str | None = None
     updated_at: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self) -> None:
@@ -161,6 +164,7 @@ def note_to_dict(n: Note) -> dict[str, Any]:
         "superseded_by": n.superseded_by,
         "in_notebook": bool(n.in_notebook),
         "created_at": n.created_at.isoformat(),
+        "created_at_utc": n.created_at_utc,
         "updated_at": n.updated_at.isoformat(),
     }
 
@@ -188,6 +192,7 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         by=d.get("by"),
         in_notebook=d.get("in_notebook", True) is not False,  # files before the flag: in
         created_at=datetime.fromisoformat(d["created_at"]),
+        created_at_utc=d.get("created_at_utc"),
         updated_at=datetime.fromisoformat(d["updated_at"]),
     )
 
@@ -370,6 +375,8 @@ class NotebookStore:
         if old is not None:
             old.unlink()
         else:
+            if not note.created_at_utc:
+                note.created_at_utc = utc_now()
             # A line written after another is later than it. The clock on
             # Windows ticks every few milliseconds, so two lines written back
             # to back were given the same created_at and listed in the order

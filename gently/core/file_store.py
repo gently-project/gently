@@ -333,16 +333,33 @@ def _now() -> str:
     return datetime.now().isoformat()
 
 
+_UTC = "%Y-%m-%dT%H:%M:%S.%fZ"
+
+
+def utc_now() -> str:
+    """Now, in UTC, with its Z: read from the clock, not worked out from a
+    local time."""
+    return datetime.now(timezone.utc).strftime(_UTC)
+
+
+def utc_of_epoch(epoch: float) -> str:
+    """A moment given in seconds since 1970, in UTC with its Z."""
+    return datetime.fromtimestamp(float(epoch), tz=timezone.utc).strftime(_UTC)
+
+
 def _in_utc(local_iso: str | None = None) -> str:
-    """The same moment in UTC, with its Z. Every time on disk is the PC's
-    local time with no zone: the hour the clocks go back happens twice, and
-    two stacks in it cannot be put in order or timed against one another.
-    A stack's time is written both ways. ``None`` is now."""
+    """A local time worked back to UTC. Every time on disk is the PC's local
+    time with no zone: the hour the clocks go back happens twice, and a time
+    in it cannot be worked back for certain. So this is the last resort, for
+    a caller that has only a local time; one that has the moment itself
+    gives ``utc_of_epoch`` or ``utc_now``. ``None`` is now, from the clock."""
+    if not local_iso:
+        return utc_now()
     try:
-        local = datetime.fromisoformat(local_iso) if local_iso else datetime.now()
+        local = datetime.fromisoformat(local_iso)
     except (TypeError, ValueError):
-        local = datetime.now()
-    return local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        return utc_now()
+    return local.astimezone(timezone.utc).strftime(_UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +586,7 @@ class FileStore:
             "name": name,
             "description": description,
             "created_at": now,
+            "created_at_utc": utc_now(),
             "last_active": now,
             "metadata": metadata,
             "project_id": project_id,
@@ -1283,6 +1301,7 @@ class FileStore:
         metadata: dict | None = None,
         side: str = "A",
         acquired_at: str | None = None,
+        acquired_at_utc: str | None = None,
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, write sidecar metadata.
@@ -1323,7 +1342,7 @@ class FileStore:
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
             "acquired_at": acquired_at or _now(),
-            "acquired_at_utc": _in_utc(acquired_at),
+            "acquired_at_utc": acquired_at_utc or _in_utc(acquired_at),
             "metadata": metadata,
         }
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
@@ -1344,6 +1363,7 @@ class FileStore:
         volume_data: np.ndarray | None = None,
         side: str = "A",
         acquired_at: str | None = None,
+        acquired_at_utc: str | None = None,
     ) -> Path:
         """
         Zero-copy path: move an existing TIFF to its canonical location.
@@ -1393,7 +1413,7 @@ class FileStore:
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
             "acquired_at": acquired_at or _now(),
-            "acquired_at_utc": _in_utc(acquired_at),
+            "acquired_at_utc": acquired_at_utc or _in_utc(acquired_at),
             "metadata": metadata,
         }
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
