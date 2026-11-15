@@ -2874,7 +2874,39 @@ const DevicesManager = (function () {
         else if (_currentView === 'operate') OperateManager.activate();
     }
 
+    // Manual is a second set of the instrument's controls (sheet, lasers, LED,
+    // snap, burst, the room light, the water's setpoint), and none of them
+    // knew about a run. While one is running they are locked: the view can be
+    // looked at, and one deliberate press unlocks it for a minute. Burst, the
+    // room light and the setpoint are only here, so the view stays.
+    const MANUAL_UNLOCK_MS = 60000;
+    let _manualUnlockedUntil = 0;
+    function lockManualUnderARun() {
+        const view = document.getElementById('devices-view-manual');
+        if (!view) return;
+        let bar = document.getElementById('devices-manual-lock');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'devices-manual-lock';
+            bar.className = 'devices-manual-lock';
+            bar.innerHTML = '<span>A run is going. These controls act on the instrument it is using, so they are locked.</span>'
+                + '<button type="button" class="view-btn">Unlock for a minute</button>';
+            bar.querySelector('button').addEventListener('click', () => {
+                _manualUnlockedUntil = Date.now() + MANUAL_UNLOCK_MS;
+                lockManualUnderARun();
+                setTimeout(lockManualUnderARun, MANUAL_UNLOCK_MS + 50);
+            });
+            view.prepend(bar);
+        }
+        const locked = document.body.dataset.run === 'running' && Date.now() >= _manualUnlockedUntil;
+        bar.hidden = !locked;
+        [...view.children].forEach(el => { if (el !== bar) el.inert = locked; });
+    }
+
     function init() {
+        lockManualUnderARun();
+        // The shell keeps the run's state on <body>; the lock follows it.
+        new MutationObserver(lockManualUnderARun).observe(document.body, { attributes: true, attributeFilter: ['data-run'] });
         cacheDom();
         setupViewSwitcher();
         setupRegionEditor();

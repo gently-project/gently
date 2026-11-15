@@ -280,7 +280,14 @@ class TestNaming:
         for page in ("review.js", "home.js", "campaigns.js"):
             src = (js / page).read_text(encoding="utf-8")
             assert "s.name || s.session_id" not in src, page
-            assert "s.name || s.suggested_name || s.session_id" in src, page
+            # Home says the derived words through said(), which leaves "cut
+            # short" off the live session: its run is going, not cut short.
+            want = (
+                "s.name || said(s) || s.session_id"
+                if page == "home.js"
+                else ("s.name || s.suggested_name || s.session_id")
+            )
+            assert want in src, page
 
     def test_what_a_person_wrote_is_the_logs_last_column(self):
         # A derived name was the row's facts in a sentence; in the log they
