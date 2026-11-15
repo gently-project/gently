@@ -34,7 +34,7 @@ def _lasers_out_after(core, group_name: str, seconds: float) -> threading.Timer:
     """
 
     def out() -> None:
-        logger.error("A stack held the lasers on for %.0f s; putting them out", seconds)
+        logger.error("A stack had not finished after %.0f s; putting the lasers out", seconds)
         try:
             core.setConfig(group_name, "ALL OFF")
         except Exception:
@@ -307,6 +307,13 @@ class DiSPIMVolumeScanner:
                 self.core.setConfig(self.laser_control.group_name, "ALL OFF")
                 self.core.waitForConfig(self.laser_control.group_name, "ALL OFF")
 
+                # A stack stopped part way (HALT, a camera that gave up) is a
+                # failure. It used to be returned as it stood, and a volume of
+                # 140 of 300 slices was filed as that timepoint.
+                if len(images) != self._num_slices:
+                    raise RuntimeError(
+                        f"stack cut short: {len(images)} of {self._num_slices} frames"
+                    )
                 # Store volume
                 self._last_volume = np.array(images)
                 self._last_volume_time = time.time()

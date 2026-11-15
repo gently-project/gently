@@ -1256,8 +1256,21 @@ class DiSPIMMicroscope(Microscope):
         return await self._api_post("/api/stage/joystick", {"enabled": bool(enabled)})
 
     async def halt_motion(self) -> dict:
-        """Stop every positioner now (F-drive, XY, bottom Z). See #109."""
-        return await self._api_post("/api/motion/halt", {})
+        """Stop every positioner now and put the light out. See #109.
+
+        Asked first on the device layer's stop line (its port + 1), which
+        answers while a plan is running; the main port does not until the
+        plan ends. A device layer with no stop line is asked the old way.
+        """
+        try:
+            assert self._session is not None
+            scheme, _, rest = self.http_url.partition("://")
+            host, _, port = rest.rpartition(":")
+            url = f"{scheme}://{host}:{int(port) + 1}/halt"
+            async with self._session.post(url, json={}, timeout=5) as resp:
+                return await resp.json()
+        except Exception:
+            return await self._api_post("/api/motion/halt", {})
 
     async def nudge_fdrive(self, delta: float) -> dict:
         """Fenced relative move of the SPIM-head F-drive by ``delta`` µm."""
