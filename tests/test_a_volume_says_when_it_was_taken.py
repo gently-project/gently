@@ -38,7 +38,9 @@ REPO = Path(__file__).resolve().parents[1]
 def test_the_device_reads_the_time_the_scan_was_set_running():
     core, scanner = MagicMock(), MagicMock()
     core.isSequenceRunning.return_value = False
-    core.getRemainingImageCount.return_value = 0
+    frames = [np.zeros((2, 2), np.uint16), np.zeros((2, 2), np.uint16)]
+    core.getRemainingImageCount.side_effect = lambda: len(frames)
+    core.popNextImage.side_effect = lambda: frames.pop()
     core.getBufferTotalCapacity.return_value = 1000
     vs = DiSPIMVolumeScanner(
         scanner=scanner, camera=MagicMock(), piezo=MagicMock(), laser_control=MagicMock(), core=core

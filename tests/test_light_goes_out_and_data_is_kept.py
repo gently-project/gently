@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +51,7 @@ def test_halt_puts_out_everything_that_lights_the_sample():
     core = MagicMock()
     core.isSequenceRunning.return_value = True
     scanner, scanner_b, led = MagicMock(), MagicMock(), MagicMock()
+    scanner.name, scanner_b.name = "Scanner:AB", "Scanner:CD"
     lasers = SimpleNamespace(group_name="Laser")
     status, body = _halt(
         {
@@ -62,21 +64,34 @@ def test_halt_puts_out_everything_that_lights_the_sample():
         core,
     )
     assert status == 200 and body["halted"] == ["xy_stage"]
+    # The lasers and the LED first: they are the light.
     assert body["dark"] == [
+        "lasers",
+        "led",
         "scanner scan",
         "scanner beam",
         "scanner_b scan",
         "scanner_b beam",
-        "camera",
-        "lasers",
-        "led",
+        "camera (stopping)",
     ]
-    for s in (scanner, scanner_b):
-        s.set_spim_state.assert_called_once_with("Idle")
-        s.enable_beam.assert_called_once_with(False)
-    core.stopSequenceAcquisition.assert_called_once()
     core.setConfig.assert_called_once_with("Laser", "ALL OFF")
     led.set.assert_called_once_with("Closed")
+    # The scan and the beams are told without waiting for the card to say it
+    # is done: the device's own setters wait, five seconds at a time, and on
+    # the rig that was a minute with a stack in flight.
+    for name in ("Scanner:AB", "Scanner:CD"):
+        core.setProperty.assert_any_call(name, "SPIMState", "Idle")
+        core.setProperty.assert_any_call(name, "BeamEnabled", "No")
+    scanner.set_spim_state.assert_not_called()
+    core.waitForDevice.assert_not_called()
+    # Light before motion, and the camera last and not waited for: its stop
+    # took a minute on the rig with the scan idle, and the stages had waited.
+    order = [c[0] for c in core.method_calls]
+    assert order.index("setConfig") < order.index("stop") < order.index("isSequenceRunning")
+    for th in threading.enumerate():
+        if th.name == "halt-camera":
+            th.join(timeout=5)
+    core.stopSequenceAcquisition.assert_called_once()
 
 
 def test_what_would_not_go_out_is_named_and_the_rest_is_still_tried():
@@ -222,3 +237,74 @@ def test_a_camera_that_never_answers_does_not_keep_the_lasers_on(monkeypatch):
         assert presets[0] != "ALL OFF" and "ALL OFF" in presets
     finally:
         stuck.set()
+
+
+def test_halt_is_heard_while_a_plan_is_running():
+    """On the rig, HALT pressed 2.6 s into a five-second stack was acted on at
+    7.4 s, after the last frame: a plan runs on the thread that answers
+    every request. The stop line is a second listener on its own thread."""
+    import http.client
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        free = probe.getsockname()[1]
+    core = MagicMock()
+    core.isSequenceRunning.return_value = False
+    dl = DeviceLayerServer.__new__(DeviceLayerServer)
+    dl.system = SimpleNamespace(core=core)
+    dl.devices = {"xy_stage": SimpleNamespace(name="XY"), "led": MagicMock()}
+    dl.port = free - 1
+    assert dl.start_stop_line() == free
+    try:
+        # Nothing else of the device layer is running: no event loop at all.
+        conn = http.client.HTTPConnection("127.0.0.1", free, timeout=5)
+        conn.request("POST", "/halt", body="{}")
+        resp = conn.getresponse()
+        body = json.loads(resp.read())
+        assert resp.status == 200 and body["halted"] == ["xy_stage"] and "led" in body["dark"]
+        core.stop.assert_called_once_with("XY")
+    finally:
+        dl._stop_line.shutdown()
+    # It is started with the device layer, and the client asks it first.
+    src = Path(acquisition.__file__).parents[1].joinpath("device_layer.py").read_text("utf-8")
+    assert "        self.start_stop_line()\n" in src
+    client = Path(acquisition.__file__).parents[1].joinpath("client.py").read_text("utf-8")
+    halt = client[client.index("    async def halt_motion(self) -> dict:") :][:900]
+    assert "int(port) + 1" in halt and 'self._api_post("/api/motion/halt", {})' in halt
+
+
+def test_a_stack_cut_short_is_a_failure():
+    """Stopped part way, a stack was returned as it stood: 140 of 300 slices,
+    filed as that timepoint."""
+    from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+
+    frames = [np.zeros((2, 2), np.uint16)]  # one frame of the three asked for
+    core = MagicMock()
+    core.isSequenceRunning.return_value = False
+    core.getBufferTotalCapacity.return_value = 1000
+    core.getRemainingImageCount.side_effect = lambda: len(frames)
+    core.popNextImage.side_effect = lambda: frames.pop()
+    vs = DiSPIMVolumeScanner(
+        scanner=MagicMock(),
+        camera=MagicMock(),
+        piezo=MagicMock(),
+        laser_control=MagicMock(),
+        core=core,
+    )
+    vs.configure(
+        num_slices=3,
+        exposure_ms=10.0,
+        galvo_amplitude=0.5,
+        galvo_center=0.0,
+        piezo_amplitude=25.0,
+        piezo_center=50.0,
+    )
+    status = vs.trigger()
+    import threading
+
+    for t in threading.enumerate():
+        if t is not threading.current_thread() and t.name != "stop-line":
+            t.join(timeout=5)
+    assert "stack cut short: 1 of 3 frames" in str(status.exception(timeout=1))
+    assert vs.read() == {}

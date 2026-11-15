@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -3565,56 +3566,150 @@ class DeviceLayerServer(Service):
         (halted) position on its own. Ungated on purpose: a stop button that
         answers "you do not have control" is worse than no stop button.
         """
-        halted: list[str] = []
+        halted, dark, errors = await asyncio.to_thread(self._halt_now)
+        return web.json_response(
+            {"success": not errors, "halted": halted, "dark": dark, "errors": errors},
+            status=200 if not errors else 502,
+        )
+
+    def _halt_now(self) -> tuple[list[str], list[str], dict[str, str]]:
+        """Put the light out and stop every positioner. Plain, on whatever
+        thread calls it: the HTTP route above, and the stop line below.
+
+        Light first, and the lasers first of the light. On the rig, with the
+        positioners asked first, a HALT during a stack took a minute to get
+        through and the lasers were put out by the stack's own 30 s clock
+        before HALT reached them. How long each step took is logged."""
         errors: dict[str, str] = {}
+        took: dict[str, float] = {}
+        dark = self._light_out(errors, took)
+        halted: list[str] = []
         # The piezo is a stage to MMCore too, and an aborted calibration can
         # leave it mid-sweep. The galvo is not a positioner and has no stop.
         for key in ("fdrive", "xy_stage", "z_stage", "piezo"):
             dev = self.devices.get(key)
             if dev is None:
                 continue
+            t0 = time.perf_counter()
             try:
-                await asyncio.to_thread(self.system.core.stop, dev.name)
+                self.system.core.stop(dev.name)
                 halted.append(key)
             except Exception as exc:
                 errors[key] = str(exc)
-        dark = await asyncio.to_thread(self._light_out, errors)
-        logger.warning("HALT: stopped %s, light out %s, errors=%s", halted, dark, errors)
-        return web.json_response(
-            {"success": not errors, "halted": halted, "dark": dark, "errors": errors},
-            status=200 if not errors else 502,
+            took[key] = time.perf_counter() - t0
+        if self._stop_the_camera():
+            dark.append("camera (stopping)")
+        logger.warning(
+            "HALT: light out %s, stopped %s, errors=%s, took %s",
+            dark,
+            halted,
+            errors,
+            ", ".join(f"{k} {v * 1000:.0f} ms" for k, v in took.items()),
         )
+        return halted, dark, errors
 
-    def _light_out(self, errors: dict[str, str]) -> list[str]:
-        """Everything that lights the sample, off: the scan, the cameras'
-        sequence, the beams, the lasers, the LED. HALT stopped what moves and
+    def start_stop_line(self) -> int | None:
+        """A second, tiny HTTP server on its own thread, for HALT only.
+
+        A plan runs on the thread that serves every request, so while a stack
+        is being taken or a stage is being driven by a plan, nothing is
+        answered until the plan ends. On the rig, HALT pressed 2.6 s into a
+        five-second stack was acted on at 7.4 s, after the last frame. This
+        line does not wait for that thread. It listens beside the main port
+        (one above it), on the loopback only, and any POST to it is a halt.
+        """
+        import http.server
+        import json as _json
+
+        layer = self
+
+        class Stop(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802  (the name http.server calls)
+                halted, dark, errors = layer._halt_now()
+                body = _json.dumps(
+                    {"success": not errors, "halted": halted, "dark": dark, "errors": errors}
+                ).encode()
+                self.send_response(200 if not errors else 502)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):  # quiet: _halt_now logs what matters
+                return
+
+        port = int(self.port or 0) + 1
+        try:
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Stop)
+        except OSError as exc:
+            logger.error("The stop line could not listen on %d: %s", port, exc)
+            return None
+        threading.Thread(target=server.serve_forever, name="stop-line", daemon=True).start()
+        self._stop_line = server
+        logger.info("Stop line listening on http://127.0.0.1:%d", port)
+        return port
+
+    def _light_out(self, errors: dict[str, str], took: dict[str, float] | None = None) -> list[str]:
+        """Everything that lights the sample, off: the lasers, the LED, the
+        scan, the beams. HALT stopped what moves and
         left what shines: pressed during a stack, the lasers went on firing.
-        Each is tried whatever the one before did; what would not go out is
-        named in ``errors``."""
+
+        The lasers and the LED first: they are the light, they are one write
+        each, and neither waits on the controller that is busy scanning. The
+        scan and the beams are told without waiting for the card to say it
+        is done, which is what took the time. Each is tried whatever the one
+        before did; what would not go out is named in ``errors``."""
         core = self.system.core
         dark: list[str] = []
+        took = took if took is not None else {}
 
         def attempt(what: str, fn) -> None:
+            t0 = time.perf_counter()
             try:
                 fn()
                 dark.append(what)
             except Exception as exc:
                 errors[what] = str(exc)
+            took[what] = time.perf_counter() - t0
 
-        for key in ("scanner", "scanner_b"):
-            dev = self.devices.get(key)
-            if dev is not None:
-                attempt(f"{key} scan", lambda d=dev: d.set_spim_state("Idle"))
-                attempt(f"{key} beam", lambda d=dev: d.enable_beam(False))
-        if hasattr(core, "isSequenceRunning"):
-            attempt("camera", lambda: core.isSequenceRunning() and core.stopSequenceAcquisition())
         lasers = self.devices.get("laser_control")
         if lasers is not None:
             attempt("lasers", lambda: core.setConfig(lasers.group_name, "ALL OFF"))
         led = self.devices.get("led")
         if led is not None:
             attempt("led", lambda: led.set("Closed"))
+        for key in ("scanner", "scanner_b"):
+            dev = self.devices.get(key)
+            if dev is not None:
+                # The properties themselves, with no wait for the card: the
+                # device's own setters wait for it, five seconds at a time.
+                attempt(f"{key} scan", lambda d=dev: core.setProperty(d.name, "SPIMState", "Idle"))
+                attempt(f"{key} beam", lambda d=dev: core.setProperty(d.name, "BeamEnabled", "No"))
         return dark
+
+    def _stop_the_camera(self) -> bool:
+        """Tell a camera that is waiting on the scan to stop, and do not wait
+        for it. With the scan idle the triggers it waits for never come, and
+        its stop took a minute on the rig: the stages were not asked until it
+        was done. It is told on a thread of its own, last, and HALT answers
+        without it. True when a sequence was running."""
+        core = self.system.core
+        try:
+            if not (hasattr(core, "isSequenceRunning") and core.isSequenceRunning()):
+                return False
+        except Exception:
+            return False
+
+        def stop() -> None:
+            t0 = time.perf_counter()
+            try:
+                core.stopSequenceAcquisition()
+                logger.warning("HALT: the camera stopped after %.1f s", time.perf_counter() - t0)
+            except Exception:
+                logger.exception("HALT: the camera would not stop")
+
+        threading.Thread(target=stop, name="halt-camera", daemon=True).start()
+        return True
 
     async def handle_get_bottom_z(self, request):
         """GET /api/stage/bottom_z — bottom-camera focus Z position + limits."""
@@ -4878,6 +4973,7 @@ class DeviceLayerServer(Service):
 
         logger.info("=" * 60)
         logger.info("HTTP API available at http://%s:%d", self.host, self.port)
+        self.start_stop_line()
         logger.info("=" * 60)
         logger.info(
             "Endpoints: GET /api/status, GET /api/devices, GET /api/plans,"
