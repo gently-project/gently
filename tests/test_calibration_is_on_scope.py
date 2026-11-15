@@ -97,9 +97,11 @@ def test_the_step_has_a_name_on_screen() -> None:
     assert 'id="op-fit-show" data-source="fit"' in row
     assert row.index('id="op-fit-show"') < row.index('id="op-calibrate"')
     assert OPERATE.count("'#op-source [data-source], #op-fit-show'") == 2
-    assert "if (src === 'fit') { showPane('cal'); return; }" in _fn(
-        "    function chooseSource(src) {"
-    )
+    choose = _fn("    function chooseSource(src) {")
+    # A toggle: pressed with the graphs up, back to the camera before them.
+    assert "if (_pane === 'cal') chooseSource(_beforeFit);" in choose
+    assert "else showPane('cal');" in choose
+    assert "if (name === 'cal') _beforeFit = prev === 'spim' ? _side : 'bottom';" in OPERATE
     assert "_pane === 'cal' ? 'fit'" in _fn("    function renderSource() {")
     # And Acquisition's pre-flight still leads here by name.
     assert "showPane('cal');" in _fn("    function preflightFix(action) {")
