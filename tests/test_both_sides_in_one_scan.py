@@ -113,13 +113,15 @@ def _pair(core):
     return DiSPIMTwoSidedVolumeScanner(a=a, b=b), a, b
 
 
-def _scan(ab, monkeypatch, n=3):
+def _scan(ab, monkeypatch, n=3, tag_error=False):
     import gently.hardware.dispim.devices.acquisition as acq
 
     class Md:
         cam = None
 
         def GetSingleTag(self, _):
+            if tag_error:
+                raise RuntimeError("no such tag")
             return MagicMock(GetValue=lambda: self.cam)
 
     monkeypatch.setattr(acq.pymmcore, "Metadata", Md, raising=False)
@@ -182,6 +184,18 @@ def test_a_core_that_names_no_camera_gives_the_frames_in_order(monkeypatch):
     assert (got["volume_scanner"]["value"] == 1).all() and (
         got["volume_scanner_b"]["value"] == 2
     ).all()
+
+
+def test_a_camera_tag_that_cannot_be_read_costs_no_frame(monkeypatch):
+    core = Core(3)
+    ab, _, _ = _pair(core)
+    status = _scan(ab, monkeypatch, tag_error=True)
+    assert status.exception(timeout=1) is None
+    got = ab.read()
+    assert (got["volume_scanner"]["value"] == 1).all() and (
+        got["volume_scanner_b"]["value"] == 2
+    ).all()
+    assert got["volume_scanner"]["value"].shape == (3, 2, 2)
 
 
 def test_a_short_stack_is_a_failure_and_the_lasers_still_go_out(monkeypatch):

@@ -383,7 +383,8 @@ class DiSPIMTwoSidedVolumeScanner:
     sides itself. Everything for both sides is set up first, the card is
     told two sides with a short wait between them, both cameras are started,
     and one trigger runs side A, the wait, then side B. The starts of the
-    two stacks are then one scan and the wait apart.
+    two stacks are then one scan and the wait apart (the card waits before
+    each side, A as well).
 
     It reads as two volumes under the names of the two one-sided scanners,
     so whoever takes a volume by name finds each side where it always was.
@@ -463,9 +464,14 @@ class DiSPIMTwoSidedVolumeScanner:
         try:
             md = pymmcore.Metadata()
             img = self.core.popNextImageMD(md)
+        except (AttributeError, TypeError):
+            return self.core.popNextImage(), None
+        # The frame is out of the buffer by now: a tag that cannot be read
+        # must not cost the frame.
+        try:
             return img, str(md.GetSingleTag("Camera").GetValue())
         except (AttributeError, TypeError, RuntimeError):
-            return self.core.popNextImage(), None
+            return img, None
 
     def _put_away(self) -> None:
         for vs in (self.a, self.b):
@@ -505,7 +511,9 @@ class DiSPIMTwoSidedVolumeScanner:
 
                 names = {self.a.camera.name: "A", self.b.camera.name: "B"}
                 frames: dict[str, list] = {"A": [], "B": []}
-                started: dict[str, float] = {"A": time.time()}
+                # A stack began when its first frame came: the card waits
+                # before each side, A as well, so the trigger is not A's start.
+                started: dict[str, float] = {}
                 self.a.scanner.set_spim_state("Running")
 
                 timeout_s = settings.timeouts.volume_acquisition
@@ -520,8 +528,7 @@ class DiSPIMTwoSidedVolumeScanner:
                         # The camera's name says the side. A core that gives
                         # no name gives the frames in order: A's, then B's.
                         side = names.get(cam or "") or ("A" if len(frames["A"]) < n else "B")
-                        if side == "B" and "B" not in started:
-                            started["B"] = time.time()
+                        started.setdefault(side, time.time())
                         frames[side].append(img)
                         continue
                     if time.time() - t0 > timeout_s:
