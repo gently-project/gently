@@ -609,7 +609,7 @@ const OperateManager = (function () {
             const stopped = (r.halted || []).join(', ');
             // success with nothing halted means no positioner was registered to
             // halt — not "everything is stopped". Say the difference.
-            if (stopped) toast(`Halted: ${stopped}`);
+            if (stopped) toast(`Halted: ${stopped}${(r.dark || []).length ? ' · lasers, LED and scan off' : ''}`);
             else toastFail('HALT reached no positioners — none are registered');
         } catch (e) {
             // A refusal carries its body: which axes stopped, which did not and

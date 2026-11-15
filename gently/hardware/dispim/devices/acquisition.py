@@ -3,6 +3,7 @@ DiSPIM compound acquisition devices (volume scanner and light sheet snap).
 """
 
 import logging
+import threading
 import time
 from collections import OrderedDict
 from typing import Any
@@ -20,6 +21,33 @@ from .piezo import DiSPIMPiezo
 from .scanner import DiSPIMScanner
 
 logger = logging.getLogger(__name__)
+
+
+def _lasers_out_after(core, group_name: str, seconds: float) -> threading.Timer:
+    """A clock that puts the lasers out, started when they are put on.
+
+    A stack turns them on, waits on the camera, and turns them off. If a call
+    to the camera never returns, nothing after it runs: the stack is reported
+    failed and the lasers stay on the sample until the process is killed.
+    This runs on its own thread, so it does not wait on that call. Whoever
+    starts it cancels it when the lasers have been put out the ordinary way.
+    """
+
+    def out() -> None:
+        logger.error("A stack held the lasers on for %.0f s; putting them out", seconds)
+        try:
+            core.setConfig(group_name, "ALL OFF")
+        except Exception:
+            logger.exception("The lasers could not be put out")
+
+    timer = threading.Timer(seconds, out)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+# Far longer than any stack takes, and short for a sample under four lasers.
+LASERS_ON_AT_MOST_S = 30.0
 
 
 class DiSPIMVolumeScanner:
@@ -209,6 +237,7 @@ class DiSPIMVolumeScanner:
         status = Status(obj=self, timeout=120)
 
         def wait():
+            watch = _lasers_out_after(self.core, self.laser_control.group_name, LASERS_ON_AT_MOST_S)
             try:
                 t0 = time.perf_counter()
                 # Enable lasers
@@ -305,8 +334,8 @@ class DiSPIMVolumeScanner:
                 status.set_exception(exc)
             else:
                 status.set_finished()
-
-        import threading
+            finally:
+                watch.cancel()
 
         threading.Thread(target=wait).start()
 
@@ -459,6 +488,7 @@ class DiSPIMTwoSidedVolumeScanner:
         status = Status(obj=self, timeout=120)
 
         def wait():
+            watch = _lasers_out_after(self.core, self.laser_control.group_name, LASERS_ON_AT_MOST_S)
             try:
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
@@ -520,8 +550,8 @@ class DiSPIMTwoSidedVolumeScanner:
                 status.set_exception(exc)
             else:
                 status.set_finished()
-
-        import threading
+            finally:
+                watch.cancel()
 
         threading.Thread(target=wait).start()
         return status

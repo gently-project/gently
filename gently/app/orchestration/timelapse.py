@@ -1563,17 +1563,29 @@ class TimelapseOrchestrator:
                     num_frames = 1
                 else:
                     # Full 3D volume (default)
-                    results[side] = await self.client.acquire_volume(
-                        num_slices=embryo.num_slices,
-                        exposure_ms=embryo.exposure_ms,
-                        galvo_amplitude=galvo_amplitude,
-                        galvo_center=galvo_center,
-                        piezo_amplitude=piezo_amplitude,
-                        piezo_center=piezo_center,
-                        laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
-                        side=side,
-                        **self._volume_lasers(embryo),
-                    )
+                    try:
+                        results[side] = await self.client.acquire_volume(
+                            num_slices=embryo.num_slices,
+                            exposure_ms=embryo.exposure_ms,
+                            galvo_amplitude=galvo_amplitude,
+                            galvo_center=galvo_center,
+                            piezo_amplitude=piezo_amplitude,
+                            piezo_center=piezo_center,
+                            laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+                            side=side,
+                            **self._volume_lasers(embryo),
+                        )
+                    except Exception as exc:
+                        # Side A is already taken and its dose spent: it is
+                        # kept. Raised from here, B's failure skipped the
+                        # filing of A too, and three such rounds ended the
+                        # embryo for a fault on the other arm.
+                        if not (results.get("A") or {}).get("success"):
+                            raise
+                        logger.warning(
+                            "%s side %s failed this round, side A kept: %s", embryo_id, side, exc
+                        )
+                        results[side] = {"success": False, "error": str(exc)}
                     num_frames = embryo.num_slices
                     exposure_ms = embryo.exposure_ms
 
@@ -1684,14 +1696,16 @@ class TimelapseOrchestrator:
                     message=embryo_state.last_error,
                 )
 
-                # Stop after too many errors
-                if embryo_state.error_count >= 3:
-                    embryo_state.is_complete = True
-                    embryo_state.completion_reason = f"errors: {embryo_state.last_error}"
+                self._stop_after_errors(embryo_state)
 
         except Exception as e:
             embryo_state.error_count += 1
             embryo_state.last_error = str(e)
+            # The same limit as a failure the instrument reports. Without it
+            # an error raised here (a full disk when the stack is saved) was
+            # counted and never acted on: the embryo was imaged every round
+            # for the rest of the night and every stack was lost.
+            self._stop_after_errors(embryo_state)
             logger.error(
                 f"Acquisition failed for {embryo_id} t{embryo_state.timepoints_acquired}: "
                 f"{e}\n{traceback.format_exc()}"
@@ -1706,6 +1720,14 @@ class TimelapseOrchestrator:
                 message=str(e),
                 exception=e,
             )
+
+    @staticmethod
+    def _stop_after_errors(embryo_state: Any) -> None:
+        """Three rounds in a row that failed end this embryo's run. A round
+        that works puts the count back to nothing."""
+        if embryo_state.error_count >= 3:
+            embryo_state.is_complete = True
+            embryo_state.completion_reason = f"errors: {embryo_state.last_error}"
 
     def _volume_lasers(self, embryo: Any) -> dict[str, Any]:
         """What a volume is told about its lasers, beyond the 488 power.
