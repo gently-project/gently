@@ -54,9 +54,17 @@ EMBRYOS = [(-124.0, -355.0), (-310.0, -402.0), (-88.0, -511.0)]
 BOTTOM_UM_PER_PX = 0.65  # 6.5 µm pixels behind 10x: operate-math's BASE_UM_PER_PX
 SPIM_UM_PER_PX = 0.1625  # 6.5 µm pixels behind 40x
 # Where the piezo has to be for the sheet a galvo angle puts down: µm per degree, and µm at 0.
-FOCUS = {"A": (16.0, 2.0), "B": (-15.2, -3.0)}
+# Near what the rig measures (97 and 104 µm/° on 2026-11-15). At 16 µm/° the
+# scan routine's ±0.5° sweep was ±8 µm, narrower than the embryo, and it
+# refused every one as overrunning the sweep.
+FOCUS = {"A": (97.0, 2.0), "B": (104.0, -3.0)}
 LINE_OF_OUTPUT = {"5": 405, "6": 488, "7": 561, "8": 637}
-SPEED_UM_S = {"xy": 5745.0, "z": 1920.0, "piezo": 20000.0}
+# GENTLY_SIM_XY_UM_S slows the XY stage, to watch a move long enough to stop it.
+SPEED_UM_S = {
+    "xy": float(os.environ.get("GENTLY_SIM_XY_UM_S", "5745")),
+    "z": 1920.0,
+    "piezo": 20000.0,
+}
 
 # MM::DeviceType
 CAMERA, SHUTTER, STATE, STAGE, XYSTAGE, SERIAL, GENERIC, HUB, GALVO = 2, 3, 4, 5, 6, 7, 8, 15, 16
@@ -135,9 +143,11 @@ class SimCore:
         self._camera = ""
         self._callback: Any = None
         self._snapped: list[np.ndarray] = []
-        self._seq: deque[np.ndarray] = deque(maxlen=400)
-        self._seq_stop = threading.Event()
-        self._seq_thread: threading.Thread | None = None
+        self._seq: deque[np.ndarray] = deque(maxlen=1400)
+        # One sequence per camera: a two-sided scan has both waiting at once.
+        self._seq_stops: dict[str, threading.Event] = {}
+        self._seq_threads: dict[str, threading.Thread] = {}
+        self._side_done = {"A": threading.Event(), "B": threading.Event()}
         self._last: np.ndarray | None = None
         rng = np.random.default_rng(1)
         self._noise = [
@@ -491,11 +501,84 @@ class SimCore:
         self._seq.clear()
 
     def isSequenceRunning(self, label: str | None = None) -> bool:
-        return self._seq_thread is not None and self._seq_thread.is_alive()
+        threads = [self._seq_threads.get(label)] if label else list(self._seq_threads.values())
+        return any(t is not None and t.is_alive() for t in threads)
 
-    def _run_sequence(self, label: str, count: int | None) -> None:
+    # ── a hardware-timed stack ──────────────────────────────────────────
+    # A light-sheet camera on external trigger takes no frame until the
+    # micro-mirror card runs its scan (SPIMState "Running"), and then one a
+    # slice, the galvo and the piezo stepping together across the amplitudes
+    # they were given. That is what a volume, a scan calibration and a
+    # two-sided scan are. Without it every such frame here was of one plane,
+    # with the beam off, and the scan routine saw no embryo.
+    _SIDE = {
+        "A": ("Scanner:AB:33", "PiezoStage:P:34"),
+        "B": ("Scanner:CD:33", "PiezoStage:Q:35"),
+    }
+
+    def _scan_for(self, side: str) -> bool:
+        """Is the card running a scan that this side's camera is part of, now?"""
+        card = self.props.get("Scanner:AB:33", {})
+        other = self.props.get("Scanner:CD:33", {})
+        if side == "B" and other.get("SPIMState") == "Running":
+            return True
+        if card.get("SPIMState") != "Running":
+            return False
+        two = str(card.get("SPIMNumSides", "1")).strip() == "2"
+        first = str(card.get("SPIMFirstSide", "A")).strip() or "A"
+        if not two:
+            return side == first
+        # Two sides: the first now, the second when the first is done.
+        return side == first or self._side_done[first].is_set()
+
+    def _stack(self, label: str, count: int, stop: threading.Event) -> None:
+        side = "B" if label.endswith("2") else "A"
+        scanner, piezo = self._SIDE[side]
+        self._side_done[side].clear()
+        while not stop.is_set() and not self._scan_for(side):
+            time.sleep(0.005)
+        if stop.is_set():
+            return
+        card = self.props.get("Scanner:AB:33", {})
+        if side != str(card.get("SPIMFirstSide", "A")).strip() and (
+            str(card.get("SPIMNumSides", "1")).strip() == "2"
+        ):
+            time.sleep(float(card.get("SPIMDelayBeforeSide(ms)", "50") or 50) / 1000.0)
+        sp, pp = self.props.get(scanner, {}), self.props.get(piezo, {})
+        g_amp = float(sp.get("SingleAxisYAmplitude(deg)", "0") or 0)
+        g_off = float(sp.get("SingleAxisYOffset(deg)", "0") or 0)
+        p_amp = float(pp.get("SingleAxisAmplitude(um)", "0") or 0)
+        p_off = float(pp.get("SingleAxisOffset(um)", "0") or 0)
+        for k in range(count):
+            # The scan put to Idle part way (a HALT) is a stack cut short.
+            if stop.is_set() or not self._scan_for(side):
+                break
+            time.sleep(self.exposure.get(label, 10.0) / 1000.0 + 0.004)
+            f = (k / (count - 1) - 0.5) if count > 1 else 0.0
+            frame = self._crop(
+                label, self._lightsheet(label, sheet=(g_off + g_amp * f, p_off + p_amp * f))
+            )
+            self._frame += 1
+            self._seq.append(frame)
+            self._last = frame
+        self._side_done[side].set()
+        # The card goes back to Idle when its last side is done.
+        two = str(card.get("SPIMNumSides", "1")).strip() == "2"
+        last = side != str(card.get("SPIMFirstSide", "A")).strip() if two else True
+        if last:
+            with self._state:
+                for dev in ("Scanner:AB:33", "Scanner:CD:33"):
+                    if self.props.get(dev, {}).get("SPIMState") == "Running":
+                        self.props[dev]["SPIMState"] = "Idle"
+
+    def _run_sequence(self, label: str, count: int | None, stop: threading.Event) -> None:
+        module = self.devices.get(label, ("", ""))[0]
+        triggered = self.props.get(label, {}).get("TRIGGER SOURCE") == "EXTERNAL"
+        if count is not None and module != "PCO_Camera" and triggered:
+            self._stack(label, count, stop)
+            return
         n = 0
-        while not self._seq_stop.is_set() and (count is None or n < count):
+        while not stop.is_set() and (count is None or n < count):
             time.sleep(self.exposure.get(label, 10.0) / 1000.0 + 0.004)
             frame = self._render(label)
             self._seq.append(frame)
@@ -503,12 +586,11 @@ class SimCore:
             n += 1
 
     def _start_sequence(self, label: str, count: int | None) -> None:
-        self.stopSequenceAcquisition()
-        self._seq_stop.clear()
-        self._seq_thread = threading.Thread(
-            target=self._run_sequence, args=(label, count), daemon=True
-        )
-        self._seq_thread.start()
+        self.stopSequenceAcquisition(label)
+        stop = threading.Event()
+        thread = threading.Thread(target=self._run_sequence, args=(label, count, stop), daemon=True)
+        self._seq_stops[label], self._seq_threads[label] = stop, thread
+        thread.start()
 
     def startSequenceAcquisition(self, *args: Any) -> None:
         label = args[0] if isinstance(args[0], str) else self._camera
@@ -519,10 +601,12 @@ class SimCore:
         self._start_sequence(self._camera, None)
 
     def stopSequenceAcquisition(self, label: str | None = None) -> None:
-        self._seq_stop.set()
-        if self._seq_thread is not None and self._seq_thread.is_alive():
-            self._seq_thread.join(timeout=2.0)
-        self._seq_thread = None
+        for name in [label] if label else list(self._seq_threads):
+            stop, thread = self._seq_stops.pop(name, None), self._seq_threads.pop(name, None)
+            if stop is not None:
+                stop.set()
+            if thread is not None and thread.is_alive():
+                thread.join(timeout=2.0)
 
     def getRemainingImageCount(self) -> int:
         return len(self._seq)
@@ -593,21 +677,29 @@ class SimCore:
                 frame[inside] *= 0.55
         return frame.astype(np.uint16)
 
-    def _lightsheet(self, label: str) -> np.ndarray:
+    def _lightsheet(self, label: str, sheet: tuple[float, float] | None = None) -> np.ndarray:
+        """What a light-sheet camera sees. ``sheet`` is a slice of a
+        hardware-timed stack: the galvo angle and piezo position the card
+        has stepped to, with the beam on because the card gates it."""
         size = 2304
         frame = self._noise[self._frame % 3].copy()
         side = "B" if label.endswith("2") else "A"
         scanner = "Scanner:CD:33" if side == "B" else "Scanner:AB:33"
         piezo = "PiezoStage:Q:35" if side == "B" else "PiezoStage:P:34"
-        if self.props.get(scanner, {}).get("BeamEnabled") != "Yes":
+        if sheet is None and self.props.get(scanner, {}).get("BeamEnabled") != "Yes":
             return frame
         power = self._routed_power()
         if power <= 0:
             return frame
         slope, offset = FOCUS[side]
-        angle = self.galvo.get(scanner, [0.0, 0.0])[1]
+        angle = sheet[0] if sheet is not None else self.galvo.get(scanner, [0.0, 0.0])[1]
         sheet_z = slope * angle  # where the sheet cuts the embryo, µm
-        defocus = abs(self.axes[piezo].now() - (sheet_z + offset)) if piezo in self.axes else 0.0
+        at = (
+            sheet[1]
+            if sheet is not None
+            else (self.axes[piezo].now() if piezo in self.axes else sheet_z + offset)
+        )
+        defocus = abs(at - (sheet_z + offset))
         sigma = math.hypot(6.0, 4.0 * defocus)
         gain = power * self.exposure.get(label, 20.0) * 55.0 * (6.0 / sigma) ** 2
         sx, sy = self._stage()
