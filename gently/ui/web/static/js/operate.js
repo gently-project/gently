@@ -2630,8 +2630,7 @@ const OperateManager = (function () {
             b.classList.toggle('is-on', on);
             b.setAttribute('aria-pressed', String(on));
         });
-        const inrun = $('op-roster-inrun');
-        if (inrun) inrun.textContent = _embryos.length ? `· ${subjectIds().length} in the run` : '';
+        renderInRun();
         const a = el.querySelector('[data-scope="all"]');
         const s2 = el.querySelector('[data-scope="selected"]');
         if (a) a.textContent = `All subjects (${all})`;
@@ -3189,8 +3188,7 @@ const OperateManager = (function () {
         if (typeof RosterPanel !== 'undefined' && RosterPanel.render) RosterPanel.render();
         // How many the run images, beside how many there are: it follows a
         // role and the scope alike, so it is said where both redraw.
-        const inrun = $('op-roster-inrun');
-        if (inrun) inrun.textContent = _embryos.length ? `· ${subjectIds().length} in the run` : '';
+        renderInRun();
         const say = $('op-plan-ends-say');
         if (!say) return;
         const ids = new Set(subjectIds());
@@ -3205,8 +3203,29 @@ const OperateManager = (function () {
     }
 
     /** Is this embryo imaged by the run as it stands? For the table's dimming. */
+    // While a run is going, "in the run" is the run's own word: the embryos
+    // it still images, from its status. Before one, it is what the plan would
+    // image. The list used to say the plan's count over a run: "5 in the
+    // run" with four started and one of those stopped.
+    function runIds() {
+        if (!_runGoing) return null;
+        return Object.keys(_runRows).filter(id => !(_runRows[id] || {}).is_complete);
+    }
     function inRun(emb) {
-        return !!emb && subjectIds().includes(emb.id);
+        const going = runIds();
+        return !!emb && (going || subjectIds()).includes(emb.id);
+    }
+    let _inRunSaid = '';
+    function renderInRun() {
+        const going = runIds();
+        const el = $('op-roster-inrun');
+        if (el) el.textContent = !_embryos.length ? '' : going ? `· ${going.length} in the run` : `· ${subjectIds().length} in the plan`;
+        // The rows dim what is out of the run: drawn again when that set changes.
+        const key = going ? going.slice().sort().join(',') : '';
+        if (key !== _inRunSaid) {
+            _inRunSaid = key;
+            if (typeof RosterPanel !== 'undefined' && RosterPanel.render) RosterPanel.render();
+        }
     }
 
     function renderPlan() {
@@ -3565,6 +3584,22 @@ const OperateManager = (function () {
      * heads the Running column, and the column is brought into view; the
      * run rows underneath it come from the timelapse status (next PR).
      */
+    let _saidRunFor = null;
+    async function sayRunPlan(head, startedAt) {
+        if (_saidRunFor === startedAt) return;      // asked for once a run
+        _saidRunFor = startedAt;
+        let d = null;
+        try { d = await getJSON('/api/devices/timelapse/plan'); } catch (_) { _saidRunFor = null; return; }
+        if (!d || !d.plan || !head.hidden) return;
+        const ids = new Set(d.plan.embryo_ids || []);
+        const subjects = _embryos.filter(e => !ids.size || ids.has(e.id)).map(e => ({ id: e.id, label: labelFor(e) }));
+        const sides = Array.isArray(d.plan.sides) && d.plan.sides.join('') !== 'A' ? ` Sides ${d.plan.sides.join(' and ')}.` : '';
+        head.textContent = AcquisitionPlan.describe(AcquisitionPlan.fromStructure(d.plan), subjects) + sides;
+        head.hidden = false;
+        const box = head.closest('.op-panel');
+        if (box) box.hidden = false;
+    }
+
     function landOnRun(sentence) {
         const head = $('op-run-plan');
         if (head) { head.textContent = sentence; head.hidden = false; }
@@ -3884,6 +3919,7 @@ const OperateManager = (function () {
         // that was interrupted is still the business in hand.
         const going = !!running || live.length > 0 || (resumable && st.ended !== 'stopped');
         if (going !== _runGoing) { _runGoing = going; setAcqView(going ? 'watch' : 'design'); }
+        renderInRun();
         const anything = ids.length > 0 || tactics.length > 0;
         _runBrightfield = !!(st && st.volumes === false && st.bf);
         _runOverview = !!(st && st.bf);
@@ -3943,13 +3979,11 @@ const OperateManager = (function () {
         if (tact) tact.innerHTML = tactics.map(tacticCard).join('');
         const head = $('op-run-plan');
         if (head && !going) head.hidden = true;
-        // Reloaded over a run: the sentence Start was pressed on is gone
-        // with the page, but the form was filled from the session's own
-        // plan and nobody has typed over it, so it says the same thing.
-        if (head && going && head.hidden && _planRestored && !_planDirty && $('op-plan-say')) {
-            head.textContent = AcquisitionPlan.describe(readPlan(), planSubjects());
-            head.hidden = false;
-        }
+        // A run this page did not start (another window, the agent, a reload):
+        // the sentence comes from the plan the run was started with, which
+        // the server keeps. It used to be read off this page's own form,
+        // which said every 1 min over a run going every 5.
+        if (head && going && head.hidden) sayRunPlan(head, st && st.started_at);
         const headBox = head && head.closest('.op-panel');
         if (headBox) headBox.hidden = head.hidden;
         if (_pane === 'acquire') renderTiles();

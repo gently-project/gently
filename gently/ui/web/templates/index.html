@@ -177,7 +177,8 @@
                 <button type="button" class="cal-arc-raw" id="cal-arc-raw" title="Open it large, with its counts"><img id="cal-arc-img" alt=""></button>
                 <div class="cal-arc-cap" id="cal-arc-cap"></div>
                 <div class="op-panel cal-arc-filmbox">
-                    <div class="op-panel-name">Every exposure of this run <em>in the order taken · the bar is its score within its sweep · ← → steps</em></div>
+                    <div class="op-panel-name">The run's exposures <em>one step at a time · a sweep in piezo order · the bar is its sharpness · ← → an exposure · [ ] a step</em></div>
+                    <div class="cal-arc-steps" id="cal-arc-steps" role="tablist" aria-label="The steps of this run"></div>
                     <div class="cal-arc-film" id="cal-arc-film"></div>
                 </div>
             </section>
@@ -187,7 +188,7 @@
                     <div class="cal-arc-kv" id="cal-arc-kv"></div>
                 </div>
                 <div class="op-panel cal-arc-plotbox">
-                    <div class="op-panel-name">Its plots</div>
+                    <div class="op-panel-name">Its graphs <em>press a point for its exposure</em></div>
                     <div class="cal-arc-plots" id="cal-arc-plots"></div>
                 </div>
                 <div class="cal-arc-foot">
@@ -331,8 +332,11 @@
                         <div class="view-switcher" id="view-switcher">
                             <button class="view-btn active" data-view="default" title="Tiles and analysis (1)" aria-pressed="true">Watch</button>
                             <button class="view-btn" data-view="board" title="Table (2)" aria-pressed="false">Table</button>
-                            <button class="view-btn" data-view="filmstrip" title="Film (3)" aria-pressed="false">Film</button>
-                            <button class="view-btn" data-view="vitals" title="Vitals (4)" aria-pressed="false">Vitals</button>
+                            {# Film is no longer offered: Watch has the scrubber, the
+                               player and both sides, and Film showed side A whatever
+                               was chosen. Its code is still in embryos.js, to come out
+                               when no run is being watched on this page. #}
+                            <button class="view-btn" data-view="vitals" title="Vitals (3)" aria-pressed="false">Vitals</button>
                         </div>
                     </div>
                     <div class="header-stats" id="header-stats">

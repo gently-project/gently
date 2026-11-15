@@ -426,6 +426,11 @@ const AcquisitionPlan = (() => {
         const interval = Math.max(1, num(st.cadence_s, num(st.interval, 30)));
         const bf = st.bf && typeof st.bf === 'object' ? st.bf : null;
         const stop = parseStopSpec(st.stop_condition);
+        // A plan kept from a caller that sent the kind and its number apart
+        // ("duration", 16): the number is the plan's, not the default's.
+        if (stop.value == null && st.condition_value != null && Number.isFinite(Number(st.condition_value))) {
+            stop.value = Number(st.condition_value);
+        }
         const overrides = Object.entries(st.stop_conditions || {}).map(([embryoId, spec]) => {
             const p = parseStopSpec(typeof spec === 'string' ? spec
                 : stopSpec((spec || {}).stop_condition, (spec || {}).condition_value));

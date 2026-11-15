@@ -115,3 +115,46 @@ test('the newest run is first', () => {
     assert.deepEqual(got.map(r => r.run), ['20261108_004606', '20261108_004435', '20261108_004129']);
     assert.deepEqual(A.newestFirst(undefined), []);
 });
+
+// ── the run as steps, and its graphs ──────────────────────────────────────
+// Shaped like a scan run on disk: edges, a wide look at one angle, then a
+// fine sweep at it again; each sweep closed by its plot.
+
+const sweep = (name, piezos, at) => piezos.map((p, k) => ({ n: at + k, kind: 'focus_sweep', galvo_name: name, galvo: 0.07, piezo: p, score: 100 - Math.abs(p - 4) * 10, file: `frames/${at + k}.tif` }));
+const RUN = [
+    { n: 1, kind: 'edge_detection', galvo: -0.1, signal: 20, visible: false, file: 'frames/001.tif' },
+    { n: 2, kind: 'edge_detection', galvo: 0.0, signal: 150, visible: true, file: 'frames/002.tif' },
+    ...sweep('0.070°', [20, -20, 0, 4], 3),
+    { n: 7, kind: 'focus_plot', galvo_name: '0.070°', best_piezo: 4.0, r_squared: 0.6, file: 'plots/007.png' },
+    ...sweep('0.070°', [6, 2, 4], 8),
+    { n: 11, kind: 'focus_plot', galvo_name: '0.070°', best_piezo: 4.1, r_squared: 0.99, file: 'plots/011.png' },
+    { n: 12, kind: 'calibration_summary', file: 'plots/012.png' },
+];
+
+test('a run is browsed as the steps it took, not as one strip', () => {
+    const s = A.steps(RUN);
+    assert.deepEqual(s.map(x => [x.label, x.frames.length, x.start]), [['edges', 2, 0], ['0.070° wide', 4, 2], ['0.070° fine', 3, 6]]);
+    // A sweep reads as a focus series: in piezo order, whatever order it was taken in.
+    assert.deepEqual(s[1].frames.map(f => f.piezo), [-20, 0, 4, 20]);
+    // And carries what its plot said it found.
+    assert.deepEqual([s[1].best, s[1].r2, s[2].best], [4.0, 0.6, 4.1]);
+    assert.deepEqual(A.steps(undefined), []);
+});
+
+test('a graph is drawn from the numbers, each point the exposure it came from', () => {
+    const s = A.steps(RUN)[1];
+    const svg = A.chart({ title: 'Sharpness', zero: true, vline: s.best, on: 4, pts: s.frames.map((f, k) => ({ x: f.piezo, y: f.score, frame: s.start + k, tip: `piezo ${f.piezo}` })) });
+    assert.equal((svg.match(/class="dot"/g) || []).length, 4);
+    assert.equal((svg.match(/data-arc-frame="/g) || []).length, 4);
+    assert.match(svg, /<title>piezo 4<\/title>/);          // a point says its values
+    assert.match(svg, /class="pt is-on" data-arc-frame="4"/);   // the exposure shown is marked
+    assert.match(svg, /class="best"/);                       // the sharpest the sweep found
+    assert.equal((svg.match(/class="hit"[^>]* r="9"/g) || []).length, 4);   // a target bigger than the mark
+    assert.equal(A.chart({ pts: [] }), '');
+});
+
+test('many points are a curve: the dots step back', () => {
+    const pts = Array.from({ length: 40 }, (_, k) => ({ x: k, y: k % 7 }));
+    assert.match(A.chart({ pts }), /class="cal-arc-chart is-dense"/);
+    assert.doesNotMatch(A.chart({ pts: pts.slice(0, 5) }), /is-dense/);
+});

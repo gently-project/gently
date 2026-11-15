@@ -119,3 +119,34 @@ def test_what_is_hidden_stays_hidden():
     # With no run kept the page says so, in place of three empty zones.
     assert '.cal-archive[data-runs="some"] > .cal-arc-empty { display: none; }' in CSS
     assert "No calibration has been kept in this session yet." in TAB
+
+
+def test_the_graphs_are_drawn_on_the_page_and_not_shown_as_pictures():
+    """ "the graphs are just images of the things. the mockup had graph
+    objects ... so that is a bit disappointing." The run's numbers are in its
+    record; the page draws them, and a point is the exposure it came from."""
+    graphs = ARCHIVE[
+        ARCHIVE.index("    function renderGraphs() {") : ARCHIVE.index(
+            "    function renderFilm() {"
+        )
+    ]
+    assert "<img" not in graphs
+    for what in ("'Where the embryo is'", "`Focus at ${s.label}`", "'The fit'"):
+        assert what in graphs, what
+    assert "Its graphs" in TAB and "Its plots" not in TAB
+    # Over a point, the exposure it is; pressed, that exposure large.
+    assert "closest('.cal-arc-chart .pt[data-arc-frame]')" in ARCHIVE
+    assert "cal-arc-peek" in ARCHIVE and ".cal-arc-peek {" in CSS
+
+
+def test_the_exposures_are_browsed_a_step_at_a_time():
+    """ "the bottom image list in the calibration is okay, but need a better
+    way to organize it and browse it": a scan run is 275 exposures."""
+    assert 'id="cal-arc-steps"' in TAB
+    film = ARCHIVE[
+        ARCHIVE.index("    function renderFilm() {") : ARCHIVE.index("    function showFrame(k) {")
+    ]
+    assert "data-arc-step=" in film and "s.frames.map(" in film
+    assert "e.key === '[' || e.key === ']'" in ARCHIVE
+    # A point pressed on a graph takes the film to its step.
+    assert "film.dataset.step !== String(stepOf(_at))" in ARCHIVE

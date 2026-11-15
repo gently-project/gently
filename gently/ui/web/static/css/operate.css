@@ -2710,3 +2710,38 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 .op-fitrow .op-btn { flex: 0 0 auto; height: 22px; padding: 0 9px; font-size: 12px; }
 /* A refused calibration points at the panel that puts it right. */
 .op-panel.is-pointed { border-color: var(--op-warn); box-shadow: 0 0 0 1px var(--op-warn); }
+
+/* The archive's graphs, drawn on the page from the run's numbers, and the
+   run's steps above its film. One series a graph: the accent is the series,
+   text wears the text colours, the axis and the marked best stay quiet. */
+.cal-arc-graph { margin: 0; flex: 0 0 auto; }
+.cal-arc-graph figcaption { font-size: 11.5px; color: var(--op-ink-dim); margin-bottom: 2px; }
+.cal-arc-graph figcaption b { color: var(--op-ink); font-weight: 600; }
+.cal-arc-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.cal-arc-chart .axis { fill: none; stroke: var(--op-rule2); stroke-width: 1; }
+.cal-arc-chart .tick { font: 9.5px var(--op-mono); fill: var(--op-ink-dim); }
+.cal-arc-chart .tick.end { text-anchor: end; }
+.cal-arc-chart .tick.mid { text-anchor: middle; }
+.cal-arc-chart .band { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+.cal-arc-chart .ln { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.cal-arc-chart .best { stroke: var(--op-ink-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.cal-arc-chart .hit { fill: transparent; }
+.cal-arc-chart .dot { fill: var(--accent); stroke: var(--op-panel); stroke-width: 2; }
+.cal-arc-chart .pt[data-arc-frame] { cursor: pointer; }
+.cal-arc-chart .pt:hover .dot { r: 5.5; }
+.cal-arc-chart .pt.is-on .dot { fill: var(--op-ink); stroke: var(--accent); r: 5.5; }
+.cal-arc-steps { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
+.cal-arc-step { height: 22px; padding: 0 9px; font: 12px var(--op-ui); color: var(--op-ink-dim); background: transparent; border: 1px solid var(--op-rule2); border-radius: 11px; cursor: pointer; white-space: nowrap; }
+.cal-arc-step small { margin-left: 5px; font: 10px var(--op-mono); opacity: 0.8; }
+.cal-arc-step.is-on { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.cal-arc-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cal-arc-chart.is-dense .dot { r: 2.2; stroke-width: 1; }
+.cal-arc-chart.is-dense .hit { r: 5; }
+.cal-arc-chart.is-dense .pt:hover .dot, .cal-arc-chart.is-dense .pt.is-on .dot { r: 5; stroke-width: 2; }
+.cal-arc-film, .cal-arc-plotbox .cal-arc-plots, .cal-arc-list { scrollbar-color: var(--op-rule2) transparent; }
+.cal-arc-plotbox .cal-arc-plots { gap: 10px; }
+/* The exposure a graph's point is, shown beside the pointer while it is over the point. */
+.cal-archive { position: relative; }
+.cal-arc-peek { position: absolute; z-index: 5; width: 176px; padding: 6px; border: 1px solid var(--accent); border-radius: 4px; background: var(--op-panel); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); pointer-events: none; }
+.cal-arc-peek img { display: block; width: 100%; background: #04070b; border-radius: 2px; }
+.cal-arc-peek span { display: block; margin-top: 4px; font: 10.5px/1.35 var(--op-mono); color: var(--op-ink-dim); }

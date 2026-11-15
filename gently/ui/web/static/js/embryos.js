@@ -505,7 +505,7 @@ const EmbryosManager = {
         document.addEventListener('keydown', (e) => {
             if (typeof state !== 'undefined' && state.tab !== TABS.EMBRYOS) return;
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
-            const viewMap = { '1': 'default', '2': 'board', '3': 'filmstrip', '4': 'vitals' };
+            const viewMap = { '1': 'default', '2': 'board', '3': 'vitals' };   // Film is no longer offered
             if (viewMap[e.key]) {
                 e.preventDefault();
                 this.switchView(viewMap[e.key]);

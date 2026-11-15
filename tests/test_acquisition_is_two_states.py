@@ -335,3 +335,22 @@ def test_the_clock_is_what_there_is_to_wait_for():
 def test_the_monitor_with_every_timepoint_is_one_press_away():
     assert 'id="op-acq-monitor"' in PANE
     assert "switchTab('embryos')" in OPERATE
+
+
+def test_in_the_run_is_the_runs_own_count_while_one_is_going():
+    """ "in acquisition on the embryos list, i see embryos 5. 5 in the run.
+    thos are outdated info." Four had been started and one of those stopped:
+    three were in the run. The count was the plan form's subjects, whatever
+    was running. While a run is going it is the run's rows that are not
+    complete; before one it says "in the plan"."""
+    src = OPERATE
+    ids = src[src.index("    function runIds() {") :][:260]
+    assert "if (!_runGoing) return null;" in ids
+    assert "!(_runRows[id] || {}).is_complete" in ids
+    said = src[src.index("    function renderInRun() {") :][:520]
+    assert "in the run`" in said and "in the plan`" in said
+    # Redrawn with the run's status, not only when the form changes.
+    run = src[src.index("    async function renderRun() {") :]
+    assert "renderInRun();" in run[: run.index("    function tacticCard(")]
+    # One writer: the two that said the form's count are gone.
+    assert src.count("subjectIds().length} in the run") == 0

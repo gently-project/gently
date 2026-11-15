@@ -222,3 +222,12 @@ test('a plan that takes side B says which sides, and keeps them when saved', () 
     assert.deepEqual(P.fromStructure(P.toStructure(both)).spim.sides, ['A', 'B']);
     assert.deepEqual(P.fromForm({ interval: 60, intervalUnit: 's', sides: 'nonsense' }).spim.sides, ['A']);
 });
+
+test('a kept plan whose ending came as a kind and a number apart keeps its number', () => {
+    // The first two-sided run was started with {stop_condition: "duration", condition_value: 16}
+    // and the page said "after 1 h" over it.
+    const plan = P.fromStructure({ interval: 300, stop_condition: 'duration', condition_value: 16, volumes: true });
+    assert.deepEqual(plan.stop, { kind: 'duration', value: 16 });
+    assert.match(P.describe(plan, [{ id: 'embryo_2', label: '2' }]), /after 16 h/);
+    assert.equal(P.fromStructure({ interval: 300, stop_condition: 'duration:8', condition_value: 16 }).stop.value, 8);
+});
