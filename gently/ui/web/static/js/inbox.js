@@ -16,12 +16,16 @@ const Inbox = (() => {
     let known = null;        // ids in `new` at the last load, so a toast is for a fresh one
     let pill = null, pop = null, timer = null;
 
+    // Still waiting on you: not opened, and not answered. An ask answered on its
+    // session without being opened from here is not unopened business.
+    const waiting = i => !i.seen && !i.answered;
+
     async function load() {
         let d;
         try { d = await (await fetch('/api/inbox')).json(); } catch (e) { return; }
         if (!d || !Array.isArray(d.asks)) return;
         data = d;
-        const unseen = data.asks.filter(i => !i.seen);
+        const unseen = data.asks.filter(waiting);
         const ids = new Set(unseen.map(i => i.note.id));
         if (known && data.me) {
             const fresh = unseen.find(i => !known.has(i.note.id));
@@ -54,7 +58,7 @@ const Inbox = (() => {
             pill.className = 'inbox-pill';
             pill.setAttribute('aria-hidden', 'true');
         }
-        const n = data.asks.filter(i => !i.seen).length;
+        const n = data.asks.filter(waiting).length;
         pill.textContent = String(n);
         pill.classList.toggle('is-empty', !n);
         if (pill.parentElement !== you) you.appendChild(pill);
@@ -75,7 +79,7 @@ const Inbox = (() => {
     // answered says so. The place is where it was written.
     function item(i) {
         const where = place(i, 'on ');
-        const cls = (i.seen ? 'is-seen' : 'is-new') + (i.answered ? ' is-answered' : '');
+        const cls = (waiting(i) ? 'is-new' : 'is-seen') + (i.answered ? ' is-answered' : '');
         return `<button type="button" class="presence-pop-item inbox-item ${cls}" data-open="${escapeHtml(i.note.id)}" title="${i.seen ? 'Opened' : 'Not opened yet'}${i.answered ? ' · answered' : ''}">
             <span class="inbox-who rd-head"><i class="inbox-dot" aria-hidden="true"></i>${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${i.answered ? '<span class="inbox-state is-answered">answered</span>' : ''}</span>
             <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
@@ -110,7 +114,7 @@ const Inbox = (() => {
     // lines. Switching stays inside the popover; the tab is remembered.
     function paint(pop) {
         const asks = data.asks || [], mine = data.mine || [];
-        const unopened = asks.filter(i => !i.seen).length;
+        const unopened = asks.filter(waiting).length;
         const tabs = `<div class="inbox-tabs" role="tablist">
             <button type="button" role="tab" class="inbox-tab${tab === 'for' ? ' on' : ''}" data-tab="for" aria-selected="${tab === 'for'}">For you${unopened ? ` <b class="inbox-tab-n">${unopened}</b>` : ''}</button>
             <button type="button" role="tab" class="inbox-tab${tab === 'by' ? ' on' : ''}" data-tab="by" aria-selected="${tab === 'by'}">By you</button>
