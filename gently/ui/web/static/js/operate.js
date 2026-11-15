@@ -1890,10 +1890,11 @@ const OperateManager = (function () {
         if (_selected !== id) return;            // the selection moved on while we asked
         if (!runs.length) { host.hidden = true; _calKept = null; return; }
         const last = runs[runs.length - 1];
-        let images = [];
+        let images = [], record = last;
         try {
             const d = await getJSON(`/api/calibration/records/${encodeURIComponent(id)}/${encodeURIComponent(last.run)}`);
             images = (d && d.images) || [];
+            record = { ...last, ...(d || {}), images };
         } catch (_) { images = []; }
         if (_selected !== id) return;
         _calKept = { embryoId: id, run: last.run, images };
@@ -1907,13 +1908,46 @@ const OperateManager = (function () {
         }
         const strip = $('op-cal-kept-strip');
         if (strip) {
+            // The run's graphs, drawn from its numbers as the Calibration tab
+            // draws them ("it shows the image based graphs and not the native
+            // graphs"). The saved pictures are for a page without the archive.
+            const arc = typeof CalibrationArchive !== 'undefined' ? CalibrationArchive : null;
+            const drawn = arc && arc.graphsHtml ? arc.graphsHtml(record, arc.steps(images), -1) : '';
+            strip.classList.toggle('is-graphs', !!drawn);
             const plots = images.filter(i => (i.file || '').startsWith('plots/'));
             const shown = plots.length ? plots : images.slice(-6);
-            strip.innerHTML = shown.map(i =>
+            strip.innerHTML = drawn || shown.map(i =>
                 `<button type="button" class="op-cal-kept-img" data-cal-img="${images.indexOf(i)}" title="${escapeHtml(calImageTitle(i))}">` +
                 `<img loading="lazy" src="${escapeHtml(i.url)}?max=720" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
+            if (drawn) tabGraphs(strip);
         }
         host.hidden = false;
+    }
+
+    // One graph at a time, chosen by name ("the graphs can be shown in some
+    // subtabs instead of top to bottom"): six graphs down the pane was three
+    // screens of scrolling. It opens on the fit, the run's answer.
+    function tabGraphs(strip) {
+        const figs = [...strip.querySelectorAll('.cal-arc-graph')];
+        if (figs.length < 2) return;
+        const bar = document.createElement('div');
+        bar.className = 'cal-arc-steps op-cal-kept-tabs';
+        bar.setAttribute('role', 'tablist');
+        const show = k => {
+            figs.forEach((f, i) => { f.hidden = i !== k; });
+            [...bar.children].forEach((b, i) => { b.classList.toggle('is-on', i === k); b.setAttribute('aria-selected', String(i === k)); });
+        };
+        figs.forEach((f, k) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cal-arc-step';
+            b.setAttribute('role', 'tab');
+            b.textContent = (f.querySelector('figcaption b') || {}).textContent || `Graph ${k + 1}`;
+            b.addEventListener('click', () => show(k));
+            bar.appendChild(b);
+        });
+        strip.prepend(bar);
+        show(figs.length - 1);
     }
 
     function calImageTitle(i) {

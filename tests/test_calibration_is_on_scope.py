@@ -242,3 +242,27 @@ def test_the_rail_shows_which_embryos_lack_a_fit() -> None:
     assert "showFit: true" in OPERATE
     # Same field the server-side gate checks.
     assert "slope_um_per_deg" in ROSTER
+
+
+def test_fit_draws_the_runs_graphs_and_stands_apart_from_the_cameras():
+    """ "the Fit tab in the camera views of Scope ... is bit out of place. also
+    it shows the image based graphs and not the native graphs we worked on for
+    calibration." Fit showed the saved pictures of a run's graphs; it draws
+    them from the run's numbers, with the Calibration tab's own drawing."""
+    web = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web" / "static"
+    archive = (web / "js" / "calibration-archive.js").read_text(encoding="utf-8")
+    operate = (web / "js" / "operate.js").read_text(encoding="utf-8")
+    css = (web / "css" / "operate.css").read_text(encoding="utf-8")
+    # One drawing, used by both.
+    assert "function graphsHtml(_rec, _steps, _at) {" in archive
+    assert "if (host) host.innerHTML = graphsHtml(_rec, _steps, _at);" in archive
+    assert "return { ...pure, show, refresh, graphsHtml };" in archive
+    kept = operate[operate.index("    async function renderCalKept(emb) {") :]
+    kept = kept[: kept.index("    function calImageTitle(i) {")]
+    assert "arc.graphsHtml(record, arc.steps(images), -1)" in kept
+    assert kept.index("arc.graphsHtml(") < kept.index("op-cal-kept-img")  # pictures only without it
+    # One graph at a time, by name, opening on the fit.
+    assert "if (drawn) tabGraphs(strip);" in kept
+    assert "show(figs.length - 1);" in operate
+    # Not the fifth of five joined buttons.
+    assert '.op-srcb[data-source="fit"] { margin-left: 14px;' in css

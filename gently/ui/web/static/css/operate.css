@@ -2159,22 +2159,28 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 .op-source {
     flex: none;
     display: inline-flex;
-    border: 1px solid var(--op-rule2);
-    border-radius: 4px;
-    overflow: hidden;
 }
 .op-srcb {
     height: 24px;
     padding: 0 10px;
-    border: 0;
-    border-left: 1px solid var(--op-rule2);
+    border: 1px solid var(--op-rule2);
+    border-left-width: 0;
     background: var(--op-field);
     color: var(--op-ink-dim);
     font: 12px var(--op-ui);
     white-space: nowrap;
     cursor: pointer;
 }
-.op-srcb:first-child { border-left: 0; }
+.op-srcb:first-child { border-left-width: 1px; border-radius: 4px 0 0 4px; }
+.op-srcb[data-source="Multi"] { border-radius: 0 4px 4px 0; }
+/* Fit is not a camera. It was the fifth of five joined buttons and read as
+   one more view of the sample; it stands apart from them, a button of its own. */
+.op-srcb[data-source="fit"] { margin-left: 14px; border-left-width: 1px; border-radius: 4px; }
+/* The run's graphs in the Fit pane: one to a row, the pane's width. */
+.op-cal-kept-strip.is-graphs { display: block; }
+.op-cal-kept-strip.is-graphs .cal-arc-graph { margin: 0 0 12px; }
+.op-cal-kept-strip.is-graphs .cal-arc-graph[hidden] { display: none; }
+.op-cal-kept-tabs { margin: 6px 0 10px; }
 .op-srcb:hover { color: var(--op-ink); }
 .op-srcb.is-on { background: var(--accent); color: var(--op-on-accent); font-weight: 600; }
 .op-srcb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
