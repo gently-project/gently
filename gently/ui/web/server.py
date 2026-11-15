@@ -221,6 +221,29 @@ class VisualizationServer(Service):
         from gently.ui.web.actions import is_action, record_action
 
         @self.app.middleware("http")
+        async def _own_pages_only(request, call_next):
+            # Anything that changes state, from a page of another site, is
+            # refused before a route sees it (auth.same_origin says why).
+            from fastapi.responses import JSONResponse
+
+            from gently.ui.web.auth import same_origin
+
+            if request.method not in ("GET", "HEAD", "OPTIONS") and not same_origin(
+                request.headers
+            ):
+                logger.warning(
+                    "Refused %s %s from another site (%s)",
+                    request.method,
+                    request.url.path,
+                    request.headers.get("origin"),
+                )
+                return JSONResponse(
+                    {"detail": "This request came from a page of another site."},
+                    status_code=403,
+                )
+            return await call_next(request)
+
+        @self.app.middleware("http")
         async def _record_actions(request, call_next):
             response = await call_next(request)
             if is_action(request.method, request.url.path):

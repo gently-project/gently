@@ -326,11 +326,13 @@ def create_router(server) -> APIRouter:
         # operators/admins may take the control lock. With no accounts
         # configured we fall back to the legacy "anyone connected can drive".
         from gently.ui.web.accounts import CONTROL_ROLES, get_account_store
-        from gently.ui.web.auth import SESSION_COOKIE
+        from gently.ui.web.auth import SESSION_COOKIE, same_origin, socket_may_control
 
         _acct = get_account_store()
         username = None
-        can_control = True  # legacy default when no accounts are configured
+        # With no accounts: the rig PC or the control token, as for the HTTP
+        # routes. It was True for whoever connected.
+        can_control = socket_may_control(websocket)
         if _acct is not None and _acct.has_users():
             # Viewing is open: anonymous clients may connect and *watch* the
             # conversation. Only authenticated operators/admins can hold or
@@ -338,7 +340,8 @@ def create_router(server) -> APIRouter:
             _token = websocket.cookies.get(SESSION_COOKIE)
             username = _acct.verify_session(_token) if _token else None
             role = _acct.get_role(username) if username else None
-            can_control = role in CONTROL_ROLES
+            # An operator's own page, not another site's page using their cookie.
+            can_control = role in CONTROL_ROLES and same_origin(websocket.headers)
 
         # Assign a stable id for control arbitration. The label shown to other
         # clients is the username when authenticated, else where they are:
