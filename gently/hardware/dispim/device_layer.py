@@ -63,8 +63,7 @@ class PlanRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
-# What the water may be set to with a sample in it, in °C.
-TEMPERATURE_SETPOINT_C = (4.0, 40.0)
+from gently.settings import WATER_SETPOINT_C as TEMPERATURE_SETPOINT_C  # noqa: E402
 
 
 class DeviceLayerServer(Service):
