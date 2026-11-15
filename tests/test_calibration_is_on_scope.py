@@ -87,11 +87,16 @@ def test_it_is_not_a_page_of_its_own() -> None:
 
 
 def test_the_step_has_a_name_on_screen() -> None:
-    """#108: there was no next step on screen. Fit is in the strip above the
-    picture, beside the cameras it follows."""
+    """#108: there was no next step on screen. The fit's graphs are opened
+    from the Sheet panel's Fit row, beside the fit they show: "you have still
+    not found a right place to move Fit tab to outside of the camera options"."""
     strip = SCOPE[SCOPE.index('id="op-source"') :]
     strip = strip[: strip.index("</span>")]
-    assert re.findall(r'data-source="(\w+)"', strip)[-1] == "fit"
+    assert "fit" not in re.findall(r'data-source="(\w+)"', strip)
+    row = SCOPE[SCOPE.index('class="op-row op-fitrow"') :][:1400]
+    assert 'id="op-fit-show" data-source="fit"' in row
+    assert row.index('id="op-fit-show"') < row.index('id="op-calibrate"')
+    assert OPERATE.count("'#op-source [data-source], #op-fit-show'") == 2
     assert "if (src === 'fit') { showPane('cal'); return; }" in _fn(
         "    function chooseSource(src) {"
     )
@@ -167,9 +172,30 @@ def test_how_it_is_done_is_under_the_picture_in_displays_place() -> None:
 
 
 def test_the_instrument_does_not_move_when_fit_is_chosen() -> None:
-    """The box is the bottom camera's shape, so the columns beside it keep
-    their places. Measured: 583 px at 1920×889 and 614 at 1440×920, both ways."""
-    assert ".op-pane-scope .op-calfit {\n    aspect-ratio: 1 / 1;" in CSS
+    """The box is as wide as the bottom camera's square, so the columns beside
+    it keep their places. Measured: 638 px wide at 1920 by 944 with a camera
+    up and with Fit up. Its height is what the settings under it leave: they
+    are a heading and three named lines now, taller than Display's one."""
+    box = CSS[CSS.index(".op-pane-scope .op-calfit {") :][:520]
+    assert "aspect-ratio: auto;" in box and "flex: 1 1 0;" in box
+    assert (
+        "width: calc(100cqh - var(--op-viewbar-h) - var(--op-bar-h) - var(--op-display-h)"
+        " - 3 * var(--op-view-gap));"
+    ) in box
+
+
+def test_the_settings_say_what_they_are_and_align_is_not_one_more_fit() -> None:
+    """ "not clear Align A and B feature being present in the embryo calibration
+    feature -- especially the embryo calibration stuff is not clearly stated".
+    One unlabelled row held the fit's settings, the other ways to a fit, and a
+    stage move."""
+    assert OPTIONS.index(">Measure<") < OPTIONS.index(">Or<") < OPTIONS.index(">Align views<")
+    assert '<h3 class="op-panel-name">Calibration <em>of the selected embryo</em></h3>' in OPTIONS
+    assert 'class="op-actions cal-align"' in OPTIONS
+    assert "saves that as its position" in OPTIONS
+    # Both sides in one press, for a script as much as for a person.
+    assert '<option value="AB"' in OPTIONS and "A then B" in OPTIONS
+    assert "if (_calSide === 'AB') body.side = 'both';" in OPERATE
 
 
 def test_everything_a_calibration_needs_is_on_the_one_screen() -> None:
@@ -264,5 +290,5 @@ def test_fit_draws_the_runs_graphs_and_stands_apart_from_the_cameras():
     # One graph at a time, by name, opening on the fit.
     assert "if (drawn) tabGraphs(strip);" in kept
     assert "show(figs.length - 1);" in operate
-    # Not the fifth of five joined buttons.
-    assert '.op-srcb[data-source="fit"] { margin-left: 14px;' in css
+    # Not in the camera strip at all: lit in the Fit row while its graphs are up.
+    assert "#op-fit-show.is-on {" in css

@@ -158,6 +158,9 @@ def test_the_marking_panel_offers_the_look() -> None:
     js = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web" / "static" / "js"
     marking = (js / "panels" / "marking.js").read_text(encoding="utf-8")
     operate = (js / "operate.js").read_text(encoding="utf-8")
-    assert 'data-set="look"' in marking and "Dark · LED" in marking
+    assert 'data-set="look"' in marking and "LED · embryos dark" in marking
+    # Detection says its default by the light: "the default for embryo detection
+    # should be stated as room light mode".
+    assert "label: 'Room light · embryos bright (default)'" in marking
     assert "method: settings.look === 'dark' ? 'dark' : 'bright'" in marking
     assert "tune.method = cfg.method" in operate and "'dark blobs'" in operate

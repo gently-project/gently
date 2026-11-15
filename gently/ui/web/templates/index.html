@@ -661,10 +661,6 @@
                         <button class="op-srcb" data-source="A" type="button" aria-pressed="false" title="Light sheet, side A: scanner AB · piezo P · camera 1">SPIM A</button>
                         <button class="op-srcb" data-source="B" type="button" aria-pressed="false" title="Light sheet, side B: scanner CD · piezo Q · camera 2">SPIM B</button>
                         <button class="op-srcb" data-source="Multi" type="button" aria-pressed="false" title="Both light-sheet cameras in one frame: A red, B green">Multi</button>
-                        {# Not a camera: what a calibration of the selected
-                           embryo looks at, while it looks and afterwards.
-                           The surface is still named `cal` in operate.js. #}
-                        <button class="op-srcb" data-source="fit" type="button" aria-pressed="false" title="The selected embryo's piezo–galvo fit: what its calibration looks at, while it looks and afterwards">Fit</button>
                       </span>
                       {# A live view is on because someone pressed Start, and
                          only while its camera is the one on screen: choosing
@@ -811,7 +807,13 @@
                          calibration points inside the detected galvo range and
                          are wrong to touch without a reason, so they sit behind
                          a disclosure. Defaults match calibrate_embryo. #}
+                      {# Three things were one unlabelled row of controls, and
+                         nobody could tell the fit's settings from the verbs
+                         beside them, or what Align had to do with a fit. Each
+                         is named, and says in a line what it does. #}
+                      <h3 class="op-panel-name">Calibration <em>of the selected embryo</em></h3>
                       <div class="op-row op-row-wrap cal-opts">
+                        <span class="op-label cal-group" title="How Calibrate (in Sheet, on the right) measures this embryo's piezo-galvo fit">Measure</span>
                         {# Which routine runs. Legacy is the software sweep; scan is
                            the hardware-timed one (#267). Both stay until the rig
                            says which to keep. #}
@@ -829,6 +831,7 @@
                           <select class="cal-num" id="cal-side" title="Which light-sheet side is calibrated. Arm that side's beam in Light.">
                             <option value="A" selected>A</option>
                             <option value="B">B</option>
+                            <option value="AB" title="Side A, then side B, in one go. Arm both beams in Light.">A then B</option>
                           </select>
                         </label>
                         <label class="cal-opt">
@@ -843,7 +846,9 @@
                         <button type="button" class="op-btn op-btn-quiet" id="cal-more"
                                 aria-expanded="false" aria-controls="cal-adv">More…</button>
                       </div>
+                      <p class="op-cap cal-says">Calibrate, in Sheet on the right, measures the fit with these settings: one side, or A then B in one go.</p>
                       <div class="op-actions">
+                        <span class="op-label cal-group" title="Other ways to a fit, and discarding one">Or</span>
                         {# Borrowing lends another embryo's slope and measures this
                            embryo's own extent and focus from it: a short scan, not
                            a free copy (#267). Any embryo with a fit can lend, best
@@ -859,12 +864,18 @@
                         {# Only where there is a fit to discard. Two clicks:
                            the numbers it drops cost ~70 exposures to measure. #}
                         <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
+                      </div>
+                      {# Not a fit: a stage move. On a line of its own so it is
+                         not read as one more way to calibrate. #}
+                      <div class="op-actions cal-align">
+                        <span class="op-label cal-group" title="A stage move, done once both sides have a fit">Align views</span>
                         {# Brings the two views onto one another on the selected
                            embryo by moving the stage, and writes the stage's
                            position back as the embryo's. Needs a fit on both
                            sides and the laser on (gently/app/ab_align.py). #}
                         <button class="op-btn" id="op-ab-align" type="button"
                                 title="Move the stage until the selected embryo sits at the same place in side A's and side B's frames. Needs a fit on both sides and the laser routed.">Align A and B</button>
+                        <span class="op-cap">Moves the stage until the embryo sits at the same place in both views, and saves that as its position. Needs a fit on both sides.</span>
                       </div>
                     </div>
                   </div>
@@ -917,6 +928,13 @@
                            the routine at its next step and halts every positioner. #}
                         <div class="op-row op-fitrow"><span class="op-label">Fit</span>
                           <span class="op-num op-fit-says" id="op-cal-result">—</span>
+                          {# What the fit rests on, and its settings: the graphs of
+                             the embryo's last calibration, in the frame's place.
+                             It was a fifth button in the camera strip, where it
+                             read as a camera. It is with the fit it shows. The
+                             surface is still named `cal` in operate.js. #}
+                          <button class="op-btn op-btn-quiet" id="op-fit-show" data-source="fit" type="button" aria-pressed="false"
+                                  title="Show this embryo's calibration in the frame's place: its graphs, and the settings Calibrate uses. A camera above brings the picture back.">Graphs</button>
                           <button class="op-btn op-btn-warn" id="op-cal-abort" type="button" hidden>Abort</button>
                           <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button></div>
                         <div class="op-cap" id="op-spim-multi-note" hidden>Multi is both sides in one frame. Choose SPIM A or SPIM B to move a sheet.</div>

@@ -70,8 +70,9 @@ const MarkingPanel = (() => {
     // dark under the transmitted-light LED. The dark finder is the one the
     // export's crops use.
     const LOOKS = [
-        { id: 'bright', label: 'Bright · room light' },
-        { id: 'dark', label: 'Dark · LED' },
+        // Named by the light, which is what the operator chooses; room light is the default.
+        { id: 'bright', label: 'Room light · embryos bright (default)' },
+        { id: 'dark', label: 'LED · embryos dark' },
     ];
     const DEFAULTS = { claude: true, sam: true, sensitivity: 'permissive', fresh: false, look: 'bright' };
     let settings = Object.assign({}, DEFAULTS);
@@ -198,8 +199,8 @@ const MarkingPanel = (() => {
                 </div>
 
                 <div class="mk-opts">
-                  <label class="mk-opt" title="Bright: embryos lit by the room light. Dark: embryos under the transmitted-light LED, found the way the export's crops find them.">
-                    <span class="mk-opt-cap">Embryos look</span>
+                  <label class="mk-opt" title="What lights the dish when Detect runs. Room light is the default: embryos show bright. Under the transmitted-light LED they show dark, and are found the way the export's crops find them.">
+                    <span class="mk-opt-cap">Lit by</span>
                     <select class="mk-select" data-set="look">
                       ${LOOKS.map(o => `<option value="${o.id}"${o.id === (settings.look || 'bright') ? ' selected' : ''}>${o.label}</option>`).join('')}
                     </select>

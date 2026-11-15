@@ -72,7 +72,7 @@ CONTROLS = {
     "op-fd-goto": "$('op-fd-goto')",
     "[data-lib]": "[data-lib]",
     # Which camera is on screen: the strip above the frame.
-    "[data-source]": "#op-source [data-source]",
+    "[data-source]": "#op-source [data-source], #op-fit-show",
 }
 
 

@@ -2100,6 +2100,33 @@ def create_router(server) -> APIRouter:
         if client is None or not getattr(client, "is_connected", False):
             raise HTTPException(status_code=503, detail="Microscope not connected")
 
+        # Both sides in one request: A, then B, each as it would be alone
+        # ("there should be an option to find both sides fitting": two presses
+        # with a select turned between them is not something a script or a
+        # batch can lean on). Side B is the scan routine's; so is this.
+        if str(payload.get("side") or "").lower() in ("both", "ab"):
+            fits: dict[str, str] = {}
+            last: dict = {}
+            for side in ("A", "B"):
+                try:
+                    last = await calibrate_embryo_route(
+                        embryo_id, {**payload, "side": side, "method": "scan"}
+                    )
+                except HTTPException as exc:
+                    # The reason first, as for one side; then which side, and
+                    # what was already found and kept.
+                    kept = "; side A calibrated and kept" if fits else ""
+                    raise HTTPException(
+                        status_code=exc.status_code, detail=f"{exc.detail} (side {side}{kept})"
+                    ) from None
+                fits[side] = str(last.get("message") or "")
+            return {
+                "success": True,
+                "message": " | ".join(f"side {s}: {m}" for s, m in fits.items()),
+                "sides": fits,
+                "calibration": last.get("calibration") or {},
+            }
+
         # Ensure the calibration tools are registered on the global registry,
         # then run via the registry so context (agent/client) is injected the
         # same way the agent invokes it. Calling the @tool wrapper directly would
