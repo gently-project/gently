@@ -1571,7 +1571,15 @@ const OperateManager = (function () {
     // Nothing here remembers the LED any more; the panel reads it from the
     // device and this asks the panel. Programmatic close still lives here
     // because pane exit and end-of-acquisition are operate.js's business.
+    //
+    // It closes an LED that is open, or whose state has not been read. One the
+    // page reads as closed is left alone: this runs on every change of
+    // surface and on leaving the tab, and a brightfield run opens the LED
+    // itself for about a second a frame. A "close" sent then, by someone
+    // going to the Embryos tab to watch the run, lands in that second and
+    // the frame is dark. Nothing was open to close; nothing is sent.
     async function forceLedOff() {
+        if ((SharedState.get('light') || {}).led === 'Closed') return;
         try { await postJSON('/api/devices/led/set', { state: 'Closed' }); } catch (_) {}
         if (typeof LightPanel !== 'undefined') { try { await LightPanel.refresh(); } catch (_) {} }
         renderSubnavMeta();

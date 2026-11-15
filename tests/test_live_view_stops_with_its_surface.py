@@ -99,3 +99,23 @@ def test_leaving_the_devices_tab_is_leaving_every_surface_in_it():
     fn = DEVICES[DEVICES.index("    function onTabChanged(tab) {") :][:400]
     assert "if (tab !== 'devices') OperateManager.deactivate();" in fn
     assert "else if (_currentView === 'operate') OperateManager.activate();" in fn
+
+
+def test_an_led_that_is_already_closed_is_not_told_to_close():
+    """Leaving a surface, or the tab, closes the LED: half of #106. It did so
+    by sending "Closed" every time, whatever the LED was. A brightfield run
+    opens the LED itself for about a second a frame (the settle, then the
+    exposure), and somebody going to the Embryos tab to watch that run sent
+    a close that could land in that second: a dark frame. Seen as a request
+    from a page that was only being looked at, during the first two-sided
+    run; two past brightfield runs (3,360 frames) hold no dark frame, so it
+    had not bitten yet.
+
+    What is read as closed is left alone. Open, or not yet read, is closed
+    as before: unknown must not become a reason to leave a light on."""
+    fn = OPERATE[OPERATE.index("    async function forceLedOff() {") :]
+    fn = fn[: fn.index("renderSubnavMeta();")]
+    skip = "if ((SharedState.get('light') || {}).led === 'Closed') return;"
+    assert fn.index(skip) < fn.index("postJSON('/api/devices/led/set', { state: 'Closed' })")
+    # Only a read of Closed skips it.
+    assert "=== 'Open'" not in fn and "!== 'Open'" not in fn
