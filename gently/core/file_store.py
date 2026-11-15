@@ -1226,9 +1226,15 @@ class FileStore:
         volume: np.ndarray,
         metadata: dict | None = None,
         side: str = "A",
+        acquired_at: str | None = None,
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, write sidecar metadata.
+
+        ``acquired_at`` is when the stack was taken, from the instrument. Left
+        out, it is now, the time of saving: on a two-sided run the two sides
+        are saved together after both are taken, and their files read 0.3 s
+        apart when the stacks began 2.4 s apart.
 
         Parameters
         ----------
@@ -1259,7 +1265,7 @@ class FileStore:
             "side": str(side).upper(),
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
-            "acquired_at": _now(),
+            "acquired_at": acquired_at or _now(),
             "metadata": metadata,
         }
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
@@ -1279,6 +1285,7 @@ class FileStore:
         metadata: dict | None = None,
         volume_data: np.ndarray | None = None,
         side: str = "A",
+        acquired_at: str | None = None,
     ) -> Path:
         """
         Zero-copy path: move an existing TIFF to its canonical location.
@@ -1328,7 +1335,7 @@ class FileStore:
             "side": str(side).upper(),
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
-            "acquired_at": _now(),
+            "acquired_at": acquired_at or _now(),
             "metadata": metadata,
         }
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)

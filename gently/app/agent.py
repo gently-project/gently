@@ -1725,7 +1725,13 @@ class MicroscopyAgent:
         return result
 
     async def on_volume_acquired(
-        self, embryo_id: str, timepoint: int, volume_data, volume_path=None, side: str = "A"
+        self,
+        embryo_id: str,
+        timepoint: int,
+        volume_data,
+        volume_path=None,
+        side: str = "A",
+        acquired_at: str | None = None,
     ):
         """Callback when a volume is acquired. ``side`` is the imaging path it
         came from; A is the canonical view and lands where volumes always have,
@@ -1772,6 +1778,7 @@ class MicroscopyAgent:
                         metadata=acq_metadata,
                         volume_data=volume,
                         side=side,
+                        acquired_at=acquired_at,
                     )
                 else:
                     stored_path = self.store.put_volume(
@@ -1781,6 +1788,7 @@ class MicroscopyAgent:
                         volume,
                         metadata=acq_metadata,
                         side=side,
+                        acquired_at=acquired_at,
                     )
             except StorageError:
                 raise

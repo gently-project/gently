@@ -86,6 +86,10 @@ class DiSPIMVolumeScanner:
 
         self._last_volume = None
         self._last_volume_time = None
+        # When the stack began: the moment the scan was set running. This is
+        # the volume's time. The time it was finished, read out and its lasers
+        # put out is _last_volume_time, over a second later.
+        self._scan_started: float | None = None
         self._configured = False
 
         # Configuration cache
@@ -137,7 +141,9 @@ class DiSPIMVolumeScanner:
             Custom SPIM timing parameters (uses defaults if None)
         """
         # Configure camera for hardware triggering
+        t0 = time.perf_counter()
         self.camera.configure_for_volume_acquisition(exposure_ms)
+        t_camera = time.perf_counter()
 
         # Configure scanner for volume acquisition
         self.scanner.configure_for_volume_acquisition(
@@ -148,10 +154,13 @@ class DiSPIMVolumeScanner:
             first_side=self.side,
         )
 
+        t_scanner = time.perf_counter()
+
         # Configure piezo for volume acquisition
         self.piezo.configure_for_volume_acquisition(
             amplitude_um=piezo_amplitude, offset_um=piezo_center, num_slices=num_slices
         )
+        t_piezo = time.perf_counter()
 
         # Apply per-line laser power if specified. Each setter raises if the
         # value violates the hard safety bound — fail loudly, don't acquire
@@ -173,6 +182,16 @@ class DiSPIMVolumeScanner:
         self._laser_config = laser_config
         self._laser_powers_pct = applied_powers  # for metadata downstream
         self._configured = True
+        # Where a volume's setup goes: it is the wait between the two views.
+        logger.info(
+            "Side %s configured in %.0f ms (camera %.0f, scanner %.0f, piezo %.0f, lasers %.0f)",
+            self.side,
+            (time.perf_counter() - t0) * 1000,
+            (t_camera - t0) * 1000,
+            (t_scanner - t_camera) * 1000,
+            (t_piezo - t_scanner) * 1000,
+            (time.perf_counter() - t_piezo) * 1000,
+        )
 
     def trigger(self):
         """
@@ -190,9 +209,11 @@ class DiSPIMVolumeScanner:
 
         def wait():
             try:
+                t0 = time.perf_counter()
                 # Enable lasers
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
+                t_lasers = time.perf_counter()
 
                 # Defensive stop: the lightsheet live streamer may have left the
                 # camera in continuous acquisition.  Starting a new sequence on
@@ -216,6 +237,8 @@ class DiSPIMVolumeScanner:
                 self.core.waitForDevice(self.camera.name)
 
                 # Trigger SPIM state machine
+                t_ready = time.perf_counter()
+                self._scan_started = time.time()
                 self.scanner.set_spim_state("Running")
 
                 # Collect images
@@ -240,6 +263,7 @@ class DiSPIMVolumeScanner:
 
                     time.sleep(0.01)
 
+                t_scanned = time.perf_counter()
                 # Stop sequence
                 if self.core.isSequenceRunning():
                     self.core.stopSequenceAcquisition()
@@ -256,6 +280,14 @@ class DiSPIMVolumeScanner:
                 # Store volume
                 self._last_volume = np.array(images)
                 self._last_volume_time = time.time()
+                logger.info(
+                    "Side %s stack: lasers on %.0f ms, camera ready %.0f, scan %.0f, put away %.0f",
+                    self.side,
+                    (t_lasers - t0) * 1000,
+                    (t_ready - t_lasers) * 1000,
+                    (t_scanned - t_ready) * 1000,
+                    (time.perf_counter() - t_scanned) * 1000,
+                )
 
             except Exception as exc:
                 # Cleanup on error - always turn off lasers!
@@ -285,7 +317,8 @@ class DiSPIMVolumeScanner:
             data = OrderedDict()
             data[self.name] = {
                 "value": self._last_volume,
-                "timestamp": self._last_volume_time or time.time(),
+                # When the stack began, which is when the sample was imaged.
+                "timestamp": self._scan_started or self._last_volume_time or time.time(),
             }
             return data
         else:
