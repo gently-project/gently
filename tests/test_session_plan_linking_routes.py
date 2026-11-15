@@ -49,6 +49,11 @@ def _make_app(mock_cs):
     server = _Server()
     app.include_router(campaign_router(server))
     app.include_router(session_router(server))
+    # Linking changes what is filed where, so it needs control, as every
+    # other change to a project does.
+    from gently.ui.web import auth
+
+    app.dependency_overrides[auth.require_control] = lambda: True
     return app
 
 

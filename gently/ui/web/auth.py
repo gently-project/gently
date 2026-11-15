@@ -22,10 +22,12 @@ for authenticated remote operators later.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 from enum import Enum
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request
 
@@ -135,13 +137,44 @@ def resolve_role(request: Request) -> Role:
     if host in _LOOPBACK_HOSTS:
         return Role.CONTROL
 
-    token = _configured_token()
-    if token is not None:
-        supplied = request.headers.get(_TOKEN_HEADER, "").strip()
-        if supplied and supplied == token:
-            return Role.CONTROL
+    if _has_the_token(request.headers):
+        return Role.CONTROL
 
     return Role.VIEW
+
+
+def _has_the_token(headers: Any) -> bool:
+    token = _configured_token()
+    supplied = (headers.get(_TOKEN_HEADER) or "").strip()
+    if not token or not supplied:
+        return False
+    return hmac.compare_digest(str(supplied), str(token))
+
+
+def same_origin(headers: Any) -> bool:
+    """False only when a browser says the request comes from another site.
+
+    A browser puts the page's own address in ``Origin`` on anything that
+    changes state, and on every WebSocket. Control here is granted to the rig
+    PC by its address, so without this any page open in the rig's browser,
+    from any site, could tell ``localhost:8080`` to start a run or move the
+    stage and be obeyed. A request with no ``Origin`` is not from a page (a
+    script, the device layer, curl) and is judged by the other checks.
+    """
+    origin = (headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    return urlparse(origin).netloc.lower() == (headers.get("host") or "").strip().lower()
+
+
+def socket_may_control(websocket: Any) -> bool:
+    """With no accounts, who may drive over a WebSocket: the rule the HTTP
+    routes use (the rig PC, or the control token), from this app's own page.
+    It was everyone who connected."""
+    client = getattr(websocket, "client", None)
+    host = client.host if client else None
+    local = host in _LOOPBACK_HOSTS
+    return (local or _has_the_token(websocket.headers)) and same_origin(websocket.headers)
 
 
 def require_control(request: Request) -> Role:

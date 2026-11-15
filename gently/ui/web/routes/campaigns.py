@@ -772,7 +772,10 @@ def create_router(server) -> APIRouter:
             "sessions": [_serialize(s) for s in sessions],
         }
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/sessions")
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/sessions",
+        dependencies=[Depends(require_control)],
+    )
     async def link_session_to_item(campaign_id: str, item_id: str, request: Request):
         """Link a session to a plan item (appends) and record it against the campaign."""
         cs = _get_store()
@@ -801,7 +804,10 @@ def create_router(server) -> APIRouter:
         sessions = [s for s in all_sessions if s.session_id in item_sids]
         return {"sessions": [_serialize(s) for s in sessions]}
 
-    @router.delete("/api/campaigns/{campaign_id}/items/{item_id}/sessions/{session_id}")
+    @router.delete(
+        "/api/campaigns/{campaign_id}/items/{item_id}/sessions/{session_id}",
+        dependencies=[Depends(require_control)],
+    )
     async def unlink_session_from_item(campaign_id: str, item_id: str, session_id: str):
         """Remove a session link from a plan item. Returns {unlinked: bool}."""
         cs = _get_store()
