@@ -35,8 +35,10 @@ MANAGER = GALLERY[
 
 
 def test_the_tab_opens_on_the_runs_kept_on_disk():
-    views = re.findall(r'<button class="view-btn( active)?" data-view="(\w+)"', TAB)
-    assert views == [(" active", "runs"), ("", "profile"), ("", "gallery")]
+    # The runs are the tab. Profile and Gallery, the pushed copies, are no
+    # longer offered ("i guess we get rid of profile ad gallery").
+    assert 'data-view="profile"' not in TAB and 'data-view="gallery"' not in TAB
+    assert "if (viewName !== 'runs') return;" in MANAGER
     assert "currentView: 'runs'," in MANAGER
     # The pushed-image views are still there, and start out of sight.
     assert '<div class="calibration-container" id="calibration-live" hidden>' in TAB

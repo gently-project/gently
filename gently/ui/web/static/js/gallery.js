@@ -967,7 +967,7 @@ const CalibrationManager = {
     },
 
     switchView(viewName) {
-        if (!['runs', 'profile', 'gallery'].includes(viewName)) return;
+        if (viewName !== 'runs') return;   // Profile and Gallery are no longer offered
         this.currentView = viewName;
         CalibrationProfileView.selectedSliceIndex = null;
         this.showView();

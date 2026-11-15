@@ -49,8 +49,6 @@ const Atrium = (() => {
               tol: 20, pressWhen: () => !ConnectionStatus.get().microscopeConnected },
             { tab: 'calibration', title: 'CALIBRATION', x: 540, y: 700, w: 700, h: 460, crit: 0.85, children: [
                 { key: 'runs', title: 'runs', go: () => CalibrationManager.switchView('runs') },
-                { key: 'profile', title: 'profile', go: () => CalibrationManager.switchView('profile') },
-                { key: 'gallery', title: 'gallery', go: () => CalibrationManager.switchView('gallery') },
               ] },
             { tab: 'experiment',  title: 'EXPERIMENT',  x: 1280, y: 700, w: 700, h: 460, crit: 0.6, children: [
                 { key: 'overview', title: 'overview', go: () => ExperimentOverview.setView('overview') },

@@ -149,11 +149,11 @@
     <div id="calibration-content" class="tab-content">
         <div class="calibration-header-bar">
             <h2 class="calibration-title">Calibration</h2>
-            <div class="view-switcher" id="calibration-view-switcher">
-                <button class="view-btn active" data-view="runs" title="Every run this session kept on disk, with its raw exposures (1)">Runs</button>
-                <button class="view-btn" data-view="profile" title="The run in progress, as it is pushed to the page (2)">Profile</button>
-                <button class="view-btn" data-view="gallery" title="The pushed images as a gallery (3)">Gallery</button>
-            </div>
+            {# Profile and Gallery, which showed the copies pushed to the page
+               while a calibration ran, are no longer offered: the runs on disk
+               hold every exposure, and Fit on Scope shows a run as it goes.
+               Their container below stays hidden and their code in gallery.js
+               is still there, to come out when no run is being watched. #}
         </div>
         {# The archive (calibration-archive.js): every calibration run this
            session kept, read from disk through /api/calibration/records, so

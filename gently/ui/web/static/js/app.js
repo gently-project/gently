@@ -504,8 +504,6 @@ const KeyboardShortcuts = {
         '6': () => switchTab(TABS.EXPERIMENT),   // Experiment
         '?': () => KeyboardShortcuts.showHelp(),
         't': () => ThemeManager.toggle(),
-        'p': () => { if (state.tab === TABS.CALIBRATION) CalibrationManager.switchView('profile'); },
-        'g': () => { if (state.tab === TABS.CALIBRATION) CalibrationManager.switchView('gallery'); },
     },
 
     init() {
