@@ -28,7 +28,7 @@
 .rig-sec-quiet .rig-sec-head { margin-bottom: 0; align-items: center; }
 
 .rig-sec-label {
-    font-size: 0.64rem;
+    font-size: 0.6875rem;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: var(--text-muted);
@@ -63,7 +63,7 @@
     background: var(--accent);
     transition: width 0.3s ease;
 }
-.rig-progress-text { font-size: 0.68rem; color: var(--text-muted); }
+.rig-progress-text { font-size: 0.6875rem; color: var(--text-muted); }
 
 /* ── actions ────────────────────────────────────────────────── */
 .rig-actions { display: flex; align-items: center; gap: 0.4rem; }
@@ -84,7 +84,11 @@
 .rig-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .rig-btn:disabled { opacity: 0.45; cursor: default; }
 .rig-btn-go:hover:not(:disabled) { border-color: var(--accent-green); color: var(--accent-green); }
-.rig-btn-stop:hover:not(:disabled) { border-color: var(--accent-red); color: var(--accent-red); }
+/* Stop is red before it is hovered: it is the one press here that takes the
+   instrument away. Armed (pressed once), it is filled. */
+.rig-btn-stop:not(:disabled) { border-color: color-mix(in srgb, var(--accent-red) 55%, transparent); color: var(--accent-red); }
+.rig-btn-stop:hover:not(:disabled) { border-color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
+.rig-btn-stop.is-armed:not(:disabled) { background: var(--accent-red); border-color: var(--accent-red); color: #fff; }
 
 .rig-field { display: flex; align-items: center; gap: 0.35rem; }
 .rig-field-label { font-size: 0.7rem; color: var(--text-muted); }
@@ -179,7 +183,7 @@
 .devices-tempwrap-chev { flex: none; transition: transform 0.15s ease; }
 .devices-tempwrap-head[aria-expanded="true"] .devices-tempwrap-chev { transform: rotate(90deg); }
 .devices-tempwrap-title {
-    font-size: 0.68rem;
+    font-size: 0.6875rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
@@ -213,7 +217,7 @@
 }
 .temp-ref-label {
     fill: var(--text-muted);
-    font-size: 10px;
+    font-size: 11px;
     text-anchor: start;
     font-variant-numeric: tabular-nums;
 }
@@ -222,7 +226,7 @@
 .temp-grid-line { stroke: var(--temp-grid-line-color); stroke-width: 1; }
 .temp-grid-label {
     fill: var(--temp-grid-label-color);
-    font-size: 10px;
+    font-size: 11px;
     text-anchor: end;
     font-variant-numeric: tabular-nums;
 }
@@ -284,3 +288,6 @@
 /* ── STATUS SHAPES (vocabulary in main.css). The SVG end label cannot take a
    pseudo-element, so the fold heading carries the glyph. ── */
 .devices-tempwrap-now.is-drifting::before { content: '! '; }
+
+/* Nothing in the menu under 11 px: the two badges were 10.4. */
+.rig-menu .status-badge { font-size: 0.6875rem; }
