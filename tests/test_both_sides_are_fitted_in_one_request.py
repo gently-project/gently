@@ -138,6 +138,8 @@ def test_several_embryos_are_walked_in_the_order_asked_on_both_sides(monkeypatch
         body["calibrated"] == ["embryo_1"] and body["failed"] == [] and body["sides"] == ["A", "B"]
     )
     assert aligned == [] and body["aligned"] == {}
+    # The fits as they now stand come back with the reply.
+    assert body["calibrations"]["embryo_1"]["B"]["slope_um_per_deg"] == 36.0
 
 
 def test_aligning_the_views_is_part_of_the_walk_and_a_moved_embryo_is_fitted_again(monkeypatch):

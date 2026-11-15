@@ -2241,6 +2241,12 @@ const OperateManager = (function () {
             const d = await postJSON('/api/devices/calibrate/all',
                 Object.assign({ embryo_ids: ids, align }, calibrationSettings()));
             const ok = (d.calibrated || []).length, failed = d.failed || [];
+            // The fits as the walk left them, onto the page's own copies: the
+            // last embryo's was seen missing its side B until the next update.
+            Object.entries(d.calibrations || {}).forEach(([id, cal]) => {
+                const mine = _embryos.find(e => e.id === id);
+                if (mine) mine.calibration = cal;
+            });
             // Each failure with its reason: which embryo, and what to do about it.
             const whys = failed.map(id => `${id.replace(/^embryo_/, '')}: ${String((d.why || {})[id] || 'failed').slice(0, 90)}`);
             if (failed.length) toastFail(`${ok} calibrated, ${failed.length} not. ${whys.join(' · ')}`);

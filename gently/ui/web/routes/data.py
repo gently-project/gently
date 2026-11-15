@@ -2392,6 +2392,11 @@ def create_router(server) -> APIRouter:
             "failed": [eid for eid in targets if eid not in calibrated],
             "why": why,
             "aligned": aligned,
+            # Each embryo's fits as they now stand, so the page that asked
+            # shows them without waiting on a broadcast it may have missed.
+            "calibrations": {
+                eid: dict(getattr(embryos.get(eid), "calibration", {}) or {}) for eid in targets
+            },
             "sides": list(sides),
             "message": f"{len(calibrated)} of {len(targets)} calibrated"
             + (f"; {len(why)} failed" if why else ""),
