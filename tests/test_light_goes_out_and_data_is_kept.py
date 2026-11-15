@@ -87,7 +87,13 @@ def test_halt_puts_out_everything_that_lights_the_sample():
     # Light before motion, and the camera last and not waited for: its stop
     # took a minute on the rig with the scan idle, and the stages had waited.
     order = [c[0] for c in core.method_calls]
-    assert order.index("setConfig") < order.index("stop") < order.index("isSequenceRunning")
+    # The lasers, then what moves, then the scan and the beams, then the camera.
+    assert (
+        order.index("setConfig")
+        < order.index("stop")
+        < order.index("setProperty")
+        < order.index("isSequenceRunning")
+    )
     for th in threading.enumerate():
         if th.name == "halt-camera":
             th.join(timeout=5)
@@ -308,3 +314,30 @@ def test_a_stack_cut_short_is_a_failure():
             t.join(timeout=5)
     assert "stack cut short: 1 of 3 frames" in str(status.exception(timeout=1))
     assert vs.read() == {}
+
+
+def test_a_move_stopped_part_way_does_not_say_it_arrived():
+    """Seen on the simulated rig: a stage sent to -2200 and halted at 33
+    reported success. The plan had ended; the stage had not arrived."""
+    from gently.hardware.dispim import client as client_module
+    from gently.hardware.dispim.client import DiSPIMMicroscope
+
+    def scope(at):
+        c = DiSPIMMicroscope.__new__(DiSPIMMicroscope)
+
+        async def submit(name, kwargs=None, timeout=None):
+            return {"success": True}
+
+        async def where():
+            return at
+
+        c._submit_plan_and_wait = submit  # type: ignore[method-assign]
+        c.get_stage_position = where  # type: ignore[method-assign]
+        return c
+
+    got = asyncio.run(scope((33.0, -355.0)).move_to_position(-2200.0, -355.0))
+    assert got["success"] is False and got["x"] == 33.0
+    assert "2233 µm short of (-2200.0, -355.0)" in got["error"]
+    near = client_module.ARRIVED_WITHIN_UM - 1
+    got = asyncio.run(scope((-2200.0 + near, -355.0)).move_to_position(-2200.0, -355.0))
+    assert got == {"success": True, "x": -2200.0, "y": -355.0}

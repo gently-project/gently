@@ -24,6 +24,10 @@ from gently.settings import settings
 logger = logging.getLogger(__name__)
 
 
+# A move has arrived when the stage reads within this of where it was sent.
+ARRIVED_WITHIN_UM = 10.0
+
+
 class DiSPIMMicroscope(Microscope):
     """
     Client for Gently Device Layer Server.
@@ -365,6 +369,22 @@ class DiSPIMMicroscope(Microscope):
         )
 
         if result.get("success"):
+            # The plan ending is not the stage arriving: a move stopped part
+            # way (HALT, a limit) ended its plan too, and was reported as
+            # having gone where it was sent. Where it is, is read.
+            try:
+                at_x, at_y = await self.get_stage_position()
+            except Exception:
+                return {"success": True, "x": x, "y": y}
+            short = ((at_x - x) ** 2 + (at_y - y) ** 2) ** 0.5
+            if short > ARRIVED_WITHIN_UM:
+                return {
+                    "success": False,
+                    "x": at_x,
+                    "y": at_y,
+                    "error": f"the stage stopped at ({at_x:.1f}, {at_y:.1f}) µm, "
+                    f"{short:.0f} µm short of ({x:.1f}, {y:.1f})",
+                }
             return {"success": True, "x": x, "y": y}
 
         return result

@@ -3582,7 +3582,10 @@ class DeviceLayerServer(Service):
         before HALT reached them. How long each step took is logged."""
         errors: dict[str, str] = {}
         took: dict[str, float] = {}
-        dark = self._light_out(errors, took)
+        # The lasers and the LED are the light: 46 ms on the rig. Then what
+        # moves, before the scan and the beams are tidied, which is another
+        # quarter of a second a stage would go on travelling through.
+        dark = self._light_out(errors, took, only=("lasers", "led"))
         halted: list[str] = []
         # The piezo is a stage to MMCore too, and an aborted calibration can
         # leave it mid-sweep. The galvo is not a positioner and has no stop.
@@ -3597,6 +3600,7 @@ class DeviceLayerServer(Service):
             except Exception as exc:
                 errors[key] = str(exc)
             took[key] = time.perf_counter() - t0
+        dark += self._light_out(errors, took, only=("scan",))
         if self._stop_the_camera():
             dark.append("camera (stopping)")
         logger.warning(
@@ -3649,7 +3653,12 @@ class DeviceLayerServer(Service):
         logger.info("Stop line listening on http://127.0.0.1:%d", port)
         return port
 
-    def _light_out(self, errors: dict[str, str], took: dict[str, float] | None = None) -> list[str]:
+    def _light_out(
+        self,
+        errors: dict[str, str],
+        took: dict[str, float] | None = None,
+        only: tuple[str, ...] = ("lasers", "led", "scan"),
+    ) -> list[str]:
         """Everything that lights the sample, off: the lasers, the LED, the
         scan, the beams. HALT stopped what moves and
         left what shines: pressed during a stack, the lasers went on firing.
@@ -3673,12 +3682,12 @@ class DeviceLayerServer(Service):
             took[what] = time.perf_counter() - t0
 
         lasers = self.devices.get("laser_control")
-        if lasers is not None:
+        if lasers is not None and "lasers" in only:
             attempt("lasers", lambda: core.setConfig(lasers.group_name, "ALL OFF"))
         led = self.devices.get("led")
-        if led is not None:
+        if led is not None and "led" in only:
             attempt("led", lambda: led.set("Closed"))
-        for key in ("scanner", "scanner_b"):
+        for key in ("scanner", "scanner_b") if "scan" in only else ():
             dev = self.devices.get(key)
             if dev is not None:
                 # The properties themselves, with no wait for the card: the
