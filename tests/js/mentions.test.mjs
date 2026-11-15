@@ -35,3 +35,19 @@ test('an answered ask is not counted as unopened', () => {
     assert.ok(inbox.includes('const waiting = i => !i.seen && !i.answered;'));
     assert.ok(!inbox.includes('filter(i => !i.seen)'));
 });
+
+test('wherever a notebook note is written or shown, a person can be asked and is drawn', () => {
+    // A finding, a line in the Notebook tab: both are notebook notes, and the
+    // server already read their @words; the boxes offered nobody and the
+    // cards drew "@ryan" as words.
+    const campaigns = fs.readFileSync(new URL('campaigns.js', JS), 'utf8');
+    const notebook = fs.readFileSync(new URL('notebook.js', JS), 'utf8');
+    assert.ok(!campaigns.includes('<div class="pj-body">${esc(n.body)}</div>'));
+    assert.equal(campaigns.split('<div class="pj-body">${Mentions.html(n.body, n.mentions)}</div>').length - 1, 2);
+    assert.ok(campaigns.includes(`e.target.matches('textarea[data-field="body"]')) Mentions.attach(e.target);`));
+    assert.ok(notebook.includes('if (input) Mentions.attach(input);'));
+    assert.ok(notebook.includes("Mentions.html(n.body || '', n.mentions)"));
+    // The list of people hangs from its box's container.
+    const css = fs.readFileSync(new URL('../css/main.css', JS), 'utf8');
+    assert.ok(css.includes('.nb-ask, .pj-form { position: relative; }'));
+});

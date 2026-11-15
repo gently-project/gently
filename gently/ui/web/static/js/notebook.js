@@ -330,7 +330,8 @@ const NotebookApp = (() => {
 
         const body = document.createElement('div');
         body.className = 'nb-body-text';
-        body.textContent = n.title && n.title !== 'Session summary' ? `${n.title}: ${n.body || ''}` : (n.body || '');
+        // The people a note asks are drawn as people, as on its session.
+        body.innerHTML = (n.title && n.title !== 'Session summary' ? `${escapeHtml(n.title)}: ` : '') + Mentions.html(n.body || '', n.mentions);
 
         el.append(head, body);
 
@@ -546,6 +547,7 @@ const NotebookApp = (() => {
         const go = $('nb-ask-go'), note = $('nb-note-go'), input = $('nb-ask-input');
         if (go) go.addEventListener('click', ask);
         if (note) note.addEventListener('click', noteIt);
+        if (input) Mentions.attach(input);                     // a note written here can ask a person
         if (input) input.addEventListener('keydown', e => {
             if (e.key !== 'Enter') return;
             e.preventDefault();

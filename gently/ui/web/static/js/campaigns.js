@@ -2365,6 +2365,11 @@ const ProjectTools = {
     },
 };
 
+// A finding is a notebook note: an @ in it asks the person, so its box offers them.
+document.addEventListener('focusin', e => {
+    if (e.target && e.target.matches && e.target.matches('textarea[data-field="body"]')) Mentions.attach(e.target);
+});
+
 const Stream = {
     mount() {
         const box = document.getElementById('stream-line');
@@ -2590,7 +2595,7 @@ function findingCard(n) {
     const cites = arr => (arr || []).map(b => `<span class="pj-cite">${esc(String(b).slice(0, 12))}</span>`).join(' ');
     return `<div class="pj-entry find${dim ? ' dim' : ''}">
         <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
-        <div class="pj-body">${esc(n.body)}</div>
+        <div class="pj-body">${Mentions.html(n.body, n.mentions)}</div>
         ${(n.basis || []).length ? `<div class="pj-m">basis ${cites(n.basis)}</div>` : ''}
         ${(n.sessions || []).length ? `<div class="pj-m">sessions ${cites(n.sessions)}</div>` : ''}
         ${dim ? '' : `<div class="pj-act">${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="confirmed">Confirm</button>` : ''}<button data-action="form-open" data-form="supersede:${esc(n.id)}">Supersede</button>${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="superseded">Dismiss</button>` : ''}</div>`}
@@ -2814,7 +2819,7 @@ function renderNotesSection() {
         <div class="pj-stack">${list.length ? list.map(n => `<div class="pj-entry">
             <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">${esc(n.kind)}${n.status && n.status !== 'confirmed' ? ` · ${esc(n.status)}` : ''}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
             ${n.title ? `<div class="pj-t"><b>${esc(n.title)}</b></div>` : ''}
-            <div class="pj-body">${esc(n.body)}</div>
+            <div class="pj-body">${Mentions.html(n.body, n.mentions)}</div>
             ${(n.sessions || []).length ? `<div class="pj-m">sessions ${n.sessions.map(s => `<span class="pj-cite">${esc(String(s).slice(0, 8))}</span>`).join(' ')}</div>` : ''}
         </div>`).join('') : '<div class="pj-none">No note is filed to this project yet.</div>'}</div>
     </div>`;
