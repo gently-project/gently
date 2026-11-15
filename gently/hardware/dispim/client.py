@@ -644,6 +644,13 @@ class DiSPIMMicroscope(Microscope):
                 ret["volume_path"] = str(fpath)
             elif result.get("volume_path"):
                 ret["volume_path"] = result["volume_path"]
+            # When the stack began, as the device read it. Saved as the
+            # volume's acquired_at: the time the file was written is not it.
+            for ev in (result.get("documents") or {}).get("events", []):
+                began = (ev.get("timestamps") or {}).get(scanner_name)
+                if began:
+                    ret["acquired_at_epoch"] = float(began)
+                    break
             return ret
 
         return {"error": result.get("error", "Acquisition failed"), "success": False}

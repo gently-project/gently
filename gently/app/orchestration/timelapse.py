@@ -1595,6 +1595,11 @@ class TimelapseOrchestrator:
                         # The side travels only when it is not A, so a callback
                         # written for one view keeps working.
                         extra = {"side": side} if side != "A" else {}
+                        # Likewise the stack's own time, when the device gave one.
+                        if r.get("acquired_at_epoch"):
+                            extra["acquired_at"] = datetime.fromtimestamp(
+                                float(r["acquired_at_epoch"])
+                            ).isoformat()
                         callback_result = await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,
