@@ -127,3 +127,16 @@ def test_nothing_that_stops_or_holds_the_rig_is_asked_about() -> None:
     # HALT does not pass through the question, and neither does anything
     # that stops a camera.
     assert "mayTakeFromRun" not in _fn("    async function haltMotion() {")
+
+
+def test_looking_at_manual_does_not_put_the_lasers_out_under_a_run() -> None:
+    """Found by an audit made with a browser that could only read: opening
+    Devices > Manual sent POST /api/devices/laser/off, every time. With a run
+    taking volumes about 20 s of every 5 min, a look at that view had about a
+    one in fifteen chance of darkening a volume."""
+    devices = (JS / "devices.js").read_text(encoding="utf-8")
+    assert (
+        "if (viewName === 'manual' && document.body.dataset.run !== 'running') setLaserOff();"
+        in devices
+    )
+    assert "if (viewName === 'manual') { setLaserOff();" not in devices

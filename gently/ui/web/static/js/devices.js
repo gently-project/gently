@@ -2448,7 +2448,11 @@ const DevicesManager = (function () {
         // Entering Manual view — gate lasers off immediately (brightfield-safe).
         // populateLaserPresets() runs after setLaserOff() so the select is always
         // seeded with the entry-safety state first.
-        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
+        // Opening Manual puts the lasers out, so it starts from dark. Not
+        // while a run is running: the run owns the lasers, and "ALL OFF"
+        // sent by a look at this view lands in whatever volume is being taken.
+        if (viewName === 'manual' && document.body.dataset.run !== 'running') setLaserOff();
+        if (viewName === 'manual') { populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
         // The Operate view owns its own module; activate/deactivate it so its
         // camera + SPIM streams only run while it's the visible view.
         if (typeof OperateManager !== 'undefined') {
