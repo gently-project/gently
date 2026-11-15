@@ -114,10 +114,9 @@ def test_nothing_in_the_instrument_or_the_dish_belongs_to_one_camera() -> None:
             ("op-cam-spim", "spim"),
             ("op-display-bottom", "bottom"),
             ("op-display-spim", "spim"),
-            # Fit, the strip's fifth entry: what a calibration looks at in
-            # the frame's place, how it is done in Display's.
+            # The fit's graphs, in the frame's place. How a calibration is
+            # done is in the Sheet panel, whichever camera is up.
             ("op-cam-cal", "cal"),
-            ("op-display-cal", "cal"),
         ]
     ), owned
     # The page starts on the bottom camera: the light sheet's own are hidden,

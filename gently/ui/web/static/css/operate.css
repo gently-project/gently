@@ -2711,7 +2711,6 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 .op-calfit-body .op-preview-img { max-width: 100%; height: auto; display: block; }
 /* The options are as tall as what they say: a heading and three named lines.
    At Display's fixed height the heading and the Align line were cut off. */
-.op-pane-scope .op-calfit-opts { gap: 6px; flex: 0 0 auto; height: auto; }
 .op-calfit-opts .cal-opts, .op-calfit-opts .op-actions { margin: 0; gap: 6px 12px; justify-content: flex-start; }
 /* Whose fit is lent is a name, not a number: the select is as wide as it. */
 .op-calfit-opts #op-cal-borrow-from { width: auto; max-width: 150px; }
@@ -2769,3 +2768,14 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 /* The line under the light-sheet picture, when the picture is not of the
    selected embryo: it says so, in the colour of a caution. */
 #op-spim-target.is-elsewhere { color: var(--accent-amber, #d29922); }
+
+/* Calibration's settings, folded into the Sheet panel under the fit. */
+details.op-calfit-opts { margin-top: 6px; border-top: 1px solid var(--op-rule2); padding-top: 6px; }
+details.op-calfit-opts > summary { cursor: pointer; font: 12px var(--op-ui); color: var(--op-ink-dim); list-style-position: inside; }
+details.op-calfit-opts > summary em { font-style: normal; opacity: 0.75; }
+details.op-calfit-opts > summary:hover, details.op-calfit-opts[open] > summary { color: var(--op-ink); }
+details.op-calfit-opts > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+details.op-calfit-opts[open] > summary { margin-bottom: 8px; }
+details.op-calfit-opts .cal-opts, details.op-calfit-opts .op-actions { flex-wrap: wrap; }
+details.op-calfit-opts .cal-says { margin-left: 0; }
+details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
