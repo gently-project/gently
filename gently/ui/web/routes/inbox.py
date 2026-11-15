@@ -19,8 +19,16 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 
 from gently.core.file_store import _read_yaml, _write_yaml
-from gently.harness.memory.notebook import Note, note_to_dict
+from gently.harness.memory.notebook import Author, Note, note_to_dict
 from gently.ui.web.auth import current_username
+
+AGENT = "agent"  # what a line writes to ask it: "@agent ..."
+
+
+def who_wrote(n: Note) -> str | None:
+    """Who a line is by, as a conversation counts them: the person, or the
+    agent, whose lines carry no ``by``."""
+    return AGENT if n.author == Author.AGENT else n.by
 
 
 def known_people(server: Any) -> list[str]:
@@ -84,13 +92,13 @@ def _wrote_after(notes: list[Note], who: str, ask: Note) -> bool:
     if ask.sessions:
         where = set(ask.sessions)
         return any(
-            n.by == who and _when_written(n) > ask.created_at and set(n.sessions) & where
+            who_wrote(n) == who and _when_written(n) > ask.created_at and set(n.sessions) & where
             for n in notes
         )
     if ask.projects:
         where = set(ask.projects)
         return any(
-            n.by == who and _when_written(n) > ask.created_at and set(n.projects) & where
+            who_wrote(n) == who and _when_written(n) > ask.created_at and set(n.projects) & where
             for n in notes
         )
     return False
@@ -109,13 +117,13 @@ def _replies(everything: list[Note], pid: str) -> dict[str, str]:
     others. Kesavan asks @ryan, Ryan answers without an @: it is Kesavan's."""
     out: dict[str, str] = {}
     for ask in everything:
-        people = {ask.by, *ask.mentions} - {None}
+        people = {who_wrote(ask), *ask.mentions} - {None}
         if not ask.mentions or pid not in people or not (ask.sessions or ask.projects):
             continue
         for n in everything:
             if (
-                n.by in people
-                and n.by != pid
+                who_wrote(n) in people
+                and who_wrote(n) != pid
                 and pid not in n.mentions
                 and n.id != ask.id
                 and _when_written(n) > ask.created_at

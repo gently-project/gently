@@ -10,7 +10,7 @@ it is open like ``/api/notebook/ask``.
 import asyncio
 import logging
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
 
 from gently.harness.memory.notebook_pages import (
     Page,
@@ -25,7 +25,7 @@ from gently.harness.memory.notebook_pages import (
 )
 from gently.ui.web.auth import current_username, require_control
 
-from .notebook import _for_view, person_note
+from .notebook import _for_view, agent_answers, person_note
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ def create_router(server) -> APIRouter:
         return {"ok": True, **_view(nb, page)}
 
     @router.post("/api/notebook/pages/{page_id}/notes", dependencies=[Depends(require_control)])
-    async def write_line(page_id: str, request: Request):
+    async def write_line(page_id: str, request: Request, background: BackgroundTasks):
         """A person's line written from a page: filed where the page is
         (its project, thread, strain or session), so it is on the page."""
         body = await request.json()
@@ -197,6 +197,8 @@ def create_router(server) -> APIRouter:
         }
         note = person_note(server, {**filed, **(body or {})}, current_username(request))
         note_id = nb.write_note(note)
+        if "agent" in note.mentions:
+            background.add_task(agent_answers, server, note_id)
         _changed("notebook.page.write")
         return {"ok": True, "note": _for_view(nb.get_note(note_id)), **_view(nb, page)}
 

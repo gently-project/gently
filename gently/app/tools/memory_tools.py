@@ -147,6 +147,18 @@ def _project_of(agent, cs, project: str | None) -> str | None:
     return None
 
 
+def _asked(text: str) -> list[str]:
+    """The people a note of the agent's asks: each @id that is someone at
+    this rig. The line then reaches their inbox, as a person's would."""
+    from gently.harness.memory.notebook import mentions_in
+    from gently.ui.web.routes.inbox import known_people
+
+    try:
+        return mentions_in(text, known_people(None))
+    except Exception:
+        return []
+
+
 @tool(
     name="record_note",
     description=(
@@ -155,7 +167,8 @@ def _project_of(agent, cs, project: str | None) -> str | None:
         "clarity — keep their meaning and any specifics (numbers, strains, stages) — then save. "
         "The note is attributed to the human and tagged to the current session and its "
         "project. kind is 'observation' (default), 'finding' (a claim) or 'question'; "
-        "project names a project by shorthand or id when the note is about another one."
+        "project names a project by shorthand or id when the note is about another one. "
+        "Writing @name of a person at this rig (@ryan) asks them: the note reaches their inbox."
     ),
     category=ToolCategory.UTILITY,
     examples=[
@@ -206,6 +219,7 @@ async def record_note(
         projects=[project_id] if project_id else [],
         embryos=as_tags(embryos),
         strains=as_tags(strains),
+        mentions=_asked(text),
     )
     note_id = cs.notebook.write_note(note)
     # Refresh the Notebook tab + Agent's-view live edge (both ride CONTEXT_UPDATED).
@@ -224,7 +238,8 @@ async def record_note(
     description=(
         "File a finding of your own — a claim the data supports — into the project's "
         "ledger as PROPOSED, for the researcher to confirm, supersede or dismiss on the "
-        "Projects tab. Cite the note ids it rests on in basis. Never confirm it yourself."
+        "Projects tab. Cite the note ids it rests on in basis. Never confirm it yourself. "
+        "Writing @name of a person at this rig (@ryan) asks them: it reaches their inbox."
     ),
     category=ToolCategory.UTILITY,
     examples=[
@@ -265,6 +280,7 @@ async def propose_finding(
         projects=[project_id] if project_id else [],
         strains=as_tags(strains),
         basis=as_tags(basis),
+        mentions=_asked(text),
     )
     note_id = cs.notebook.write_note(note)
     try:

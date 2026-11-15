@@ -7,8 +7,9 @@ holder's action, the same store methods the agent's tools use.
 
 import asyncio
 import logging
+import re
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request
 
 from gently.harness.memory.notebook import (
     Author,
@@ -61,10 +62,12 @@ def person_note(server, body: dict, by: str | None) -> Note:
     status = _coerce(NoteStatus, body.get("status")) or (
         NoteStatus.OPEN if kind == NoteKind.QUESTION else NoteStatus.CONFIRMED
     )
-    from gently.ui.web.routes.inbox import known_people
+    from gently.ui.web.routes.inbox import AGENT, known_people
 
     mentions = list(
-        dict.fromkeys(as_tags(body.get("mentions")) + mentions_in(text, known_people(server)))
+        dict.fromkeys(
+            as_tags(body.get("mentions")) + mentions_in(text, [*known_people(server), AGENT])
+        )
     )
     return Note(
         id="",
@@ -82,6 +85,75 @@ def person_note(server, body: dict, by: str | None) -> Note:
         basis=list(body.get("basis") or []),
         by=by,
     )
+
+
+_AT_AGENT = re.compile(r"(?<![\w@])@agent\b[,:]?\s*", re.IGNORECASE)
+
+
+async def agent_answers(server, note_id: str) -> str | None:
+    """A line that asks the agent ("@agent what changed at 25 C?") gets a line
+    back, on the same session and project, for the one who asked. It answers
+    from the notes filed where the ask was, and from nothing else: it reads,
+    and touches no hardware. Returns the reply's id, or None when the line
+    does not ask it. A failure is a line too, set aside, so the asker is not
+    left waiting on silence."""
+    from gently.harness.memory.notebook_ask import answer_question, select_notes
+    from gently.settings import settings
+    from gently.ui.web.routes.inbox import AGENT
+
+    cs = getattr(server, "context_store", None)
+    if cs is None:
+        return None
+    nb = cs.notebook
+    ask = nb.get_note(note_id)
+    if ask is None or AGENT not in ask.mentions or ask.author == Author.AGENT:
+        return None
+    if ask.sessions:
+        notes = nb.query_notes(session=ask.sessions[0], in_notebook=True)
+        if ask.projects:
+            notes += nb.query_notes(project=ask.projects[0], in_notebook=True)
+    elif ask.projects:
+        notes = nb.query_notes(project=ask.projects[0], in_notebook=True)
+    else:
+        notes = select_notes(nb, thread=ask.threads[0] if ask.threads else None)
+    notes = list({n.id: n for n in notes if n.id != ask.id}.values())[:20]
+    question = _AT_AGENT.sub("", ask.body).strip() or ask.body
+    basis: list[str] = []
+    aside = False
+    try:
+        client = getattr(server, "claude_async", None)
+        if client is None:
+            import anthropic
+
+            client = anthropic.AsyncAnthropic()
+        got = await answer_question(client, settings.models.main, question, notes)
+        text = got.get("answer") or "I have no answer from the notes filed here."
+        basis = list(dict.fromkeys(i for pt in got.get("points") or [] for i in pt["note_ids"]))
+    except Exception as e:
+        logger.exception("The agent could not answer note %s", note_id)
+        text = f"I could not answer this: {type(e).__name__}."
+        aside = True
+    reply = nb.write_note(
+        Note(
+            id="",
+            kind=NoteKind.OBSERVATION,
+            body=text,
+            author=Author.AGENT,
+            sessions=list(ask.sessions),
+            projects=list(ask.projects),
+            threads=list(ask.threads),
+            mentions=[ask.by] if ask.by else [],
+            basis=basis,
+            in_notebook=not aside,
+        )
+    )
+    try:
+        from gently.core.event_bus import EventType, emit
+
+        emit(EventType.CONTEXT_UPDATED, {"kind": "note"}, source="notebook.agent_answers")
+    except Exception:
+        pass
+    return str(reply)
 
 
 def create_router(server) -> APIRouter:
@@ -184,7 +256,7 @@ def create_router(server) -> APIRouter:
         return result
 
     @router.post("/api/notebook/notes", dependencies=[Depends(require_control)])
-    async def write_note(request: Request):
+    async def write_note(request: Request, background: BackgroundTasks):
         """A person's note: kind observation, finding or question; facets as
         lists or comma strings. A finding written here is confirmed, since the
         person wrote it; the agent's findings arrive proposed through its tool."""
@@ -194,6 +266,8 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=503, detail="notebook unavailable")
         note = person_note(server, body, current_username(request))
         note_id = nb.write_note(note)
+        if "agent" in note.mentions:
+            background.add_task(agent_answers, server, note_id)  # after the reply is sent
         try:
             from gently.core.event_bus import EventType, emit
 
