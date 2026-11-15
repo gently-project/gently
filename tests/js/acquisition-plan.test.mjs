@@ -204,3 +204,21 @@ test('the embryos do not all fit in one field: a frame from each pinned position
     assert.equal('positions' in P.toPayload(one, IDS).bf, false);
     assert.deepEqual(P.toPayload(one, IDS).bf.position, { x: -500, y: -400 });
 });
+
+// ── which sides a round takes ─────────────────────────────────────────────
+
+test('a plan on side A alone sends no sides, as before', () => {
+
+    const body = P.toPayload(P.fromForm({ interval: 60, intervalUnit: 's', volumes: true }), ['embryo_1']);
+    assert.equal('sides' in body, false);
+    assert.deepEqual(P.fromForm({ interval: 60, intervalUnit: 's', sides: 'A' }).spim.sides, ['A']);
+});
+
+test('a plan that takes side B says which sides, and keeps them when saved', () => {
+
+    const both = P.fromForm({ interval: 60, intervalUnit: 's', volumes: true, sides: 'AB' });
+    assert.deepEqual(P.toPayload(both, ['embryo_1']).sides, ['A', 'B']);
+    assert.deepEqual(P.toPayload(P.fromForm({ interval: 60, intervalUnit: 's', volumes: true, sides: 'B' }), []).sides, ['B']);
+    assert.deepEqual(P.fromStructure(P.toStructure(both)).spim.sides, ['A', 'B']);
+    assert.deepEqual(P.fromForm({ interval: 60, intervalUnit: 's', sides: 'nonsense' }).spim.sides, ['A']);
+});

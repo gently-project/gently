@@ -1612,7 +1612,21 @@ const OperateManager = (function () {
         return Number.isFinite(v) ? v : fallback;
     };
 
+    // The side is not remembered between visits: a calibration that quietly
+    // went to the other arm is worse than choosing B again.
+    let _calSide = 'A';
+    const sideFit = emb => {
+        const c = (emb && emb.calibration) || {};
+        return _calSide === 'B' ? (c.B || {}) : c;
+    };
+
     function readCalForm() {
+        const side = $('cal-side') && $('cal-side').value === 'B' ? 'B' : 'A';
+        // Side B is measured by the scan routine only; the sweep drives A's devices.
+        if (side === 'B' && $('cal-method')) $('cal-method').value = 'scan';
+        const turned = side !== _calSide;
+        _calSide = side;
+        if (turned) renderFitRow();
         _cal = {
             method: $('cal-method') ? $('cal-method').value : _cal.method,
             edges: $('cal-edges') ? !!$('cal-edges').checked : _cal.edges,
@@ -1654,6 +1668,7 @@ const OperateManager = (function () {
     // defaults travels, so the request says what the operator changed.
     function calibrationSettings() {
         const body = {};
+        if (_calSide === 'B') body.side = 'B';
         if (_cal.method && _cal.method !== CAL_DEFAULTS.method) body.method = _cal.method;
         if (_cal.method === 'scan') {
             if (Number.isFinite(_cal.zbuf) && _cal.zbuf !== CAL_DEFAULTS.zbuf) body.z_buffer_um = _cal.zbuf;
@@ -1678,7 +1693,7 @@ const OperateManager = (function () {
     function wireCalForm() {
         const from = $('op-cal-borrow-from');
         if (from) from.addEventListener('change', () => renderBorrow(_embryos.find(e => e.id === _selected)));
-        ['cal-method', 'cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
+        ['cal-side', 'cal-method', 'cal-edges', 'cal-zbuf', 'cal-estep', 'cal-erange', 'cal-etol', 'cal-inset',
             'cal-gtop', 'cal-gbot'].forEach(id => {
             const el = $(id);
             if (el) el.addEventListener('change', readCalForm);
@@ -1823,23 +1838,27 @@ const OperateManager = (function () {
         // The verb says which of the two things it does. Running it again over
         // a fit that already exists is a different decision from calibrating
         // something that has none, and the button used to read the same.
+        // The fit of the side chosen under Fit: each side has its own.
+        const c = sideFit(emb);
+        const fitted = !!emb && c.slope_um_per_deg != null;
         const b = $('op-calibrate');
-        if (b && !b.disabled) b.textContent = hasFit(emb) ? 'Recalibrate' : 'Calibrate';
+        if (b && !b.disabled) b.textContent = fitted ? 'Recalibrate' : 'Calibrate';
         const out = $('op-cal-result');
         if (!out) return;
         // While a run goes the line is the run's ("sweeping…"); it is put
         // back when the run ends and the button with it.
         if (b && b.disabled) return;
+        const who = emb ? `embryo ${labelFor(emb)}${_calSide === 'B' ? ' · side B' : ''}` : '';
         let says = 'no embryo selected';
-        if (emb && hasFit(emb)) {
+        if (fitted) {
             // A fit records an R² for each end of the sheet; the weaker one
-            // decides, as it does when a fit is borrowed (fitScore).
-            const c = emb.calibration || {};
-            const known = [c.r_squared_top, c.r_squared_bottom, c.r_squared].some(v => v != null);
-            says = `embryo ${labelFor(emb)} · ${Number(c.slope_um_per_deg).toFixed(1)} µm/deg`
-                + (known ? ` · R² ${fitScore(emb).toFixed(2)}` : '');
+            // decides, as it does when a fit is borrowed.
+            const ends = [c.r_squared_top, c.r_squared_bottom].filter(v => v != null);
+            const r2 = ends.length ? Math.min(...ends) : c.r_squared;
+            says = `${who} · ${Number(c.slope_um_per_deg).toFixed(1)} µm/deg`
+                + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
         } else if (emb) {
-            says = `embryo ${labelFor(emb)} · not calibrated`;
+            says = `${who} · not calibrated`;
         }
         out.textContent = says;
         out.title = says;
@@ -2966,6 +2985,7 @@ const OperateManager = (function () {
         const spim = $('op-plan-spim');
         if (spim) spim.checked = plan.spim.enabled !== false;
         set('op-plan-slices', plan.spim.slices);
+        set('op-plan-sides', (plan.spim.sides || ['A']).join(''));
         set('op-plan-exposure', plan.spim.exposureMs);
         const laser = $('op-plan-laser');
         if (laser) {
@@ -3081,6 +3101,7 @@ const OperateManager = (function () {
             bfLedPct: v('op-plan-bf-led'),
             slices: v('op-plan-slices'),
             exposureMs: v('op-plan-exposure'),
+            sides: v('op-plan-sides'),
             laserConfig: v('op-plan-laser'),
             bf: !!($('op-plan-bf') && $('op-plan-bf').checked),
             bfEveryRounds: v('op-plan-bf-every'),

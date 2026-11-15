@@ -659,8 +659,16 @@ def create_router(server) -> APIRouter:
             logger.warning("recent_images failed: %s", e)
         return {"images": out[:limit]}
 
+    def _side(side: str) -> str:
+        """The imaging path asked for. It becomes a folder name, so only the
+        two this rig has are taken."""
+        s = str(side or "A").upper()
+        if s not in ("A", "B"):
+            raise HTTPException(status_code=400, detail="side must be A or B")
+        return s
+
     @router.get("/api/sessions/{session_id}/projection")
-    async def get_session_projection(session_id: str, embryo: str, t: int):
+    async def get_session_projection(session_id: str, embryo: str, t: int, side: str = "A"):
         """Serve a saved JPEG projection from any session on disk.
 
         Path-traversal safe: the resolved file must live inside the session's
@@ -669,7 +677,7 @@ def create_router(server) -> APIRouter:
         store = _file_store()
         if store is None:
             raise HTTPException(status_code=503, detail="Store not available")
-        path = store.get_projection_path(session_id, embryo, t)
+        path = store.get_projection_path(session_id, embryo, t, _side(side))
         if path is None:
             raise HTTPException(status_code=404, detail="Projection not found")
         try:
@@ -1394,15 +1402,22 @@ def create_router(server) -> APIRouter:
         )
 
     def _volume_u16(
-        session_id: str, embryo: str, t: int, z: int | None, scale: int, max_dim: int | None
+        session_id: str,
+        embryo: str,
+        t: int,
+        z: int | None,
+        scale: int,
+        max_dim: int | None,
+        side: str = "A",
     ) -> Response:
         """One plane of a volume TIFF, or its projection, as uint16 bytes."""
         import tifffile
 
         from gently.core.u16 import MEDIA_TYPE, u16_payload
 
+        side = _side(side)
         store = _file_store()
-        path = store.get_volume_path(session_id, embryo, t) if store is not None else None
+        path = store.get_volume_path(session_id, embryo, t, side) if store is not None else None
         if path is None:
             raise HTTPException(status_code=404, detail="Volume not found")
         extra: dict = {}
@@ -1417,7 +1432,10 @@ def create_router(server) -> APIRouter:
                 write_counts_projection,
             )
 
-            stored = path.parent.parent / "projections" / f"t{t:04d}.tif"
+            # Side B's volume is one folder deeper (volumes/B/), and so is
+            # its projection (projections/B/).
+            deeper = store._side_part(side)
+            stored = path.parents[len(deeper) + 1].joinpath("projections", *deeper, f"t{t:04d}.tif")
             if stored.exists():
                 arr, layout = read_counts_projection(stored)
             else:
@@ -1432,7 +1450,7 @@ def create_router(server) -> APIRouter:
             if isinstance(layout.get("xy"), list) and len(layout["xy"]) == 2:
                 extra["XY-Height"], extra["XY-Width"] = layout["xy"]
             # How many planes stand behind it, so a viewer can offer them.
-            meta = store.get_volume_meta(session_id, embryo, t) if store is not None else None
+            meta = store.get_volume_meta(session_id, embryo, t, side)
             shape = (meta or {}).get("shape")
             if isinstance(shape, list) and len(shape) >= 3:
                 extra["Planes"] = int(shape[-3])
@@ -1464,7 +1482,14 @@ def create_router(server) -> APIRouter:
         )
 
     def _volume_made(
-        session_id: str, embryo: str, t: int, kind: str, scale: int, max_dim: int | None, n: int
+        session_id: str,
+        embryo: str,
+        t: int,
+        kind: str,
+        scale: int,
+        max_dim: int | None,
+        n: int,
+        side: str = "A",
     ) -> Response:
         """A picture made from the whole volume, in counts: the dual view or
         a montage of planes (gently.core.imaging). Read with threaded decode,
@@ -1475,7 +1500,9 @@ def create_router(server) -> APIRouter:
         from gently.core.u16 import MEDIA_TYPE, u16_payload
 
         store = _file_store()
-        path = store.get_volume_path(session_id, embryo, t) if store is not None else None
+        path = (
+            store.get_volume_path(session_id, embryo, t, _side(side)) if store is not None else None
+        )
         if path is None:
             raise HTTPException(status_code=404, detail="Volume not found")
         with tifffile.TiffFile(str(path)) as tf:
@@ -1494,10 +1521,17 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/dual.u16")
     async def volume_dual_u16(
-        session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
+        session_id: str,
+        embryo: str,
+        t: int,
+        scale: int = 1,
+        max: int | None = None,
+        side: str = "A",
     ):
         """The volume's dual view (XY over XZ) as uint16 bytes."""
-        return await asyncio.to_thread(_volume_made, session_id, embryo, t, "dual", scale, max, 0)
+        return await asyncio.to_thread(
+            _volume_made, session_id, embryo, t, "dual", scale, max, 0, side
+        )
 
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/montage.u16")
     async def volume_montage_u16(
@@ -1507,24 +1541,36 @@ def create_router(server) -> APIRouter:
         n: int = 6,
         scale: int = 1,
         max: int | None = None,
+        side: str = "A",
     ):
         """A montage of n evenly spaced planes as uint16 bytes."""
         return await asyncio.to_thread(
-            _volume_made, session_id, embryo, t, "montage", scale, max, n
+            _volume_made, session_id, embryo, t, "montage", scale, max, n, side
         )
 
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/projection.u16")
     async def volume_projection_u16(
-        session_id: str, embryo: str, t: int, scale: int = 1, max: int | None = None
+        session_id: str,
+        embryo: str,
+        t: int,
+        scale: int = 1,
+        max: int | None = None,
+        side: str = "A",
     ):
         """The maximum projection of a stored volume, as the numbers."""
-        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, None, scale, max)
+        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, None, scale, max, side)
 
     @router.get("/api/sessions/{session_id}/embryos/{embryo}/volumes/{t}/slice/{z}.u16")
     async def volume_slice_u16(
-        session_id: str, embryo: str, t: int, z: int, scale: int = 1, max: int | None = None
+        session_id: str,
+        embryo: str,
+        t: int,
+        z: int,
+        scale: int = 1,
+        max: int | None = None,
+        side: str = "A",
     ):
         """One plane of a stored volume, as the numbers."""
-        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, z, scale, max)
+        return await asyncio.to_thread(_volume_u16, session_id, embryo, t, z, scale, max, side)
 
     return router

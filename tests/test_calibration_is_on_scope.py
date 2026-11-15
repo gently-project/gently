@@ -121,7 +121,9 @@ def test_the_row_is_on_screen_with_any_camera() -> None:
     assert "renderFitRow();" in _fn("    function renderScope() {")
     row = _fn("    function renderFitRow() {")
     assert "fetch(" not in row and "getJSON(" not in row
-    assert "hasFit(emb) ? 'Recalibrate' : 'Calibrate'" in row
+    assert "fitted ? 'Recalibrate' : 'Calibrate'" in row
+    # The fit of the side chosen under Fit: each side has its own.
+    assert "const c = sideFit(emb);" in row
     assert "'no embryo selected'" in row and "not calibrated" in row
 
 

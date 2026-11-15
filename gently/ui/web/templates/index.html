@@ -322,6 +322,12 @@
                             <button class="view-btn run-plan-link" type="button" data-run-control="plan"
                                     title="The plan, and Start, are on Devices, under Acquisition">Plan a run →</button>
                         </div>
+                        {# Which side's pictures: shown only for a session
+                           whose run took side B as well (embryos.js). #}
+                        <div class="view-switcher" id="embryos-side" role="group" aria-label="Which light-sheet side the pictures are of" hidden>
+                            <button class="view-btn active" type="button" data-side="A" aria-pressed="true" title="Side A's volumes" onclick="EmbryosManager.setSide('A')">SPIM A</button>
+                            <button class="view-btn" type="button" data-side="B" aria-pressed="false" title="Side B's volumes" onclick="EmbryosManager.setSide('B')">SPIM B</button>
+                        </div>
                         <div class="view-switcher" id="view-switcher">
                             <button class="view-btn active" data-view="default" title="Tiles and analysis (1)" aria-pressed="true">Watch</button>
                             <button class="view-btn" data-view="board" title="Table (2)" aria-pressed="false">Table</button>
@@ -808,6 +814,15 @@
                             <option value="scan">Scan</option>
                           </select>
                         </label>
+                        {# Each side has its own scanner, piezo and camera, and its
+                           own fit. Side B is measured by the scan routine only. #}
+                        <label class="cal-opt">
+                          <span class="op-label">Side</span>
+                          <select class="cal-num" id="cal-side" title="Which light-sheet side is calibrated. Arm that side's beam in Light.">
+                            <option value="A" selected>A</option>
+                            <option value="B">B</option>
+                          </select>
+                        </label>
                         <label class="cal-opt">
                           <input type="checkbox" id="cal-edges" checked>
                           <span class="op-label">Find galvo edges</span>
@@ -1109,6 +1124,14 @@
                               <label class="op-label op-label-next" for="op-plan-exposure">Exposure</label>
                               <input class="op-numbox" id="op-plan-exposure" type="number" min="1" max="500" value="10">
                               <span class="op-unit">ms</span></div>
+                            {# Which sides a round takes a volume from. Side B's
+                               is filed beside A's, and needs a side-B fit. #}
+                            <div class="op-row"><label class="op-label" for="op-plan-sides">Views</label>
+                              <select class="op-sel" id="op-plan-sides" title="Which light-sheet sides each round takes a volume from">
+                                <option value="A" selected>SPIM A</option>
+                                <option value="B">SPIM B</option>
+                                <option value="AB">A and B</option>
+                              </select></div>
                             {# The field is what Start will apply; the embryos
                                may hold something else — set by the agent, by a
                                rule, or by a previous Start on a different set.

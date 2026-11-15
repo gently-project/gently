@@ -1348,29 +1348,29 @@ class FileStore:
 
         return tifffile.imread(str(path))
 
-    def get_volume_path(self, session_id: str, embryo_id: str, timepoint: int) -> Path | None:
+    def get_volume_path(
+        self, session_id: str, embryo_id: str, timepoint: int, side: str = "A"
+    ) -> Path | None:
         """Return the absolute path to a volume TIFF, or None."""
         sd = self._session_dir(session_id)
         if sd is None:
             return None
-        vol_path = (
-            self._embryo_dir_for_session(sd, embryo_id)
-            / "volumes"
-            / self._volume_filename(timepoint)
+        vol_path = self._embryo_dir_for_session(sd, embryo_id).joinpath(
+            "volumes", *self._side_part(side), self._volume_filename(timepoint)
         )
         if vol_path.exists():
             return vol_path
         return None
 
-    def get_volume_meta(self, session_id: str, embryo_id: str, timepoint: int) -> dict | None:
+    def get_volume_meta(
+        self, session_id: str, embryo_id: str, timepoint: int, side: str = "A"
+    ) -> dict | None:
         """Read the sidecar metadata YAML for a volume.  Returns None if not found."""
         sd = self._session_dir(session_id)
         if sd is None:
             return None
-        meta_path = (
-            self._embryo_dir_for_session(sd, embryo_id)
-            / "volumes"
-            / self._volume_meta_filename(timepoint)
+        meta_path = self._embryo_dir_for_session(sd, embryo_id).joinpath(
+            "volumes", *self._side_part(side), self._volume_meta_filename(timepoint)
         )
         return _read_yaml(meta_path)
 
@@ -1435,15 +1435,15 @@ class FileStore:
     # Projections
     # ==================================================================
 
-    def get_projection_path(self, session_id: str, embryo_id: str, timepoint: int) -> Path | None:
+    def get_projection_path(
+        self, session_id: str, embryo_id: str, timepoint: int, side: str = "A"
+    ) -> Path | None:
         """Return absolute path to the JPEG projection, or None."""
         sd = self._session_dir(session_id)
         if sd is None:
             return None
-        proj_path = (
-            self._embryo_dir_for_session(sd, embryo_id)
-            / "projections"
-            / self._projection_filename(timepoint)
+        proj_path = self._embryo_dir_for_session(sd, embryo_id).joinpath(
+            "projections", *self._side_part(side), self._projection_filename(timepoint)
         )
         if proj_path.exists():
             return proj_path

@@ -167,6 +167,9 @@ const AcquisitionPlan = (() => {
                 exposureMs: f.exposureMs === '' ? null : Math.max(1, num(f.exposureMs, 10)),
                 laserConfig: f.laserConfig || null,
                 laserPowers: volumes ? laserPowers : {},
+                // Which imaging paths a round takes a volume from. Absent
+                // (an older form or plan) is side A, as ever.
+                sides: SIDES[f.sides] || ['A'],
             },
             bf: {
                 // With no volumes the overview is the run: it is on, and a
@@ -240,6 +243,9 @@ const AcquisitionPlan = (() => {
     }
 
     /** The start request. Only what the plan says goes on the wire. */
+    // The form's choice of views, as the sides the run route is sent.
+    const SIDES = { A: ['A'], B: ['B'], AB: ['A', 'B'] };
+
     function toPayload(plan, subjectIds) {
         const volumes = plan.spim.enabled !== false;
         const body = {
@@ -256,6 +262,10 @@ const AcquisitionPlan = (() => {
             if (plan.spim.slices != null) body.num_slices = plan.spim.slices;
             if (plan.spim.exposureMs != null) body.exposure_ms = plan.spim.exposureMs;
             if (plan.spim.laserConfig) body.laser_config = plan.spim.laserConfig;
+            // Side A alone is what the route does unasked: only a run that
+            // takes side B says so.
+            const sides = plan.spim.sides || ['A'];
+            if (sides.join('') !== 'A') body.sides = sides.slice();
             const powers = plan.spim.laserPowers || {};
             if (Object.keys(powers).length) {
                 body.laser_powers = {};
@@ -387,6 +397,7 @@ const AcquisitionPlan = (() => {
             num_slices: plan.spim.slices,
             exposure_ms: plan.spim.exposureMs,
             laser_config: plan.spim.laserConfig || null,
+            sides: (plan.spim.sides || ['A']).slice(),
             laser_powers: Object.keys(plan.spim.laserPowers || {}).length
                 ? { ...plan.spim.laserPowers } : null,
             bf: null,
@@ -427,6 +438,7 @@ const AcquisitionPlan = (() => {
             volumes: st.volumes !== false,
             bfLedPct: bf ? bf.led_intensity_pct : null,
             slices: st.num_slices, exposureMs: st.exposure_ms, laserConfig: st.laser_config,
+            sides: Array.isArray(st.sides) ? st.sides.join('') : 'A',
             laserPowers: st.laser_powers && typeof st.laser_powers === 'object' ? st.laser_powers : {},
             bf: !!(bf && bf.enabled),
             bfEveryRounds: bf && bf.every_seconds ? Math.max(1, Math.round(bf.every_seconds / interval)) : 1,
