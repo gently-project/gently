@@ -2159,22 +2159,28 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 .op-source {
     flex: none;
     display: inline-flex;
-    border: 1px solid var(--op-rule2);
-    border-radius: 4px;
-    overflow: hidden;
 }
 .op-srcb {
     height: 24px;
     padding: 0 10px;
-    border: 0;
-    border-left: 1px solid var(--op-rule2);
+    border: 1px solid var(--op-rule2);
+    border-left-width: 0;
     background: var(--op-field);
     color: var(--op-ink-dim);
     font: 12px var(--op-ui);
     white-space: nowrap;
     cursor: pointer;
 }
-.op-srcb:first-child { border-left: 0; }
+.op-srcb:first-child { border-left-width: 1px; border-radius: 4px 0 0 4px; }
+.op-srcb[data-source="Multi"] { border-radius: 0 4px 4px 0; }
+/* Fit is not a camera, and is not in this strip: its button is in the Sheet
+   panel's Fit row, beside the fit it shows. Lit while its graphs are up. */
+#op-fit-show.is-on { color: var(--accent); border-color: var(--accent); }
+/* The run's graphs in the Fit pane: one to a row, the pane's width. */
+.op-cal-kept-strip.is-graphs { display: block; }
+.op-cal-kept-strip.is-graphs .cal-arc-graph { margin: 0 0 12px; }
+.op-cal-kept-strip.is-graphs .cal-arc-graph[hidden] { display: none; }
+.op-cal-kept-tabs { margin: 6px 0 10px; }
 .op-srcb:hover { color: var(--op-ink); }
 .op-srcb.is-on { background: var(--accent); color: var(--op-on-accent); font-weight: 600; }
 .op-srcb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -2678,7 +2684,13 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
    done. The box is square, the bottom camera's shape, so the instrument
    beside it keeps its columns when Fit is chosen. */
 .op-pane-scope .op-calfit {
-    aspect-ratio: 1 / 1;
+    /* As wide as the square frame it stands in for, and as tall as the
+       settings under it leave: they are taller than Display's line. */
+    aspect-ratio: auto;
+    width: calc(100cqh - var(--op-viewbar-h) - var(--op-bar-h) - var(--op-display-h) - 3 * var(--op-view-gap));
+    flex: 1 1 0;
+    height: auto;
+    min-height: 0;
     border: 1px solid var(--op-rule);
     border-radius: 4px;
     background: var(--op-panel);
@@ -2697,8 +2709,9 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 .op-calfit-body > * { flex: 0 0 auto; margin: 0; }
 .op-calfit-body .op-preview { align-self: flex-start; max-width: 100%; }
 .op-calfit-body .op-preview-img { max-width: 100%; height: auto; display: block; }
-/* The options hold two rows and say what they are by what is in them. */
-.op-pane-scope .op-calfit-opts { gap: 6px; overflow: hidden; }
+/* The options are as tall as what they say: a heading and three named lines.
+   At Display's fixed height the heading and the Align line were cut off. */
+.op-pane-scope .op-calfit-opts { gap: 6px; flex: 0 0 auto; height: auto; }
 .op-calfit-opts .cal-opts, .op-calfit-opts .op-actions { margin: 0; gap: 6px 12px; justify-content: flex-start; }
 /* Whose fit is lent is a name, not a number: the select is as wide as it. */
 .op-calfit-opts #op-cal-borrow-from { width: auto; max-width: 150px; }
@@ -2745,3 +2758,14 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
 .cal-arc-peek { position: absolute; z-index: 5; width: 176px; padding: 6px; border: 1px solid var(--accent); border-radius: 4px; background: var(--op-panel); box-shadow: 0 6px 18px rgba(0, 0, 0, .35); pointer-events: none; }
 .cal-arc-peek img { display: block; width: 100%; background: #04070b; border-radius: 2px; }
 .cal-arc-peek span { display: block; margin-top: 4px; font: 10.5px/1.35 var(--op-mono); color: var(--op-ink-dim); }
+
+/* The Fit pane's settings, in three named lines: what Calibrate measures, the
+   other ways to a fit, and the stage move that brings the two views together. */
+.op-calfit-opts .cal-group { flex: none; min-width: 78px; color: var(--op-ink); font-weight: 600; }
+.op-calfit-opts .cal-says { margin: 2px 0 6px 86px; }
+.op-calfit-opts .cal-align { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--op-rule2); align-items: center; }
+.op-calfit-opts .cal-align .op-cap { min-width: 0; }
+
+/* The line under the light-sheet picture, when the picture is not of the
+   selected embryo: it says so, in the colour of a caution. */
+#op-spim-target.is-elsewhere { color: var(--accent-amber, #d29922); }

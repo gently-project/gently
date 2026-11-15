@@ -131,16 +131,17 @@ def test_nothing_in_the_instrument_or_the_dish_belongs_to_one_camera() -> None:
 # ── the strip chooses the camera ─────────────────────────────────────────
 
 
-def test_one_strip_names_every_camera_and_the_fit() -> None:
+def test_one_strip_names_every_camera_and_only_cameras() -> None:
+    # The fit's graphs were a fifth button here and read as a camera; they
+    # are opened from the Sheet panel's Fit row (test_calibration_is_on_scope).
     strip = FRAME[FRAME.index('id="op-source"') :]
     strip = strip[: strip.index("</span>")]
-    assert re.findall(r'data-source="(\w+)"', strip) == ["bottom", "A", "B", "Multi", "fit"]
+    assert re.findall(r'data-source="(\w+)"', strip) == ["bottom", "A", "B", "Multi"]
     assert re.findall(r">([^<>]+)</button>", strip) == [
         "Bottom cam",
         "SPIM A",
         "SPIM B",
         "Multi",
-        "Fit",
     ]
 
 

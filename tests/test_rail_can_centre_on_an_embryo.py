@@ -65,3 +65,23 @@ def test_a_glyph_verb_still_says_what_it_is() -> None:
     assert acq and "compact" not in acq.group(1), (
         "the Acquisition roster went compact; it has the width for words"
     )
+
+
+def test_a_live_view_away_from_the_embryo_is_shown_and_says_what_it_is():
+    """ "the not at the embryo is blocking on spim a and spim b camera operation
+    at times ... we cannot always be so anal about being in the embryo detected
+    position". The picture was withheld whenever the stage was not on the
+    selected embryo. It is shown, and the line under it says where it is."""
+    from pathlib import Path
+
+    js = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web" / "static" / "js"
+    operate = (js / "operate.js").read_text(encoding="utf-8")
+    frame = operate[operate.index("    function onSpimFrame(p) {") :]
+    frame = frame[: frame.index("    function onEmbryosUpdate(p) {")]
+    assert "atSelected()" not in frame and "clearImg(" not in frame
+    target = operate[operate.index("    function renderSpimTarget() {") :][:1900]
+    assert "µm from embryo ${labelFor(emb)}" in target
+    assert "el.classList.toggle('is-elsewhere', !!emb && !here);" in target
+    # Only a picture left over from before is taken down: one nothing is replacing.
+    assert "if (!here && !_spimOn) clearImg(" in target
+    assert "'Not at this embryo'" not in operate

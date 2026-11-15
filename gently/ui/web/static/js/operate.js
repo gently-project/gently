@@ -1456,7 +1456,7 @@ const OperateManager = (function () {
     // three light-sheet choices are the SPIM surface on a side.
     function renderSource() {
         const on = _pane === 'bottom' ? 'bottom' : _pane === 'spim' ? _side : _pane === 'cal' ? 'fit' : null;
-        document.querySelectorAll('#op-source [data-source]').forEach(b => {
+        document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b => {
             const is = b.dataset.source === on;
             b.classList.toggle('is-on', is);
             b.setAttribute('aria-pressed', is ? 'true' : 'false');
@@ -1629,9 +1629,10 @@ const OperateManager = (function () {
     };
 
     function readCalForm() {
-        const side = $('cal-side') && $('cal-side').value === 'B' ? 'B' : 'A';
+        const chosen = $('cal-side') ? $('cal-side').value : 'A';
+        const side = chosen === 'B' || chosen === 'AB' ? chosen : 'A';
         // Side B is measured by the scan routine only; the sweep drives A's devices.
-        if (side === 'B' && $('cal-method')) $('cal-method').value = 'scan';
+        if (side !== 'A' && $('cal-method')) $('cal-method').value = 'scan';
         const turned = side !== _calSide;
         _calSide = side;
         if (turned) renderFitRow();
@@ -1677,6 +1678,7 @@ const OperateManager = (function () {
     function calibrationSettings() {
         const body = {};
         if (_calSide === 'B') body.side = 'B';
+        if (_calSide === 'AB') body.side = 'both';   // A, then B, in one request
         if (_cal.method && _cal.method !== CAL_DEFAULTS.method) body.method = _cal.method;
         if (_cal.method === 'scan') {
             if (Number.isFinite(_cal.zbuf) && _cal.zbuf !== CAL_DEFAULTS.zbuf) body.z_buffer_um = _cal.zbuf;
@@ -1856,7 +1858,7 @@ const OperateManager = (function () {
         // While a run goes the line is the run's ("sweeping…"); it is put
         // back when the run ends and the button with it.
         if (b && b.disabled) return;
-        const who = emb ? `embryo ${labelFor(emb)}${_calSide === 'B' ? ' · side B' : ''}` : '';
+        const who = emb ? `embryo ${labelFor(emb)}${_calSide === 'B' ? ' · side B' : _calSide === 'AB' ? ' · both sides' : ''}` : '';
         let says = 'no embryo selected';
         if (fitted) {
             // A fit records an R² for each end of the sheet; the weaker one
@@ -1890,10 +1892,11 @@ const OperateManager = (function () {
         if (_selected !== id) return;            // the selection moved on while we asked
         if (!runs.length) { host.hidden = true; _calKept = null; return; }
         const last = runs[runs.length - 1];
-        let images = [];
+        let images = [], record = last;
         try {
             const d = await getJSON(`/api/calibration/records/${encodeURIComponent(id)}/${encodeURIComponent(last.run)}`);
             images = (d && d.images) || [];
+            record = { ...last, ...(d || {}), images };
         } catch (_) { images = []; }
         if (_selected !== id) return;
         _calKept = { embryoId: id, run: last.run, images };
@@ -1907,13 +1910,46 @@ const OperateManager = (function () {
         }
         const strip = $('op-cal-kept-strip');
         if (strip) {
+            // The run's graphs, drawn from its numbers as the Calibration tab
+            // draws them ("it shows the image based graphs and not the native
+            // graphs"). The saved pictures are for a page without the archive.
+            const arc = typeof CalibrationArchive !== 'undefined' ? CalibrationArchive : null;
+            const drawn = arc && arc.graphsHtml ? arc.graphsHtml(record, arc.steps(images), -1) : '';
+            strip.classList.toggle('is-graphs', !!drawn);
             const plots = images.filter(i => (i.file || '').startsWith('plots/'));
             const shown = plots.length ? plots : images.slice(-6);
-            strip.innerHTML = shown.map(i =>
+            strip.innerHTML = drawn || shown.map(i =>
                 `<button type="button" class="op-cal-kept-img" data-cal-img="${images.indexOf(i)}" title="${escapeHtml(calImageTitle(i))}">` +
                 `<img loading="lazy" src="${escapeHtml(i.url)}?max=720" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
+            if (drawn) tabGraphs(strip);
         }
         host.hidden = false;
+    }
+
+    // One graph at a time, chosen by name ("the graphs can be shown in some
+    // subtabs instead of top to bottom"): six graphs down the pane was three
+    // screens of scrolling. It opens on the fit, the run's answer.
+    function tabGraphs(strip) {
+        const figs = [...strip.querySelectorAll('.cal-arc-graph')];
+        if (figs.length < 2) return;
+        const bar = document.createElement('div');
+        bar.className = 'cal-arc-steps op-cal-kept-tabs';
+        bar.setAttribute('role', 'tablist');
+        const show = k => {
+            figs.forEach((f, i) => { f.hidden = i !== k; });
+            [...bar.children].forEach((b, i) => { b.classList.toggle('is-on', i === k); b.setAttribute('aria-selected', String(i === k)); });
+        };
+        figs.forEach((f, k) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'cal-arc-step';
+            b.setAttribute('role', 'tab');
+            b.textContent = (f.querySelector('figcaption b') || {}).textContent || `Graph ${k + 1}`;
+            b.addEventListener('click', () => show(k));
+            bar.appendChild(b);
+        });
+        strip.prepend(bar);
+        show(figs.length - 1);
     }
 
     function calImageTitle(i) {
@@ -2212,14 +2248,22 @@ const OperateManager = (function () {
         const emb = _embryos.find(e => e.id === _selected);
         const here = atSelected();
         if (el) {
+            // Away from the selected embryo the picture is still shown, and
+            // the line under it says what it is a picture of. It used to be
+            // withheld ("Not at this embryo"), which stopped the cameras being
+            // used anywhere but on a detected position: "we cannot always be
+            // so anal about being in the embryo detected position".
+            const xy = emb ? resolveXY(emb) : null;
+            const away = xy && _xy ? Math.round(Math.hypot(_xy.x - xy.x, _xy.y - xy.y)) : null;
             el.textContent = !emb ? 'No embryo selected'
                 : here ? `Selected: embryo ${labelFor(emb)}`
-                : `Selected: embryo ${labelFor(emb)} — stage is elsewhere`;
+                : `Where the stage is${away != null ? `, ${away} µm from embryo ${labelFor(emb)}` : ''}: not embryo ${labelFor(emb)}`;
+            el.classList.toggle('is-elsewhere', !!emb && !here);
         }
-        // Drop the frame here as well as in onSpimFrame: with the stream off, no
-        // frame arrives to be refused and the previous embryo's would just sit
-        // there. Every path that changes the selection calls this.
-        if (!here) clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo');
+        // A picture left from before is another matter: with the view off no
+        // frame arrives to replace it, and it would sit under this line as if
+        // it were of here. Every path that changes the selection calls this.
+        if (!here && !_spimOn) clearImg('op-img-spim', 'op-ph-spim', 'Start the view to see where the stage is');
     }
 
     // ══ ACQUISITION PANE ════════════════════════════════════════════════════
@@ -4547,8 +4591,8 @@ const OperateManager = (function () {
         }
         noteFrame('spim');
         // The frame is of wherever the stage is, which is not necessarily the
-        // embryo the caption names. Showing it there would be a false claim.
-        if (!atSelected()) { clearImg('op-img-spim', 'op-ph-spim', 'Not at this embryo'); return; }
+        // selected embryo. It is shown either way; the line under it says
+        // which (renderSpimTarget), so the picture makes no false claim.
         // Multi is two cameras composed in colour, a rendering: it comes as its
         // JPEG. A or B is one camera's frame, drawn from its counts.
         showFrame('spim', p, p.side !== 'Multi');
@@ -4680,7 +4724,7 @@ const OperateManager = (function () {
         bindAxis('galvo', $('op-gv-in'), $('op-gv'), 2);
         bindAxis('piezo', $('op-pz-in'), $('op-pz'), 1);
         adoptLsParams();
-        document.querySelectorAll('#op-source [data-source]').forEach(b =>
+        document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b =>
             b.addEventListener('click', () => chooseSource(b.dataset.source)));
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);

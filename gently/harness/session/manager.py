@@ -36,6 +36,16 @@ class SessionManager:
         self.store.create_session(self._session_id)
         logger.info(f"Created new session: {self._session_id}")
 
+    def _removed_and_not_back(self, session_id: str) -> set[str]:
+        """Embryo ids set aside in this session with no folder of their own
+        now: neither restored, nor the id taken again by a new embryo."""
+        try:
+            removed = {str(r.get("embryo_id")) for r in self.store.list_removed_embryos(session_id)}
+            here = {str(e["embryo_id"]) for e in self.store.list_embryos(session_id)}
+        except Exception:
+            return set()
+        return removed - here
+
     def _resume_session(self, session_id: str, experiment):
         """
         Resume a session from FileStore.
@@ -79,8 +89,18 @@ class SessionManager:
             experiment_data = snapshot.get("experiment_data", {})
             experiment.active_plan_item_id = experiment_data.get("active_plan_item_id")
             embryo_states = experiment_data.get("embryos", {})
+            # An embryo taken off the list stays off it. The snapshot is saved
+            # now and then, so it can still name an embryo that was removed
+            # after its last save: resuming put that embryo back in the list,
+            # and the next save of the list gave it an empty folder again,
+            # beside the one kept under removed/. Removed, and no folder of
+            # its own since, means gone.
+            gone = self._removed_and_not_back(session_id)
 
             for embryo_id, embryo_data in embryo_states.items():
+                if embryo_id in gone:
+                    logger.info("%s was removed from %s; not resumed", embryo_id, session_id)
+                    continue
                 pos = embryo_data.get("stage_position", {})
                 experiment.add_embryo(
                     embryo_id=embryo_id,

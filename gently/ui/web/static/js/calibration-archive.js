@@ -279,7 +279,13 @@ const CalibrationArchive = (() => {
     // focus sweep, and the line fitted through them.
     function renderGraphs() {
         const host = $('cal-arc-plots');
-        if (!host) return;
+        if (host) host.innerHTML = graphsHtml(_rec, _steps, _at);
+    }
+
+    // A run's graphs as markup, drawn from its record: for this tab, and for
+    // Scope's Fit, which showed the run's saved pictures of the same graphs.
+    // The names shadow the tab's own run on purpose; nothing here reads it.
+    function graphsHtml(_rec, _steps, _at) {
         const out = [];
         const block = (title, says, svg) => { if (svg) out.push(`<figure class="cal-arc-graph"><figcaption><b>${esc(title)}</b>${says ? ` <span>${esc(says)}</span>` : ''}</figcaption>${svg}</figure>`); };
         _steps.forEach(s => {
@@ -310,7 +316,7 @@ const CalibrationArchive = (() => {
                     line: [[Math.min(...gs) - pad, f(Math.min(...gs) - pad)], [Math.max(...gs) + pad, f(Math.max(...gs) + pad)]],
                     pts: points.map(p => ({ x: p.galvo, y: p.piezo, tip: `galvo ${signed(p.galvo, 3)}° · sharpest at piezo ${signed(p.piezo, 1)} µm${isNum(p.r_squared) ? ` · R² ${p.r_squared.toFixed(2)}` : ''}` })) }));
         }
-        host.innerHTML = out.join('') || '<p class="cal-arc-msg">This run has nothing to graph: it ended before it measured anything.</p>';
+        return out.join('') || '<p class="cal-arc-msg">This run has nothing to graph: it ended before it measured anything.</p>';
     }
 
     // The film is one step at a time, chosen from the steps above it: 264
@@ -473,7 +479,7 @@ const CalibrationArchive = (() => {
         return refresh();
     }
 
-    return { ...pure, show, refresh };
+    return { ...pure, show, refresh, graphsHtml };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = CalibrationArchive;

@@ -100,5 +100,5 @@ def test_calibrate_and_start_can_ask_for_side_b():
     assert 'id="cal-side"' in INDEX and 'id="op-plan-sides"' in INDEX
     assert "if (_calSide === 'B') body.side = 'B';" in OPERATE
     # Side B is measured by the scan routine only.
-    assert "if (side === 'B' && $('cal-method')) $('cal-method').value = 'scan';" in OPERATE
+    assert "if (side !== 'A' && $('cal-method')) $('cal-method').value = 'scan';" in OPERATE
     assert "sides: v('op-plan-sides')," in OPERATE
