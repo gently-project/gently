@@ -275,9 +275,28 @@ const NotebookApp = (() => {
     }
 
     // ── Notes ──────────────────────────────────────────────────────────
-    function renderNotes(notes) {
+    // What the search box narrows: every word typed is somewhere in the
+    // note's words, its title, who wrote it, or what it is filed to.
+    let _shown = [];
+    function found(n, words) {
+        if (!words.length) return true;
+        const who = n.author === 'agent' ? 'agent' : (typeof Who !== 'undefined' ? Who.name(n.by) : (n.by || ''));
+        const hay = [n.body, n.title, n.kind, who, n.by]
+            .concat(n.strains || [], n.embryos || [], n.threads || [], (n.sessions || []).map(sessionLabel))
+            .join(' ').toLowerCase();
+        return words.every(w => hay.includes(w));
+    }
+
+    function renderNotes(all) {
         const list = $('nb-notes');
         if (!list) return;
+        _shown = all;
+        const words = (($('nb-search') || {}).value || '').toLowerCase().split(/\s+/).filter(Boolean);
+        const notes = all.filter(n => found(n, words));
+        if (all.length && !notes.length) {
+            list.innerHTML = `<div class="nb-empty">None of the ${all.length} notes here has “${esc(words.join(' '))}”.</div>`;
+            return;
+        }
         if (!notes.length) {
             list.innerHTML = shelf === 'aside'
                 ? '<div class="nb-empty">Nothing set aside here. A note’s × takes it out of the ' +
@@ -298,9 +317,15 @@ const NotebookApp = (() => {
 
         const head = document.createElement('div');
         head.className = 'nb-card-head';
+        // An observation that is confirmed is the ordinary note: it wears no
+        // badge and no status. A finding, a question, a proposal do.
         const badge = document.createElement('span');
         badge.className = 'nb-badge ' + km.cls;
         badge.textContent = km.label;
+        badge.hidden = n.kind === 'observation';
+        const whenEl = document.createElement('span');
+        whenEl.className = 'nb-when';
+        whenEl.textContent = when(n.created_at);
         const author = document.createElement('span');
         author.className = 'nb-author';
         author.innerHTML = n.author === 'agent' || !n.by
@@ -308,8 +333,8 @@ const NotebookApp = (() => {
             : (typeof Who !== 'undefined' ? Who.chip(n.by) : esc(n.by));
         const status = document.createElement('span');
         status.className = 'nb-status';
-        status.textContent = n.status || '';
-        head.append(badge, author, status);
+        status.textContent = n.status === 'confirmed' ? '' : (n.status || '');
+        head.append(badge, author, whenEl, status);
         if (hasControl()) {
             const b = document.createElement('button');
             b.type = 'button';
@@ -532,6 +557,8 @@ const NotebookApp = (() => {
                 loadPage();
             });
         });
+        const search = $('nb-search');
+        if (search) search.addEventListener('input', () => renderNotes(_shown));
         // The shelf is a second axis: what the agent reads, or what was set aside.
         document.querySelectorAll('#notebook-content [data-nb-shelf]').forEach(btn => {
             btn.addEventListener('click', () => {

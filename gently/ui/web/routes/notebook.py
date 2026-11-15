@@ -49,6 +49,21 @@ def _coerce(enum_cls, value):
         return None
 
 
+def _projects_of(server, sessions: list) -> list[str]:
+    """The project a session is filed to, for a line written on that session
+    and given no project of its own. Every line on the rig was written on a
+    session, so every project's page in the Notebook read 0, and asking the
+    agent about a project found nothing to read."""
+    store = getattr(server, "gently_store", None)
+    if store is None or not sessions:
+        return []
+    try:
+        links = store.session_links(str(sessions[0]))
+    except Exception:
+        return []
+    return [str(links[0]["id"])] if links and links[0].get("id") else []
+
+
 def person_note(server, body: dict, by: str | None) -> Note:
     """A person's note from a request body: kind observation, finding or
     question; facets as lists or comma strings. A finding written by a person
@@ -69,6 +84,7 @@ def person_note(server, body: dict, by: str | None) -> Note:
             as_tags(body.get("mentions")) + mentions_in(text, [*known_people(server), AGENT])
         )
     )
+    sessions = body.get("sessions") or []
     return Note(
         id="",
         kind=kind,
@@ -78,9 +94,9 @@ def person_note(server, body: dict, by: str | None) -> Note:
         status=status,
         strains=body.get("strains") or [],
         embryos=body.get("embryos") or [],
-        sessions=body.get("sessions") or [],
+        sessions=sessions,
         threads=body.get("threads") or [],
-        projects=body.get("projects") or [],
+        projects=body.get("projects") or _projects_of(server, sessions),
         mentions=mentions,
         basis=list(body.get("basis") or []),
         by=by,
