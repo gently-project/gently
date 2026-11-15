@@ -131,6 +131,79 @@ async def recall_context(
     return memory.recall_full_context(campaign_id=campaign_id)
 
 
+@tool(
+    name="read_notebook",
+    description=(
+        "Read the shared lab notebook: what people and you have written on sessions and "
+        "projects (lines, findings, questions, session summaries, saved marks). Use it "
+        "before answering about past work, and at the start of a session to see what was "
+        "said about this project. query is words that must all appear; session and project "
+        "narrow it ('current' is the live one); kind is observation, finding or question. "
+        "Each note comes with its id, for basis."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="What did Ryan say about the hatching datasets?",
+            tool_input={"query": "hatching"},
+        ),
+        ToolExample(
+            user_query="Anything written on this session?",
+            tool_input={"session": "current"},
+        ),
+    ],
+)
+async def read_notebook(
+    query: str | None = None,
+    session: str | None = None,
+    project: str | None = None,
+    embryo: str | None = None,
+    kind: str | None = None,
+    limit: int = 20,
+    context: dict | None = None,
+) -> str:
+    agent = context.get("agent") if context else None
+    cs = getattr(agent, "context_store", None) if agent else None
+    if cs is None:
+        return "No notebook available (context store not connected)"
+    from gently.harness.memory.notebook import NoteKind
+
+    if session == "current":
+        session = getattr(agent, "session_id", None)
+    if project == "current":
+        project = _project_of(agent, cs, None)
+    elif project:
+        project = _project_of(agent, cs, project)
+    try:
+        note_kind = NoteKind(kind) if kind else None
+    except ValueError:
+        note_kind = None
+    # Only what is in the notebook: a note a person set aside is not read.
+    notes = cs.notebook.query_notes(
+        kind=note_kind, session=session or None, project=project, embryo=embryo, in_notebook=True
+    )
+    words = (query or "").lower().split()
+    if words:
+        notes = [
+            n
+            for n in notes
+            if all(w in f"{n.title or ''} {n.body} {n.by or ''}".lower() for w in words)
+        ]
+    if not notes:
+        return "Nothing in the notebook matches."
+    more = len(notes) - max(1, limit)
+    lines = []
+    for n in notes[: max(1, limit)]:
+        who = "agent" if n.author.value == "agent" else (n.by or "someone")
+        where = f" session {n.sessions[0][:8]}" if n.sessions else ""
+        what = f"({n.kind.value}, {n.status.value})"
+        head = f"[{n.id}] {n.created_at:%Y-%m-%d %H:%M} {who} {what}{where}"
+        lines.append(f"{head}: {(n.title + ': ') if n.title else ''}{n.body}")
+    if more > 0:
+        lines.append(f"... and {more} older; narrow the query or raise limit.")
+    return "\n".join(lines)
+
+
 def _project_of(agent, cs, project: str | None) -> str | None:
     """The project a note belongs to: the one named, else the live session's home."""
     if project:
@@ -383,7 +456,7 @@ async def raise_question(
         session_id=getattr(agent, "session_id", None),
         project_id=_project_of(agent, cs, project),
     )
-    cs.add_question(q)
+    cs.add_question(q, mentions=_asked(content))
     return f"Question {q.id} is open: {content}"
 
 

@@ -113,15 +113,24 @@ def create_router(server) -> APIRouter:
             session_id=body.get("session_id") or None,
             project_id=body.get("project_id") or None,
         )
-        cs.add_question(q)
+        from gently.harness.memory.notebook import mentions_in
+        from gently.ui.web.auth import current_username
+        from gently.ui.web.routes.inbox import known_people
+
+        # A question can ask a person: "@ryan does orientation matter?"
+        cs.add_question(
+            q, by=current_username(request), mentions=mentions_in(content, known_people(server))
+        )
         return {"ok": True, "question": _serialize(q)}
 
     @router.post("/api/context/questions/{q_id}/resolve", dependencies=[Depends(require_control)])
-    async def resolve_question(q_id: str, resolution: str = Body("", embed=True)):
+    async def resolve_question(request: Request, q_id: str, resolution: str = Body("", embed=True)):
         cs = _store()
         if cs is None:
             return {"ok": False, "error": "context store unavailable"}
-        cs.resolve_question(q_id, resolution or "")
+        from gently.ui.web.auth import current_username
+
+        cs.resolve_question(q_id, resolution or "", by=current_username(request))
         return {"ok": True}
 
     @router.post(
