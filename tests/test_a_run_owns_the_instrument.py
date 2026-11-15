@@ -113,7 +113,7 @@ def test_a_calibration_asks_however_it_is_asked_for() -> None:
     one = _fn("    async function calibrateSelected(opts) {")
     # Before Fit is brought up: a no leaves the page as it was.
     assert one.index("if (!mayTakeFromRun('A calibration')) return;") < one.index("showPane('cal')")
-    assert "if (!mayTakeFromRun('Calibrating the rest')) return;" in _fn(
+    assert "if (!mayTakeFromRun('Calibrating several embryos')) return;" in _fn(
         "    async function calibrateAll() {"
     )
     assert "mayTakeFromRun('Borrowing a fit" in _fn("    async function borrowCalibration() {")

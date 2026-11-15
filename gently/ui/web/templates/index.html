@@ -783,99 +783,104 @@
                       <div class="op-panel" id="op-light-host"></div>
 
                       <div class="op-panel" id="op-sheet">
-                        <h3 class="op-panel-name">Sheet <em id="op-sheet-side">side A · scanner AB · piezo P</em></h3>
-                        <!-- Each axis is a line with 0 at its centre: the ASIdiSPIM plugin's
-                             Home sends both axes to 0, and its Setup tab bounds its sliders
-                             by the micro-mirror card's deflection limits. The ends here are
-                             the controller's, read once per side (the card's limits on the
-                             slice axis, the piezo's soft limits); until read, a default span.
-                             Drag the line or type the number: they are one control. -->
-                        <div class="op-row op-axis"><span class="op-label">Galvo</span>
-                          <span class="op-ext" id="op-gv-min">−5</span>
-                          <input class="op-range" id="op-gv-in" type="range" min="-5" max="5" step="0.01" value="0"
-                                 list="op-gv-ticks" aria-label="Galvo angle in degrees">
-                          <datalist id="op-gv-ticks"><option value="0"></option></datalist>
-                          <span class="op-ext" id="op-gv-max">+5</span>
-                          <input class="op-numbox" id="op-gv" type="text" inputmode="decimal" value="0.00" autocomplete="off"
-                                 data-decimals="2" aria-label="Galvo angle in degrees, typed"><i class="op-unit">°</i></div>
-                        <div class="op-row op-axis"><span class="op-label">Piezo</span>
-                          <span class="op-ext" id="op-pz-min">−100</span>
-                          <input class="op-range" id="op-pz-in" type="range" min="-100" max="100" step="0.5" value="0"
-                                 list="op-pz-ticks" aria-label="Piezo position in micrometres">
-                          <datalist id="op-pz-ticks"><option value="0"></option></datalist>
-                          <span class="op-ext" id="op-pz-max">+100</span>
-                          <input class="op-numbox" id="op-pz" type="text" inputmode="decimal" value="0.0" autocomplete="off"
-                                 data-decimals="1" aria-label="Piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
-                        {# The selected embryo's piezo–galvo fit and the press
-                           that measures it, with the sheet it is a fit of. Here,
-                           not on a page of its own, because a calibration needs
-                           the laser, the embryo list and the light-sheet camera,
-                           and those are on Scope. Pressing it brings up Fit.
-                           Abort shows only while a calibration runs: it cancels
-                           the routine at its next step and halts every positioner. #}
-                        <div class="op-row op-fitrow"><span class="op-label">Fit</span>
-                          <span class="op-num op-fit-says" id="op-cal-result">—</span>
-                          {# What the fit rests on, and its settings: the graphs of
-                             the embryo's last calibration, in the frame's place.
-                             It was a fifth button in the camera strip, where it
-                             read as a camera. It is with the fit it shows. The
-                             surface is still named `cal` in operate.js. #}
-                          <button class="op-btn op-btn-quiet" id="op-fit-show" data-source="fit" type="button" aria-pressed="false"
-                                  title="Show this embryo's calibration in the frame's place: its graphs, and the settings Calibrate uses. Press again, or a camera above, to bring the picture back.">Graphs</button>
-                          <button class="op-btn op-btn-warn" id="op-cal-abort" type="button" hidden>Abort</button>
-                          <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button></div>
-                        {# How the fit is measured, the other ways to one, and
-                           the stage move that brings the two views together:
-                           all of calibration, in the panel of the sheet it is
-                           a calibration of. They were a second panel under the
-                           frame, shown only while the graphs were up. Folded,
-                           because the head and the stage share this column. #}
-                        <details class="op-calfit-opts" id="op-display-cal">
-                          <summary>Calibration settings <em>and aligning the two views</em></summary>
-                      {# The routine's own parameters, not a fixed recipe. Edge
-                         detection and the z buffer are the two an operator
-                         changes between samples; the rest place the pair of
-                         calibration points inside the detected galvo range and
-                         are wrong to touch without a reason, so they sit behind
-                         a disclosure. Defaults match calibrate_embryo. #}
-                      {# Three things were one unlabelled row of controls, and
-                         nobody could tell the fit's settings from the verbs
-                         beside them, or what Align had to do with a fit. Each
-                         is named, and says in a line what it does. #}
-                      <div class="op-row op-row-wrap cal-opts">
-                        <span class="op-label cal-group" title="How Calibrate, above, measures this embryo's piezo-galvo fit">Measure</span>
-                        {# Which routine runs. Legacy is the software sweep; scan is
-                           the hardware-timed one (#267). Both stay until the rig
-                           says which to keep. #}
-                        <label class="cal-opt">
-                          <span class="op-label">Method</span>
-                          <select class="cal-num" id="cal-method">
-                            <option value="legacy" selected>Legacy sweep</option>
-                            <option value="scan">Scan</option>
-                          </select>
-                        </label>
-                        {# Each side has its own scanner, piezo and camera, and its
-                           own fit. Side B is measured by the scan routine only. #}
-                        <label class="cal-opt">
-                          <span class="op-label">Side</span>
-                          <select class="cal-num" id="cal-side" title="Which light-sheet side is calibrated. Arm that side's beam in Light.">
-                            <option value="A" selected>A</option>
-                            <option value="B">B</option>
-                            <option value="AB" title="Side A, then side B, in one go. Arm both beams in Light.">A then B</option>
-                          </select>
-                        </label>
-                        <label class="cal-opt">
-                          <input type="checkbox" id="cal-edges" checked>
-                          <span class="op-label">Find galvo edges</span>
-                        </label>
-                        <label class="cal-opt">
-                          <span class="op-label">Z buffer</span>
-                          <input type="number" class="cal-num" id="cal-zbuf" min="0" max="500" step="1" value="25">
-                          <span class="op-unit">µm</span>
-                        </label>
-                        <button type="button" class="op-btn op-btn-quiet" id="cal-more"
-                                aria-expanded="false" aria-controls="cal-adv">More…</button>
+                        <h3 class="op-panel-name">Sheets <em id="op-sheet-side">both sides</em></h3>
+                        <!-- Both light sheets, each with its two axes: the rig has
+                             two views, and this showed whichever one the camera
+                             strip was on. An axis is a line with 0 at its centre
+                             (the ASIdiSPIM plugin's Home sends both to 0), bounded
+                             by the controller's own limits, read once per side.
+                             Drag the line or type the number: they are one control.
+                             Moving a side's sheet puts that side on screen, because
+                             the picture is how a sheet is judged. -->
+                        <datalist id="op-gv-ticks"><option value="0"></option></datalist>
+                        <datalist id="op-pz-ticks"><option value="0"></option></datalist>
+                        <div class="op-sheet-side" data-side="A">
+                          <button class="op-sheet-who" type="button" data-sheet-view="A"
+                                  title="Put side A on screen">
+                            <b>A</b><span>scanner AB · piezo P · camera 1</span><i class="op-sheet-on">on screen</i></button>
+                          <div class="op-row op-axis"><span class="op-label">Galvo</span>
+                            <span class="op-ext" id="op-gv-a-min">−5</span>
+                            <input class="op-range" id="op-gv-a-in" type="range" min="-5" max="5" step="0.01" value="0"
+                                   list="op-gv-ticks" aria-label="Side A galvo angle in degrees">
+                            <span class="op-ext" id="op-gv-a-max">+5</span>
+                            <input class="op-numbox" id="op-gv-a" type="text" inputmode="decimal" value="0.00" autocomplete="off"
+                                   data-decimals="2" aria-label="Side A galvo angle in degrees, typed"><i class="op-unit">°</i></div>
+                          <div class="op-row op-axis"><span class="op-label">Piezo</span>
+                            <span class="op-ext" id="op-pz-a-min">−100</span>
+                            <input class="op-range" id="op-pz-a-in" type="range" min="-100" max="100" step="0.5" value="0"
+                                   list="op-pz-ticks" aria-label="Side A piezo position in micrometres">
+                            <span class="op-ext" id="op-pz-a-max">+100</span>
+                            <input class="op-numbox" id="op-pz-a" type="text" inputmode="decimal" value="0.0" autocomplete="off"
+                                   data-decimals="1" aria-label="Side A piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
+                        </div>
+                        <div class="op-sheet-side" data-side="B">
+                          <button class="op-sheet-who" type="button" data-sheet-view="B"
+                                  title="Put side B on screen">
+                            <b>B</b><span>scanner CD · piezo Q · camera 2</span><i class="op-sheet-on">on screen</i></button>
+                          <div class="op-row op-axis"><span class="op-label">Galvo</span>
+                            <span class="op-ext" id="op-gv-b-min">−5</span>
+                            <input class="op-range" id="op-gv-b-in" type="range" min="-5" max="5" step="0.01" value="0"
+                                   list="op-gv-ticks" aria-label="Side B galvo angle in degrees">
+                            <span class="op-ext" id="op-gv-b-max">+5</span>
+                            <input class="op-numbox" id="op-gv-b" type="text" inputmode="decimal" value="0.00" autocomplete="off"
+                                   data-decimals="2" aria-label="Side B galvo angle in degrees, typed"><i class="op-unit">°</i></div>
+                          <div class="op-row op-axis"><span class="op-label">Piezo</span>
+                            <span class="op-ext" id="op-pz-b-min">−100</span>
+                            <input class="op-range" id="op-pz-b-in" type="range" min="-100" max="100" step="0.5" value="0"
+                                   list="op-pz-ticks" aria-label="Side B piezo position in micrometres">
+                            <span class="op-ext" id="op-pz-b-max">+100</span>
+                            <input class="op-numbox" id="op-pz-b" type="text" inputmode="decimal" value="0.0" autocomplete="off"
+                                   data-decimals="1" aria-label="Side B piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
+                        </div>
+                        <div class="op-cap" id="op-spim-multi-note" hidden>Multi shows both sides in one frame. Move a sheet and its side comes on screen.</div>
                       </div>
+
+                      {# Calibration, a panel of its own under the sheets it is a
+                         calibration of: the selected embryo's fit on each side,
+                         the press that measures it, the graphs behind it, and
+                         the same for several embryos at once. It was a row and a
+                         fold inside the Sheet panel. #}
+                      <div class="op-panel" id="op-calib">
+                        <h3 class="op-panel-name">Calibration <em id="op-calib-who">no embryo selected</em></h3>
+                        <div class="op-calib-fits" id="op-cal-fits" aria-live="polite"></div>
+                        <div class="op-row op-fitrow">
+                          <label class="cal-opt">
+                            <span class="op-label">Side</span>
+                            <select class="cal-num" id="cal-side" title="Which side Calibrate measures. Arm that side's beam in Light.">
+                              <option value="A" selected>A</option>
+                              <option value="B">B</option>
+                              <option value="AB" title="Side A, then side B, in one go. Arm both beams in Light.">A then B</option>
+                            </select>
+                          </label>
+                          <button class="op-btn op-btn-warn" id="op-cal-abort" type="button" hidden>Abort</button>
+                          <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate</button>
+                          <button class="op-btn op-btn-quiet" id="op-fit-show" data-source="fit" type="button" aria-pressed="false"
+                                  title="Show this embryo's last calibration in the frame's place: its graphs. Press again, or a camera above, to bring the picture back.">Graphs</button>
+                        </div>
+                        <div class="op-cap op-fit-says" id="op-cal-result">—</div>
+
+                        <details class="op-calfit-opts" id="op-display-cal">
+                          <summary>Settings <em>method, depth, borrowing a fit</em></summary>
+                          <div class="op-row op-row-wrap cal-opts">
+                            <label class="cal-opt">
+                              <span class="op-label">Method</span>
+                              <select class="cal-num" id="cal-method">
+                                <option value="legacy" selected>Legacy sweep</option>
+                                <option value="scan">Scan</option>
+                              </select>
+                            </label>
+                            <label class="cal-opt">
+                              <span class="op-label">Z buffer</span>
+                              <input type="number" class="cal-num" id="cal-zbuf" min="0" max="500" step="1" value="25">
+                              <span class="op-unit">µm</span>
+                            </label>
+                            <label class="cal-opt">
+                              <input type="checkbox" id="cal-edges" checked>
+                              <span class="op-label">Find galvo edges</span>
+                            </label>
+                            <button type="button" class="op-btn op-btn-quiet" id="cal-more"
+                                    aria-expanded="false" aria-controls="cal-adv">More…</button>
+                          </div>
                         <div class="cal-adv" id="cal-adv" hidden>
                           <div class="op-row op-row-wrap" id="cal-adv-bounds" hidden>
                             <label class="cal-opt"><span class="op-label">Galvo top</span>
@@ -907,39 +912,46 @@
                           </p>
                           <button type="button" class="op-btn op-btn-quiet" id="cal-reset">Reset to defaults</button>
                         </div>
-                      <p class="op-cap cal-says">Calibrate, above, measures the fit with these settings: one side, or A then B in one go.</p>
-                      <div class="op-actions">
-                        <span class="op-label cal-group" title="Other ways to a fit, and discarding one">Or</span>
-                        {# Borrowing lends another embryo's slope and measures this
-                           embryo's own extent and focus from it: a short scan, not
-                           a free copy (#267). Any embryo with a fit can lend, best
-                           first; hidden entirely when nothing has a fit to lend. #}
-                        <label class="cal-opt" id="op-cal-borrow-row" hidden>
-                          <span class="op-label">From</span>
-                          <select class="cal-num" id="op-cal-borrow-from"></select>
-                        </label>
-                        <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
-                        {# The rest of the slide, in one go. Absent when every
-                           embryo already has a fit — there is nothing to say. #}
-                        <button class="op-btn" id="op-cal-all" type="button" hidden>Calibrate the rest</button>
-                        {# Only where there is a fit to discard. Two clicks:
-                           the numbers it drops cost ~70 exposures to measure. #}
-                        <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
-                      </div>
-                      {# Not a fit: a stage move. On a line of its own so it is
-                         not read as one more way to calibrate. #}
-                      <div class="op-actions cal-align">
-                        <span class="op-label cal-group" title="A stage move, done once both sides have a fit">Align views</span>
-                        {# Brings the two views onto one another on the selected
-                           embryo by moving the stage, and writes the stage's
-                           position back as the embryo's. Needs a fit on both
-                           sides and the laser on (gently/app/ab_align.py). #}
-                        <button class="op-btn" id="op-ab-align" type="button"
-                                title="Move the stage until the selected embryo sits at the same place in side A's and side B's frames. Needs a fit on both sides and the laser routed.">Align A and B</button>
-                        <span class="op-cap">Moves the stage until the embryo sits at the same place in both views, and saves that as its position. Needs a fit on both sides.</span>
-                      </div>
+                          <div class="op-actions">
+                            {# Borrowing lends another embryo's slope and measures this
+                               embryo's own extent and focus from it: a short scan, not
+                               a free copy (#267). Hidden when nothing has a fit to lend. #}
+                            <label class="cal-opt" id="op-cal-borrow-row" hidden>
+                              <span class="op-label">From</span>
+                              <select class="cal-num" id="op-cal-borrow-from"></select>
+                            </label>
+                            <button class="op-btn" id="op-cal-borrow" type="button" hidden>Borrow a fit</button>
+                            {# Two clicks: the numbers it drops cost ~70 exposures to measure. #}
+                            <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
+                          </div>
                         </details>
-                        <div class="op-cap" id="op-spim-multi-note" hidden>Multi is both sides in one frame. Choose SPIM A or SPIM B to move a sheet.</div>
+
+                        {# Several embryos in one go: the walk a person did by
+                           selecting each embryo and pressing Calibrate. The side
+                           and the settings above apply to every one of them. #}
+                        <details class="op-calfit-opts" id="op-cal-several">
+                          <summary>Several embryos <em id="op-cal-several-says">one after another</em></summary>
+                          <div class="op-cal-pick" id="op-cal-pick" role="group" aria-label="Embryos to calibrate"></div>
+                          <div class="op-row op-row-wrap op-cal-pick-quick">
+                            <button type="button" class="op-nbtn" data-pick-set="all">all</button>
+                            <button type="button" class="op-nbtn" data-pick-set="none">none</button>
+                            <button type="button" class="op-nbtn" data-pick-set="unfitted" title="The embryos with no fit on the side chosen above">without a fit</button>
+                          </div>
+                          <label class="cal-opt op-cal-then-align" title="Needs Side: A then B. Each embryo's two views are brought onto one another once both sides have a fit, and it is fitted again where the stage moved for that.">
+                            <input type="checkbox" id="op-cal-then-align">
+                            <span class="op-label">then align the two views</span>
+                          </label>
+                          <div class="op-actions">
+                            <button class="op-btn op-btn-primary" id="op-cal-all" type="button" disabled>Calibrate selected</button>
+                          </div>
+                        </details>
+
+                        {# Not a fit: a stage move, on the selected embryo. #}
+                        <div class="op-actions cal-align">
+                          <button class="op-btn" id="op-ab-align" type="button"
+                                  title="Move the stage until the selected embryo sits at the same place in side A's and side B's frames, and save that as its position. Needs a fit on both sides and the laser routed.">Align A and B</button>
+                          <span class="op-cap">a stage move: the embryo at the same place in both views</span>
+                        </div>
                       </div>
                     </div>
 

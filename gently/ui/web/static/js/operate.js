@@ -1432,18 +1432,25 @@ const OperateManager = (function () {
             postJSON('/api/devices/lightsheet/live/params', body).catch(() => {});
         }, 120);
     }
-    // Whose sheet the Sheet panel's two lines move, said in its heading.
+    // Which side is on screen, said in the Sheets panel's heading.
     const SIDE_SAYS = {
-        A: 'side A · scanner AB · piezo P',
-        B: 'side B · scanner CD · piezo Q',
-        Multi: 'no side chosen',
+        A: 'side A on screen',
+        B: 'side B on screen',
+        Multi: 'both on screen',
     };
+    // Both sides are drawn, each from its own pose and its own extents. A
+    // side whose pose this page has not read or set yet shows no number: the
+    // device layer keeps one live pose, the viewed side's, so the other's is
+    // not known until it has been on screen.
     function renderPose() {
         const multi = _side === 'Multi';
-        const p = _pose[multi ? 'A' : _side];
-        const r = _range[multi ? 'A' : _side] || RANGE_DEFAULT;
-        renderAxis('op-gv', _axisRow.galvo, r.galvo, p.galvo, multi);
-        renderAxis('op-pz', _axisRow.piezo, r.piezo, p.piezo, multi);
+        ['A', 'B'].forEach(side => {
+            const p = _pose[side], r = _range[side] || RANGE_DEFAULT, k = side.toLowerCase();
+            renderAxis(`op-gv-${k}`, _axisRow[side].galvo, r.galvo, p.galvo, !_poseKnown[side]);
+            renderAxis(`op-pz-${k}`, _axisRow[side].piezo, r.piezo, p.piezo, !_poseKnown[side]);
+            const block = document.querySelector(`.op-sheet-side[data-side="${side}"]`);
+            if (block) block.classList.toggle('is-on', _side === side || multi);
+        });
         const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
         const says = $('op-sheet-side'); if (says) says.textContent = SIDE_SAYS[_side] || '';
         renderSource();
@@ -1497,17 +1504,21 @@ const OperateManager = (function () {
     // and a pose read back does not land under a drag or a half-typed
     // number). Multi has no sheet of its own: the line is off and the box
     // blank.
-    const _axisRow = { galvo: null, piezo: null };
-    function renderAxis(id, row, ext, v, off) {
+    const _axisRow = { A: { galvo: null, piezo: null }, B: { galvo: null, piezo: null } };
+    const _poseKnown = { A: false, B: false };
+    // `unknown` leaves the line and the box usable (moving it is how the side
+    // is brought on screen and its pose set) and shows no number.
+    function renderAxis(id, row, ext, v, unknown) {
+        const off = false;
         const inp = $(id + '-in'), box = $(id);
-        if (inp) { inp.min = ext[0]; inp.max = ext[1]; inp.disabled = off; }
+        if (inp) { inp.min = ext[0]; inp.max = ext[1]; inp.disabled = off; inp.classList.toggle('is-unknown', !!unknown); }
         if (box) box.disabled = off;
         const lo = $(id + '-min'), hi = $(id + '-max');
         if (lo) lo.textContent = fmtExt(ext[0]);
         if (hi) hi.textContent = fmtExt(ext[1]);
         if (row) row.show(v);
         else if (inp) inp.value = v;
-        if (off && box) box.value = '—';
+        if (unknown && box && document.activeElement !== box) box.value = '—';
     }
     const fmtExt = x => (x > 0 ? '+' : x < 0 ? '−' : '') + String(Number(Math.abs(x).toFixed(2)));
     // The extents, from the controller, once per side: the micro-mirror card's
@@ -1552,6 +1563,7 @@ const OperateManager = (function () {
                     const pose = _pose[p.side];
                     if (Number.isFinite(p.galvo)) pose.galvo = p.galvo;
                     if (Number.isFinite(p.piezo)) pose.piezo = p.piezo;
+                    _poseKnown[p.side] = true;
                 }
                 _side = p.side;
                 renderPose();
@@ -1563,9 +1575,13 @@ const OperateManager = (function () {
     }
     // The knob moved: the pose takes the number, line and readout follow, and
     // the device layer hears it on the debounce tick.
-    function setAxis(key, v) {
-        if (_side === 'Multi' || !Number.isFinite(v)) return;
-        _pose[_side][key] = v;
+    function setAxis(side, key, v) {
+        if (!Number.isFinite(v)) return;
+        _pose[side][key] = v;
+        _poseKnown[side] = true;
+        // The sheet moved is the sheet looked at: its side comes on screen,
+        // and the device layer is told the side with the pose.
+        if (_side !== side) setSpimSide(side);
         renderPose();
         postLsParams();
     }
@@ -1642,7 +1658,7 @@ const OperateManager = (function () {
         if (side !== 'A' && $('cal-method')) $('cal-method').value = 'scan';
         const turned = side !== _calSide;
         _calSide = side;
-        if (turned) renderFitRow();
+        if (turned) { renderFitRow(); renderCalibrateAll(); }
         _cal = {
             method: $('cal-method') ? $('cal-method').value : _cal.method,
             edges: $('cal-edges') ? !!$('cal-edges').checked : _cal.edges,
@@ -1866,19 +1882,33 @@ const OperateManager = (function () {
         // back when the run ends and the button with it.
         if (b && b.disabled) return;
         const who = emb ? `embryo ${labelFor(emb)}${_calSide === 'B' ? ' · side B' : _calSide === 'AB' ? ' · both sides' : ''}` : '';
-        let says = 'no embryo selected';
-        if (fitted) {
-            // A fit records an R² for each end of the sheet; the weaker one
-            // decides, as it does when a fit is borrowed.
-            const ends = [c.r_squared_top, c.r_squared_bottom].filter(v => v != null);
-            const r2 = ends.length ? Math.min(...ends) : c.r_squared;
-            says = `${who} · ${Number(c.slope_um_per_deg).toFixed(1)} µm/deg`
-                + (r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : '');
-        } else if (emb) {
-            says = `${who} · not calibrated`;
-        }
+        renderFits(emb);
+        // The fits themselves are the two lines above (renderFits). This line
+        // is what a calibration says while it runs and how it ended; at rest
+        // it says only what Calibrate would do.
+        const says = !emb ? '' : fitted ? '' : `${who} has no fit on this side yet`;
         out.textContent = says;
         out.title = says;
+    }
+
+    // The selected embryo's fit on each side, always both: one line a side,
+    // its slope and the weaker of its two R².
+    const fitWords = c => {
+        if (!c || c.slope_um_per_deg == null) return null;
+        const ends = [c.r_squared_top, c.r_squared_bottom].filter(v => v != null);
+        const r2 = ends.length ? Math.min(...ends) : c.r_squared;
+        return `${Number(c.slope_um_per_deg).toFixed(1)} µm/°${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`;
+    };
+    function renderFits(emb) {
+        const who = $('op-calib-who');
+        if (who) who.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
+        const host = $('op-cal-fits');
+        if (!host) return;
+        const cal = (emb && emb.calibration) || {};
+        host.innerHTML = !emb ? '' : [['A', cal], ['B', cal.B]].map(([side, c]) => {
+            const w = fitWords(c);
+            return `<div class="op-calib-fit${w ? '' : ' is-none'}"><b>${side}</b><span>${w ? escapeHtml(w) : 'no fit'}</span></div>`;
+        }).join('');
     }
 
     // ── what the calibration looked at ──────────────────────────────────────
@@ -2135,50 +2165,95 @@ const OperateManager = (function () {
         }
     }
 
-    // Embryos that would be calibrated by "the rest": no fit, not skipped.
-    const uncalibrated = () => _embryos.filter(e => !e.should_skip && !hasFit(e));
+    // ── several embryos, one after another ──────────────────────────────────
+    // Which embryos: the ones ticked. Until somebody ticks or unticks one, the
+    // ones with no fit on the side chosen, since those are what a walk is for.
+    const _calPick = new Set();
+    let _calPickTouched = false;
+    const sidesChosen = () => (_calSide === 'AB' ? ['A', 'B'] : [_calSide]);
+    const fitOn = (e, side) => {
+        const c = (e && e.calibration) || {};
+        return (side === 'B' ? (c.B || {}) : c).slope_um_per_deg != null;
+    };
+    const lacksAFit = e => sidesChosen().some(side => !fitOn(e, side));
+    const pickable = () => _embryos.filter(e => !e.should_skip);
+
+    function pickSet(which) {
+        _calPickTouched = true;
+        _calPick.clear();
+        pickable().forEach(e => {
+            if (which === 'all' || (which === 'unfitted' && lacksAFit(e))) _calPick.add(e.id);
+        });
+        renderCalibrateAll();
+    }
 
     function renderCalibrateAll() {
-        const btn = $('op-cal-all');
-        if (!btn) return;
-        const pending = uncalibrated();
-        // One embryo left is just the Calibrate button next to it; a batch
-        // verb for a batch of one is noise.
-        if (pending.length < 2) { btn.hidden = true; return; }
-        btn.hidden = false;
-        if (!btn.disabled) btn.textContent = `Calibrate ${pending.length} uncalibrated`;
+        const btn = $('op-cal-all'), host = $('op-cal-pick');
+        if (!btn || !host) return;
+        const all = pickable();
+        if (!_calPickTouched) {
+            _calPick.clear();
+            all.filter(lacksAFit).forEach(e => _calPick.add(e.id));
+        }
+        [..._calPick].forEach(id => { if (!all.some(e => e.id === id)) _calPick.delete(id); });
+        host.innerHTML = all.length ? all.map(e => {
+            const marks = ['A', 'B'].map(side =>
+                `<i class="${fitOn(e, side) ? 'is-fit' : 'is-none'}" title="side ${side}: ${fitOn(e, side) ? 'has a fit' : 'no fit'}">${side}</i>`).join('');
+            return `<label class="op-cal-pick-row"><input type="checkbox" data-pick="${escapeHtml(e.id)}"${_calPick.has(e.id) ? ' checked' : ''}>`
+                + `<span>embryo ${escapeHtml(labelFor(e))}</span><span class="op-cal-pick-fits">${marks}</span></label>`;
+        }).join('') : '<span class="op-cap">No embryos in the list yet.</span>';
+        // Aligning needs a fit on both sides, so it needs both asked for.
+        const align = $('op-cal-then-align');
+        if (align) {
+            align.disabled = _calSide !== 'AB';
+            if (align.disabled) align.checked = false;
+        }
+        const n = _calPick.size, sides = _calSide === 'AB' ? 'both sides' : `side ${_calSide}`;
+        const says = $('op-cal-several-says');
+        if (says) says.textContent = n ? `${n} chosen · ${sides}` : 'one after another';
+        if (!btn.dataset.busy) {
+            btn.disabled = !n;
+            btn.textContent = n ? `Calibrate ${n} embryo${n === 1 ? '' : 's'}${align && align.checked ? ' and align' : ''}` : 'Calibrate selected';
+        }
     }
 
     async function calibrateAll() {
-        const pending = uncalibrated();
-        if (!pending.length) return;
-        if (!mayTakeFromRun('Calibrating the rest')) return;
+        const ids = pickable().filter(e => _calPick.has(e.id)).map(e => e.id);
+        if (!ids.length) return;
+        if (!mayTakeFromRun('Calibrating several embryos')) return;
         const btn = $('op-cal-all'), out = $('op-cal-result');
+        const align = !!($('op-cal-then-align') || {}).checked;
         const t0 = Date.now();
-        const tick = setInterval(() => {
-            if (btn) btn.textContent = `Calibrating ${pending.length}… `
-                + `${Math.round((Date.now() - t0) / 1000)}s`;
-        }, 1000);
-        if (btn) { btn.disabled = true; btn.textContent = `Calibrating ${pending.length}… 0s`; }
-        if (out) out.textContent = 'sweeping…';
-        // No embryo id: the run walks the slide, so the progress panel should
-        // take frames from whichever embryo is under the objective.
+        const label = () => `Calibrating ${ids.length}… ${Math.round((Date.now() - t0) / 1000)}s`;
+        const tick = setInterval(() => { if (btn) btn.textContent = label(); }, 1000);
+        if (btn) { btn.dataset.busy = '1'; btn.disabled = true; btn.textContent = label(); }
+        const ab = $('op-cal-abort');
+        if (ab) { ab.hidden = false; ab.disabled = false; ab.textContent = 'Abort'; }
+        if (out) out.textContent = `walking ${ids.length} embryo${ids.length === 1 ? '' : 's'}…`;
+        // No embryo id: the walk moves along the slide, so the progress panel
+        // takes frames from whichever embryo is under the objective.
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(null);
         try {
             const d = await postJSON('/api/devices/calibrate/all',
-                Object.assign({ scope: 'uncalibrated' }, calibrationSettings()));
-            const ok = (d.calibrated || []).length, bad = (d.failed || []).length;
-            if (bad) toastFail(`${ok} calibrated, ${bad} failed: ${(d.failed || []).join(', ')}`);
-            else toast(`Calibrated ${ok} embryo${ok === 1 ? '' : 's'}`);
+                Object.assign({ embryo_ids: ids, align }, calibrationSettings()));
+            const ok = (d.calibrated || []).length, failed = d.failed || [];
+            // Each failure with its reason: which embryo, and what to do about it.
+            const whys = failed.map(id => `${id.replace(/^embryo_/, '')}: ${String((d.why || {})[id] || 'failed').slice(0, 90)}`);
+            if (failed.length) toastFail(`${ok} calibrated, ${failed.length} not. ${whys.join(' · ')}`);
+            else toast(`Calibrated ${ok} embryo${ok === 1 ? '' : 's'}${align ? ', views aligned' : ''}`);
             if (typeof CalProgressPanel !== 'undefined') {
-                CalProgressPanel.finish(!bad, bad ? `${bad} failed` : `${ok} calibrated`);
+                CalProgressPanel.finish(!failed.length, failed.length ? `${failed.length} not calibrated` : `${ok} calibrated`);
             }
+            _calPickTouched = false;   // back to "the ones without a fit": what is left
         } catch (e) {
+            const detail = String((e && e.data && e.data.detail) || '');
             if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.finish(false, why(e));
-            toastFail(`Calibrate all failed (${why(e)})`);
+            if (e && e.status === 409 && /aborted/i.test(detail)) toast(detail);
+            else toastFail(`Calibrating several failed (${why(e)})`);
         } finally {
             clearInterval(tick);
-            if (btn) btn.disabled = false;
+            if (btn) { delete btn.dataset.busy; btn.disabled = false; }
+            if (ab) ab.hidden = true;
             renderCalTarget();
         }
     }
@@ -4721,18 +4796,37 @@ const OperateManager = (function () {
         // The sheet's two axes: a line to drag and the same number to type.
         // The line moves the sheet as it is dragged (the view is how the
         // pose is judged); a typed number moves it on Enter.
-        const bindAxis = (key, line, box, decimals) => {
+        const bindAxis = (side, key, line, box, decimals) => {
             if (!line) return;
             if (box && typeof NumRow !== 'undefined') {
-                _axisRow[key] = NumRow.bind(line, box, {
-                    decimals, onInput: v => setAxis(key, v), onCommit: v => setAxis(key, v),
+                _axisRow[side][key] = NumRow.bind(line, box, {
+                    decimals, onInput: v => setAxis(side, key, v), onCommit: v => setAxis(side, key, v),
                 });
             } else {
-                line.addEventListener('input', () => setAxis(key, Number(line.value)));
+                line.addEventListener('input', () => setAxis(side, key, Number(line.value)));
             }
         };
-        bindAxis('galvo', $('op-gv-in'), $('op-gv'), 2);
-        bindAxis('piezo', $('op-pz-in'), $('op-pz'), 1);
+        ['A', 'B'].forEach(side => {
+            const k = side.toLowerCase();
+            bindAxis(side, 'galvo', $(`op-gv-${k}-in`), $(`op-gv-${k}`), 2);
+            bindAxis(side, 'piezo', $(`op-pz-${k}-in`), $(`op-pz-${k}`), 1);
+            fetchRange(side);   // each side's own extents, read once
+        });
+        // A side's name puts that side on screen.
+        document.querySelectorAll('[data-sheet-view]').forEach(b =>
+            b.addEventListener('click', () => chooseSource(b.dataset.sheetView)));
+        document.querySelectorAll('[data-pick-set]').forEach(b =>
+            b.addEventListener('click', () => pickSet(b.dataset.pickSet)));
+        const pick = $('op-cal-pick');
+        if (pick) pick.addEventListener('change', e => {
+            const box = e.target.closest('[data-pick]');
+            if (!box) return;
+            _calPickTouched = true;
+            if (box.checked) _calPick.add(box.dataset.pick); else _calPick.delete(box.dataset.pick);
+            renderCalibrateAll();
+        });
+        const thenAlign = $('op-cal-then-align');
+        if (thenAlign) thenAlign.addEventListener('change', renderCalibrateAll);
         adoptLsParams();
         document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b =>
             b.addEventListener('click', () => chooseSource(b.dataset.source)));
