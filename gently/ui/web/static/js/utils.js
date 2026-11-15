@@ -259,8 +259,9 @@ const Mentions = {
         const draw = () => {
             const w = word();
             if (!w) { close(); return; }
-            hits = Object.values(Who.people).filter(u => u.id !== 'agent'
-                && (u.id.toLowerCase().startsWith(w.q) || (u.name || '').toLowerCase().startsWith(w.q))).slice(0, 6);
+            // The rig's people, then the agent: "@agent" asks it, and it answers in a line.
+            hits = [...Object.values(Who.people).filter(u => u.id !== 'agent'), { id: 'agent', name: 'agent' }]
+                .filter(u => u.id.toLowerCase().startsWith(w.q) || (u.name || '').toLowerCase().startsWith(w.q)).slice(0, 6);
             if (!hits.length) { close(); return; }
             sel = Math.min(sel, hits.length - 1);
             if (!pop) { pop = document.createElement('div'); pop.className = 'mention-pop'; input.insertAdjacentElement('afterend', pop); }

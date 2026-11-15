@@ -20,6 +20,9 @@ const Inbox = (() => {
     // session without being opened from here is not unopened business.
     const waiting = i => !i.seen && !i.answered;
 
+    // Who a line is by: the agent's lines carry no person.
+    const by = n => (n.author === 'agent' ? 'agent' : n.by);
+
     async function load() {
         let d;
         try { d = await (await fetch('/api/inbox')).json(); } catch (e) { return; }
@@ -30,7 +33,7 @@ const Inbox = (() => {
         if (known && data.me) {
             const fresh = unseen.find(i => !known.has(i.note.id));
             if (fresh && typeof showGentlyToast === 'function') {
-                showGentlyToast(`${Who.name(fresh.note.by)}${place(fresh, ', on ')}: ${fresh.note.body}`, 'Open', () => open(fresh), 8000);
+                showGentlyToast(`${Who.name(by(fresh.note))}${place(fresh, ', on ')}: ${fresh.note.body}`, 'Open', () => open(fresh), 8000);
             }
         }
         known = ids;
@@ -81,7 +84,7 @@ const Inbox = (() => {
         const where = place(i, 'on ');
         const cls = (waiting(i) ? 'is-new' : 'is-seen') + (i.answered ? ' is-answered' : '');
         return `<button type="button" class="presence-pop-item inbox-item ${cls}" data-open="${escapeHtml(i.note.id)}" title="${i.seen ? 'Opened' : 'Not opened yet'}${i.answered ? ' · answered' : ''}">
-            <span class="inbox-who rd-head"><i class="inbox-dot" aria-hidden="true"></i>${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${i.reply_to ? '<span class="inbox-state">replied</span>' : ''}${i.answered ? '<span class="inbox-state is-answered">answered</span>' : ''}</span>
+            <span class="inbox-who rd-head"><i class="inbox-dot" aria-hidden="true"></i>${Who.head(by(i.note))}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${i.reply_to ? '<span class="inbox-state">replied</span>' : ''}${i.answered ? '<span class="inbox-state is-answered">answered</span>' : ''}</span>
             <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
         </button>`;
     }
