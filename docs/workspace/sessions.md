@@ -1,9 +1,11 @@
 # The Sessions tab: a study
 
-What the tab is for, what is wrong with it today, what was fixed along the
-way, and what it should become. `mockup-sessions-v1.html` in this folder draws
-the proposal. The loading work and one naming fix are built; **the redesign is
-not**, it is here to be agreed or changed first.
+What the tab is for, what was wrong with it, and what it became.
+`mockup-sessions-v1.html` in this folder draws the proposal. The owner asked
+for it to be built ("build teh sessions redesign") and it is: "What is built
+of the redesign", at the end, says what, how it was checked, and where the
+page differs from the drawing. The sections before it are the study as
+written, so "today" in them is the tab before this work.
 
 ## The short version
 
@@ -273,3 +275,56 @@ without the rest.
 - **The 161 folders the index does not list.** 157 are empty folders from
   July; four are not. They are invisible to this tab today and were left
   alone.
+
+## What is built of the redesign
+
+All seven steps of the order of work, on the rig's own sessions.
+
+| | Before | Now |
+|---|---|---|
+| Sessions on screen, 1920×889 | 5 | 24 |
+| Sessions on screen, 1440×920 | 5 | 26 |
+| The 12 October night's eleven embryos | a 1,751 px pane in three rows | one screen, nothing to scroll, at both sizes |
+| Where an opened session's pictures start | 633 px down | under a 30 px strip |
+
+- **The log** is a table, one session a line: when with its day of the week,
+  embryos, timepoints, cadence, how long it lasted, brightfield frames, how
+  it ended, size, project, who, and what a person wrote. A heading sorts and
+  pressed again turns round. The live session is the first line.
+- **The filters** are one bar, always there, each chip with its count.
+- **The empties** are one line at the foot with their number.
+- **Keys**: up and down move, Enter opens, Esc closes, `/` finds; a heading
+  is pressed with Enter or Space.
+- **A session opened** is two zones beside the log: its pictures, fitted so
+  every embryo is on screen, under one scrubber that moves them together;
+  and its record in four panels (This session, The run, Notes, Take out)
+  with Make live at the foot.
+- **The run says the cadence it kept**: the 12 October night kept 603.7 s a
+  round for the 10 min asked.
+
+### Where the page differs from the drawing
+
+- **The verb is still "Make live".** The drawing said "Carry on at the rig".
+  The name it has was chosen to say what it does, and is kept.
+- **The filters are the page's chips with counts**, wrapping to a second line
+  when the projects are many, not the drawing's segments and two selects.
+- **A tile keeps the dose** and drops the timepoint count and the position,
+  which are in the viewer a press away. A role of "unassigned" is not said.
+- **The opened log has no name column.** At 372 px a name was two letters.
+- **The cadence kept is worked out on the page** from how long the run
+  lasted over its rounds; the route was not changed.
+
+### Found on the way
+
+A session would sometimes not open when pressed. Sizes arrive in the
+background and each repainted its row by replacing it; a row replaced
+between the press and the release of a click swallows the click. Rows are
+repainted in place now.
+
+### How it was checked
+
+In the running app on the rig's own sessions, in a browser at 1920×889 and
+1440×920: the counts above, sorting, the empties, the keys, opening and
+closing, the scrubber, and an opened session in the light theme. The
+filing popover in the log's Project cell and the export and movie forms in
+the record's narrow column were not pressed.

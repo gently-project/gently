@@ -15,7 +15,7 @@ picture (`calibration-and-acquisition.md`). Where the text below says
 | `mockup-v2.html` | after the audit below: number boxes, a real small-window layout, both themes |
 | `calibration-and-acquisition.md` | the study of the two surfaces beside Scope, what was proposed for them, and what of it is built ("What is built" lists the steps and what is left) |
 | `mockup-run-v1.html` | that proposal drawn: calibration on Scope, Acquisition before a run and during one, the Calibration tab as the archive of raw exposures |
-| `sessions.md` | the study of the Sessions tab: what was measured, the loading work that is built, and the redesign that is proposed and not built |
+| `sessions.md` | the study of the Sessions tab: what was measured, the loading work, and the redesign, which is built ("What is built of the redesign") |
 | `mockup-sessions-v1.html` | that proposal drawn: the sessions as a log-book table, and a session opened in the same three zones as Scope |
 
 Open any of the mockups in a browser. The controls move; nothing reaches a

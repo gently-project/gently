@@ -1,34 +1,33 @@
-{# Sessions panel — shared between index.html (SPA tab) and review.html (standalone) #}
-<div class="review-container">
-    <div class="session-sidebar" id="session-sidebar">
-        <div class="sidebar-header">
-            <h3>Sessions</h3>
-            <button class="session-new-btn" onclick="ReviewApp.newSession()" title="Open a new, empty session. The current one is saved.">+ New</button>
-            <button class="refresh-btn" onclick="ReviewApp.loadSessions()" title="Refresh">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M23 4v6h-6M1 20v-6h6"/>
-                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-                </svg>
-            </button>
-        </div>
-        <div class="sidebar-filter">
-            <input type="search" class="session-search" id="session-search" placeholder="Find a session…"
-                   aria-label="Find a session" oninput="ReviewApp.searchInput()">
-            {# Filter chips: what a session holds, how its run ended, when, and
-               the recordings it carries. review.js draws them with counts. #}
-            <div class="session-filters" id="session-filters"></div>
-        </div>
-        <div class="session-list" id="session-list">
-            <div class="loading">Loading sessions...</div>
-        </div>
-    </div>
-    <div class="session-content" id="session-content">
-        <div class="no-session-selected">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+{# Sessions panel — shared between index.html (SPA tab) and review.html (standalone).
+
+   The rig's log book (docs/workspace/sessions.md). One bar: find, the
+   filters, how many are showing. Under it the log, a table with one session
+   a line, and with a session opened the same three zones as Scope: the log,
+   what the session holds, its record. review.js draws all of it. #}
+<div class="review-container" id="review-container">
+    <div class="slog-bar" role="search">
+        <input type="search" class="session-search" id="session-search" placeholder="Find a session…  /"
+               aria-label="Find a session" oninput="ReviewApp.searchInput()">
+        {# Chips in groups: what a session holds, how its run ended, when,
+           the recordings it carries, its project. Each says how many it
+           would keep, so a filter never hides sessions silently. #}
+        <div class="session-filters" id="session-filters"></div>
+        <span class="slog-count" id="session-count"></span>
+        <button class="session-new-btn" onclick="ReviewApp.newSession()" title="Open a new, empty session. The current one is saved.">+ New</button>
+        <button class="refresh-btn" onclick="ReviewApp.loadSessions()" title="Read the sessions again" aria-label="Read the sessions again">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 4v6h-6M1 20v-6h6"/>
+                <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
             </svg>
-            <p>Select a session to review</p>
+        </button>
+    </div>
+    <div class="slog-ws">
+        <div class="session-sidebar" id="session-sidebar">
+            <div class="session-list" id="session-list">
+                <div class="loading">Loading sessions...</div>
+            </div>
+            <div class="slog-empties" id="session-empties"></div>
         </div>
+        <div class="session-content" id="session-content"></div>
     </div>
 </div>
