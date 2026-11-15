@@ -306,6 +306,13 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
                 name="lightsheet_snap_b",
             )
             logger.info("Created volume scanner and lightsheet snap for side B")
+            if devices.get("volume_scanner"):
+                from .devices.acquisition import DiSPIMTwoSidedVolumeScanner
+
+                devices["volume_scanner_ab"] = DiSPIMTwoSidedVolumeScanner(
+                    a=devices["volume_scanner"], b=devices["volume_scanner_b"]
+                )
+                logger.info("Created the two-sided volume scanner")
         else:
             logger.info("No side-B volume scanner: scanner_b, camera_b or piezo_b absent")
     except Exception as e:

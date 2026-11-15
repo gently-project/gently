@@ -780,6 +780,60 @@ def mark_embryo_interactive_plan(
 # =======================
 
 
+def acquire_two_sided_volume_plan(
+    volume_scanner,
+    side_a: dict,
+    side_b: dict,
+    num_slices: int = 100,
+    exposure_ms: float = 5.0,
+    laser_config: str = "488 and 561",
+    laser_power_488_pct: float | None = None,
+    laser_power_561_pct: float | None = None,
+    laser_power_405_pct: float | None = None,
+    laser_power_637_pct: float | None = None,
+    timing_params: dict | None = None,
+    delay_before_side_ms: float = 50.0,
+    metadata: dict | None = None,
+):
+    """Both views of one volume in one scan (DiSPIMTwoSidedVolumeScanner).
+
+    ``side_a`` and ``side_b`` each give that side's galvo_amplitude,
+    galvo_center, piezo_amplitude and piezo_center. The event carries a
+    volume under each one-sided scanner's name.
+    """
+    _md = {
+        "plan_name": "acquire_two_sided_volume",
+        "num_slices": num_slices,
+        "exposure_ms": exposure_ms,
+        "side_a": side_a,
+        "side_b": side_b,
+        "laser_config": laser_config,
+        "delay_before_side_ms": delay_before_side_ms,
+    }
+    if metadata:
+        _md.update(metadata)
+
+    @bpp.run_decorator(md=_md)
+    def inner():
+        logger.info("TWO-SIDED VOLUME ACQUISITION: %d slices, %.1f ms", num_slices, exposure_ms)
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            side_a=side_a,
+            side_b=side_b,
+            laser_config=laser_config,
+            laser_power_488_pct=laser_power_488_pct,
+            laser_power_561_pct=laser_power_561_pct,
+            laser_power_405_pct=laser_power_405_pct,
+            laser_power_637_pct=laser_power_637_pct,
+            timing_params=timing_params,
+            delay_before_side_ms=delay_before_side_ms,
+        )
+        yield from bps.trigger_and_read([volume_scanner])
+
+    yield from inner()
+
+
 def acquire_single_volume_plan(
     volume_scanner,
     num_slices: int = 100,

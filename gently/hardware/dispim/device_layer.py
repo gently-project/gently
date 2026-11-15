@@ -220,6 +220,7 @@ class DeviceLayerServer(Service):
         self._heavy_plans = frozenset(
             {
                 "acquire_single_volume_plan",
+                "acquire_two_sided_volume_plan",
                 "burst_plan",
                 "timelapse_volume_plan",
                 "focus_sweep_plan",
@@ -586,12 +587,14 @@ class DeviceLayerServer(Service):
         try:
             from .plans.acquisition import (
                 acquire_single_volume_plan,
+                acquire_two_sided_volume_plan,
                 burst_plan,
                 calibrate_piezo_galvo_plan,
             )
 
             self.plans["calibrate_piezo_galvo_plan"] = calibrate_piezo_galvo_plan
             self.plans["acquire_single_volume_plan"] = acquire_single_volume_plan
+            self.plans["acquire_two_sided_volume_plan"] = acquire_two_sided_volume_plan
             self.plans["burst_plan"] = burst_plan
             logger.info("Loaded main acquisition plans")
         except ImportError:
