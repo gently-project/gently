@@ -2597,6 +2597,7 @@ function findingCard(n) {
         <div class="pj-t"><span class="pj-chip ${n.author === 'agent' ? 'ai' : ''}">finding · ${esc(n.status)}</span><span class="pj-muted">${n.author === 'agent' ? 'agent' : (n.by ? Who.chip(n.by) : esc(n.author))} · ${esc(formatDate(n.created_at))}</span></div>
         <div class="pj-body">${Mentions.html(n.body, n.mentions)}</div>
         ${(n.basis || []).length ? `<div class="pj-m">basis ${cites(n.basis)}</div>` : ''}
+        ${n.superseded_by ? `<div class="pj-m">replaced by ${cites([n.superseded_by])}</div>` : ''}
         ${(n.sessions || []).length ? `<div class="pj-m">sessions ${cites(n.sessions)}</div>` : ''}
         ${dim ? '' : `<div class="pj-act">${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="confirmed">Confirm</button>` : ''}<button data-action="form-open" data-form="supersede:${esc(n.id)}">Supersede</button>${n.status === 'proposed' ? `<button data-action="note-status" data-id="${esc(n.id)}" data-status="superseded">Dismiss</button>` : ''}</div>`}
         ${sup ? `<div class="pj-form"><textarea data-field="body" rows="3" placeholder="The finding that replaces it"></textarea><div class="pj-act"><button data-action="note-supersede" data-id="${esc(n.id)}">Save</button><button data-action="form-close">Cancel</button></div></div>` : ''}
@@ -3199,8 +3200,8 @@ async function projectAction(action, el, e) {
                 const form = el.closest('.pj-form');
                 const d = fields(form);
                 if (!d.body) { showErr(form, 'Write the finding that replaces it.'); return; }
-                await api('POST', '/api/notebook/notes', { kind: 'finding', body: d.body, projects: [cid], basis: [id] });
-                await api('POST', `/api/notebook/notes/${enc(id)}/status`, { status: 'superseded' });
+                // One call: the old finding is marked and points at the one that replaced it.
+                await api('POST', `/api/notebook/notes/${enc(id)}/supersede`, { body: d.body });
                 state.openForm = null;
                 await reloadProject();
                 return;

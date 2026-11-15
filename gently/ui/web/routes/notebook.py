@@ -317,6 +317,36 @@ def create_router(server) -> APIRouter:
             pass
         return {"ok": True, "note": _for_view(nb.get_note(note_id))}
 
+    @router.post("/api/notebook/notes/{note_id}/supersede", dependencies=[Depends(require_control)])
+    async def supersede(note_id: str, request: Request):
+        """Replace a finding with a better one. The old one is kept, marked
+        superseded and pointing at its successor; the new one rests on it.
+        Two separate calls from the page did the first half only: nothing
+        said which finding had replaced which."""
+        body = await request.json()
+        nb = _nb()
+        if nb is None:
+            raise HTTPException(status_code=503, detail="notebook unavailable")
+        old = nb.get_note(note_id)
+        if old is None:
+            raise HTTPException(status_code=404, detail="note not found")
+        new = person_note(
+            server,
+            {
+                "kind": old.kind.value,
+                "projects": old.projects,
+                "sessions": old.sessions,
+                "strains": old.strains,
+                **body,
+                "basis": [note_id],
+            },
+            current_username(request),
+        )
+        new_id = nb.write_note(new)
+        nb.supersede_note(note_id, new_id)
+        _changed("notebook.supersede")
+        return {"ok": True, "note": _for_view(nb.get_note(new_id)), "superseded": note_id}
+
     def _changed(source: str) -> None:
         try:
             from gently.core.event_bus import EventType, emit

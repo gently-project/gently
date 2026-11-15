@@ -400,6 +400,21 @@ class AgentMemory:
                 ]
             except Exception:
                 findings = []
+        # What people last wrote on this project: the agent was told its top
+        # findings and nothing of the lines, asks and marks beside them.
+        if nb is not None:
+            try:
+                recent = [
+                    n
+                    for n in nb.query_notes(project=campaign.id, in_notebook=True)
+                    if n.kind != NoteKind.FINDING and n.author.value != "agent"
+                ][:5]
+            except Exception:
+                recent = []
+            if recent:
+                lines.append("\n**Latest notes from people** (read_notebook for more):")
+                for n in recent:
+                    lines.append(f"  - {n.created_at:%b %d} {n.by or 'someone'}: {n.body[:150]}")
         if findings:
             lines.append("\n**Findings**:")
             for n in findings[:5]:

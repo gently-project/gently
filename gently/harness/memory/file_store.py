@@ -2276,7 +2276,59 @@ class FileContextStore:
     # Questions
     # ==================================================================
 
-    def add_question(self, q: Question):
+    def _question_note(self, q: Question, by: str | None, mentions: list[str]) -> None:
+        """The question as a notebook note under the same id, so it is read,
+        searched and asked about with everything else. The ledger above stays
+        what the Projects tab reads; a failure here never loses the question."""
+        try:
+            from .notebook import Author, Note, NoteKind, NoteStatus
+
+            self.notebook.write_note(
+                Note(
+                    id=q.id,
+                    kind=NoteKind.QUESTION,
+                    body=q.content,
+                    author=Author.HUMAN if by else Author.AGENT,
+                    status=NoteStatus.OPEN,
+                    sessions=[q.session_id] if q.session_id else [],
+                    projects=[q.project_id] if q.project_id else [],
+                    mentions=list(mentions),
+                    by=by,
+                )
+            )
+        except Exception:
+            logger.exception("Question %s was not written to the notebook", q.id)
+
+    def _question_answered(self, q_id: str, resolution: str, by: str | None) -> None:
+        """The note is answered, and the answer is a line of its own resting on it."""
+        try:
+            from .notebook import Author, Note, NoteKind, NoteStatus
+
+            note = self.notebook.get_note(q_id)
+            if note is None or note.kind != NoteKind.QUESTION:
+                return
+            note.status = NoteStatus.ANSWERED
+            self.notebook.write_note(note)
+            if resolution.strip():
+                self.notebook.write_note(
+                    Note(
+                        id="",
+                        kind=NoteKind.OBSERVATION,
+                        body=resolution.strip(),
+                        author=Author.HUMAN if by else Author.AGENT,
+                        sessions=list(note.sessions),
+                        projects=list(note.projects),
+                        basis=[q_id],
+                        by=by,
+                    )
+                )
+        except Exception:
+            logger.exception("Question %s was not marked answered in the notebook", q_id)
+
+    def add_question(
+        self, q: Question, *, by: str | None = None, mentions: list[str] | None = None
+    ):
+        self._question_note(q, by, mentions or [])
         path = self.agent_dir / "active" / "questions.yaml"
         items = self._read_yaml(path) or []
         items.append(
@@ -2319,7 +2371,8 @@ class FileContextStore:
         items.sort(key=lambda q: q.created_at)
         return items
 
-    def resolve_question(self, q_id: str, resolution: str):
+    def resolve_question(self, q_id: str, resolution: str, *, by: str | None = None):
+        self._question_answered(q_id, resolution or "", by)
         path = self.agent_dir / "active" / "questions.yaml"
         items = self._read_yaml(path) or []
         now = self._now()
