@@ -196,6 +196,8 @@ class TimelapseOrchestrator:
         # volume and no longer: the run has to carry it. None is the volume
         # plan's own default.
         self._laser_config: str | None = None
+        # Each line's power as the run began, for a line the plan sets none.
+        self._powers_at_start: dict[int, float] = {}
         # The imaging paths a round takes per embryo, in order. B is skipped for an
         # embryo without a B calibration, said once.
         self._sides: tuple[str, ...] = ("A",)
@@ -1306,6 +1308,7 @@ class TimelapseOrchestrator:
         acquisitions until burst completes.
         """
         try:
+            await self._note_powers_at_start()
             while not self._stop_requested:
                 # Handle pause (whole-session)
                 if self._status == TimelapseStatus.PAUSED:
@@ -1741,9 +1744,34 @@ class TimelapseOrchestrator:
             out["laser_config"] = self._laser_config
         for wl in (561, 405, 637):
             pct = getattr(embryo, f"laser_power_{wl}_pct", None)
+            if pct is None:
+                pct = self._powers_at_start.get(wl)
             if pct is not None:
                 out[f"laser_power_{wl}_pct"] = pct
         return out
+
+    async def _note_powers_at_start(self) -> None:
+        """Read each line's power once, as the run begins, and hold it.
+
+        A line the plan gives no power is "left at the setpoint it has". That
+        setpoint is whatever somebody last set by hand: 561 left at 80 % from
+        a test was the power of the whole run, said nowhere, and a slider
+        moved mid-run changed it under the run. Read at the start, it is
+        logged, and sent with every volume so it cannot drift.
+        """
+        self._powers_at_start = {}
+        for wl in (561, 405, 637):
+            try:
+                got = await self.client.get_laser_power(wl)
+            except Exception:
+                continue
+            if isinstance(got, dict) and got.get("success") and got.get("pct") is not None:
+                self._powers_at_start[wl] = float(got["pct"])
+        if self._powers_at_start:
+            logger.info(
+                "Laser powers held for this run where the plan sets none: %s",
+                ", ".join(f"{wl} nm {pct:g} %" for wl, pct in self._powers_at_start.items()),
+            )
 
     async def _check_stop_condition(self, embryo_state: EmbryoState):
         """

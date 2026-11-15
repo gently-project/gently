@@ -11,6 +11,7 @@ list survives restarts and browsers, and nothing in it can go stale.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Request
 
-from gently.core.file_store import _read_yaml, _write_yaml
+from gently.core.file_store import _read_yaml, _write_yaml, one_writer
 from gently.harness.memory.notebook import Author, Note, note_to_dict
 from gently.ui.web.auth import current_username
 
@@ -53,6 +54,7 @@ def read_seen(cs: Any, pid: str) -> set[str]:
     return {str(x) for x in (doc.get("seen") or [])}
 
 
+@one_writer
 def mark_seen(cs: Any, pid: str, ids: list[str]) -> set[str]:
     """Remember that this person has opened these asks. Ids of notes that no
     longer exist stay in the file; they match nothing and cost nothing."""
@@ -204,7 +206,8 @@ def create_router(server: Any) -> APIRouter:
         me = current_username(request)
         if cs is None or not me:
             return {"me": me, "asks": [], "new": [], "open": [], "done": [], "mine": []}
-        return inbox_for(store, cs, me)
+        # Off the event loop: it reads every note, and the page polls it.
+        return await asyncio.to_thread(inbox_for, store, cs, me)
 
     @router.post("/api/inbox/seen")
     async def post_seen(request: Request, body: dict = Body(default={})):  # noqa: B008
@@ -214,6 +217,6 @@ def create_router(server: Any) -> APIRouter:
         if cs is None or not me:
             return {"me": me, "asks": [], "new": [], "open": [], "done": [], "mine": []}
         mark_seen(cs, me, [str(x) for x in (body.get("ids") or [])])
-        return inbox_for(store, cs, me)
+        return await asyncio.to_thread(inbox_for, store, cs, me)
 
     return router

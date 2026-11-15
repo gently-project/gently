@@ -63,6 +63,10 @@ class PlanRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
+# What the water may be set to with a sample in it, in °C.
+TEMPERATURE_SETPOINT_C = (4.0, 40.0)
+
+
 class DeviceLayerServer(Service):
     """
     Consolidated device layer: MMCore + Ophyd + RunEngine + SAM.
@@ -2309,9 +2313,12 @@ class DeviceLayerServer(Service):
             data = await request.json()
             target = float(data.get("target_c"))
             wait = bool(data.get("wait", False))
-            if not (0.0 <= target <= 99.9):
+            # The controller takes 0 to 99.9. The sample does not: 73 typed
+            # for 37 was accepted. The page's own box is 4 to 40.
+            lo, hi = TEMPERATURE_SETPOINT_C
+            if not (lo <= target <= hi):
                 return web.json_response(
-                    {"success": False, "error": f"target {target} outside [0.0, 99.9]"}
+                    {"success": False, "error": f"target {target} outside [{lo}, {hi}] °C"}
                 )
             temp = self.devices.get("temperature")
             if temp is None:

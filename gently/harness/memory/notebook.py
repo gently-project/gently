@@ -20,6 +20,7 @@ from typing import Any
 
 import yaml
 
+from gently.core.file_store import _YAML_MEMO
 from gently.core.file_store import _read_yaml as _read_yaml_memo
 
 from .model import Confidence, Learning, Observation
@@ -333,6 +334,10 @@ class NotebookStore:
         with open(tmp, "w", encoding="utf-8") as fh:
             yaml.safe_dump(data, fh, default_flow_style=False, allow_unicode=True, sort_keys=False)
         os.replace(str(tmp), str(path))
+        # The reader keeps what it last parsed of a file, by its time and
+        # size. A note rewritten at the same size inside one clock tick (a
+        # status change, set aside and back) read back as it was before.
+        _YAML_MEMO.pop(str(path), None)
 
     def _read_yaml(self, path: Path) -> dict | None:
         # The store's reader: libyaml, and a note that has not changed is not parsed again.
@@ -351,7 +356,13 @@ class NotebookStore:
     # ---- read/write ----
     def write_note(self, note: Note) -> str:
         if not note.id:
+            # Eight characters of a uuid are not unique for ever. An id already
+            # in use would write this note over that one.
             note.id = self._gen_id()
+            for _ in range(8):  # one clash is rare; eight in a row is not chance
+                if self._note_path(note.id) is None:
+                    break
+                note.id = self._gen_id()
         note.updated_at = datetime.now()
         slug = self._slugify(note.title or note.body or note.kind.value)
         # remove any stale file for this id (slug may have changed)
