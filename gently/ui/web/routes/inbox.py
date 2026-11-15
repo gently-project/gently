@@ -96,6 +96,35 @@ def _wrote_after(notes: list[Note], who: str, ask: Note) -> bool:
     return False
 
 
+def _same_place(n: Note, ask: Note) -> bool:
+    if ask.sessions:
+        return bool(set(n.sessions) & set(ask.sessions))
+    return bool(ask.projects) and bool(set(n.projects) & set(ask.projects))
+
+
+def _replies(everything: list[Note], pid: str) -> dict[str, str]:
+    """Lines that are for ``pid`` without naming them: ``{note id: ask id}``.
+    An ask makes a conversation of the one who asked and the people asked;
+    what any of them then writes on that session or project is for the
+    others. Kesavan asks @ryan, Ryan answers without an @: it is Kesavan's."""
+    out: dict[str, str] = {}
+    for ask in everything:
+        people = {ask.by, *ask.mentions} - {None}
+        if not ask.mentions or pid not in people or not (ask.sessions or ask.projects):
+            continue
+        for n in everything:
+            if (
+                n.by in people
+                and n.by != pid
+                and pid not in n.mentions
+                and n.id != ask.id
+                and _when_written(n) > ask.created_at
+                and _same_place(n, ask)
+            ):
+                out.setdefault(n.id, ask.id)
+    return out
+
+
 def inbox_for(store: Any, cs: Any, pid: str) -> dict:
     """What names this person, newest first, in three piles, and what they
     wrote. New: not yet opened. Open: opened, and nothing written by them on
@@ -117,12 +146,22 @@ def inbox_for(store: Any, cs: Any, pid: str) -> dict:
 
     # One list in time order, newest first, each ask saying whether it has
     # been opened and whether it has been answered; the piles are the same
-    # facts sorted, kept for callers that read them.
+    # facts sorted, kept for callers that read them. A reply in a
+    # conversation this person is part of sits among the asks, saying which
+    # ask it follows.
+    replies = _replies(everything, pid)
+    asks = sorted(
+        asks + [n for n in everything if n.id in replies],
+        key=lambda n: n.created_at,
+        reverse=True,
+    )
     ordered: list[dict] = []
     piles: dict[str, list[dict]] = {"new": [], "open": [], "done": []}
     for a in asks:
         done = answered(a)
         item = _item(store, cs, a)
+        if a.id in replies:
+            item["reply_to"] = replies[a.id]
         item["seen"] = a.id in seen
         item["answered"] = done
         ordered.append(item)

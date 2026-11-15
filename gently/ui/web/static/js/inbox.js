@@ -81,7 +81,7 @@ const Inbox = (() => {
         const where = place(i, 'on ');
         const cls = (waiting(i) ? 'is-new' : 'is-seen') + (i.answered ? ' is-answered' : '');
         return `<button type="button" class="presence-pop-item inbox-item ${cls}" data-open="${escapeHtml(i.note.id)}" title="${i.seen ? 'Opened' : 'Not opened yet'}${i.answered ? ' · answered' : ''}">
-            <span class="inbox-who rd-head"><i class="inbox-dot" aria-hidden="true"></i>${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${i.answered ? '<span class="inbox-state is-answered">answered</span>' : ''}</span>
+            <span class="inbox-who rd-head"><i class="inbox-dot" aria-hidden="true"></i>${Who.head(i.note.by)}<span class="rd-when">${escapeHtml(formatDate(i.note.created_at))}</span>${where ? `<span class="rd-place">${escapeHtml(where)}</span>` : ''}${i.reply_to ? '<span class="inbox-state">replied</span>' : ''}${i.answered ? '<span class="inbox-state is-answered">answered</span>' : ''}</span>
             <span class="inbox-line">${Mentions.html(i.note.body, i.note.mentions)}</span>
         </button>`;
     }
