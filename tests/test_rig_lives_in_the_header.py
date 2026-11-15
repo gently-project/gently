@@ -158,3 +158,28 @@ def test_a_rig_that_was_asked_for_and_is_not_running_says_so() -> None:
     assert 'id="boot-banner-notnow"' in INDEX.read_text(encoding="utf-8"), (
         "the banner lost its 'Not now'"
     )
+
+
+def test_the_chip_has_one_writer_and_the_menu_says_what_was_read():
+    """The chip's words and dot are app.js's. The menu's script wrote them
+    too, with other words, on every status event, so the chip read whichever
+    had written last. It also showed a room light whose state was not known
+    as off, put the water's temperature on the chip only once the menu had
+    been opened, and stopped the device layer on one press."""
+    js = RIG_JS.read_text(encoding="utf-8")
+    body = js[
+        js.index("    function renderDeviceLayer(s) {") : js.index("    function fmtUptime(sec) {")
+    ]
+    assert "_el.text.textContent" not in body and "_el.dot.classList" not in body
+    assert "on ? 'on' : read === 'off' ? 'off' : 'not known'" in js
+    # One read at the start; after that only while the menu is open.
+    init = js[js.index("    function init() {") :]
+    assert init.index("refreshAmbient();") < init.index("const sync = () =>")
+    # Stop: the first press arms it, and it disarms itself.
+    stop = js[js.index("    async function stopLayer() {") :][:520]
+    assert "if (!_stopArmed) {" in stop and "setTimeout(disarmStop, 5000)" in stop
+    assert stop.index("return;") < stop.index("'/api/device-layer/stop'")
+    css = (WEB / "static" / "css" / "rig-menu.css").read_text(encoding="utf-8")
+    assert (
+        ".rig-btn-stop:not(:disabled) {" in css and ".rig-btn-stop.is-armed:not(:disabled) {" in css
+    )

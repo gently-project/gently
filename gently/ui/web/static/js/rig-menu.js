@@ -20,16 +20,6 @@
  * control-auth.js toasts on a bare 403.
  */
 const RigMenu = (function () {
-    const STATE_LABEL = {
-        ready: 'Rig ready',
-        running: 'Rig ready',
-        starting: 'Starting',
-        initializing: 'Starting',
-        external: 'Rig ready',
-        stopped: 'Rig off',
-        crashed: 'Rig crashed',
-        failed: 'Rig failed',
-    };
     const STATE_CLASS = {
         ready: 'connected', running: 'connected', external: 'connected',
         starting: 'partial', initializing: 'partial',
@@ -72,20 +62,13 @@ const RigMenu = (function () {
         if (!cacheDom() || !s) return;
         _last = s;
         const state = String(s.state || 'stopped');
-        const label = STATE_LABEL[state] || state;
         const booting = state === 'starting' || state === 'initializing';
-
-        // The chip is the only always-visible rig readout, so a boot shows its
-        // stage there rather than only inside the menu.
-        if (booting && s.progress && s.progress.n) {
-            _el.text.textContent = `Booting ${s.progress.i}/${s.progress.n}`;
-        } else {
-            _el.text.textContent = label;
-        }
-        _el.dot.classList.remove('connected', 'partial', 'error');
         const cls = STATE_CLASS[state];
-        if (cls) _el.dot.classList.add(cls);
 
+        // The chip's words and dot are app.js's (renderConnectionUI), which
+        // knows the connection as well as the boot. This wrote them too, with
+        // other words ("Rig ready") and other dot classes, on every status
+        // event: the chip read whichever of the two had written last.
         _el.dlState.textContent = state;
         _el.dlState.className = 'rig-state rig-state-' + (cls || 'off');
 
@@ -158,9 +141,12 @@ const RigMenu = (function () {
             const r = await fetch('/api/devices/room_light/status');
             const d = r.ok ? await r.json() : null;
             if (d && d.available) {
-                const on = String(d.state).toLowerCase() === 'on';
+                const read = String(d.state).toLowerCase();
+                const on = read === 'on';
                 _el.lightSec.hidden = false;
-                _el.lightState.textContent = on ? 'on' : 'off';
+                // Its state is not always known (the switch has no read-back
+                // until it has been set once). Unknown is said, not shown as off.
+                _el.lightState.textContent = on ? 'on' : read === 'off' ? 'off' : 'not known';
                 _el.lightToggle.setAttribute('aria-checked', String(on));
                 _el.lightToggle.classList.toggle('on', on);
             } else {
@@ -227,7 +213,23 @@ const RigMenu = (function () {
         } finally { _busy = false; renderDeviceLayer(_last); }
     }
 
+    // Stop drops the connection to every device. Two presses, the second
+    // within five seconds: it sits beside Log, and one stray click was enough.
+    let _stopArmed = null;
+    function disarmStop() {
+        if (_stopArmed) { clearTimeout(_stopArmed); _stopArmed = null; }
+        _el.stop.textContent = 'Stop';
+        _el.stop.classList.remove('is-armed');
+    }
+
     async function stopLayer() {
+        if (!_stopArmed) {
+            _el.stop.textContent = 'Stop the rig?';
+            _el.stop.classList.add('is-armed');
+            _stopArmed = setTimeout(disarmStop, 5000);
+            return;
+        }
+        disarmStop();
         _busy = true; renderDeviceLayer(_last);
         try {
             await post('/api/device-layer/stop', {});
@@ -302,7 +304,11 @@ const RigMenu = (function () {
             .then(s => s && renderDeviceLayer(s))
             .catch(() => {});
 
-        // Ambient readings follow the menu: a closed menu polls nothing.
+        // One read at the start, so the chip carries the water's temperature
+        // before anybody has opened the menu.
+        refreshAmbient();
+
+        // After that the readings follow the menu: a closed menu polls nothing.
         const sync = () => { isOpen() ? startAmbientPoll() : stopAmbientPoll(); };
         _el.chip.addEventListener('click', () => setTimeout(sync, 0));
         document.addEventListener('click', () => setTimeout(sync, 0));
