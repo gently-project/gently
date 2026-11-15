@@ -2039,6 +2039,46 @@ def create_router(server) -> APIRouter:
         return {"success": True, "registered": registered, "labelled": labelled}
 
     @router.post(
+        "/api/devices/embryos/{embryo_id}/align_ab", dependencies=[Depends(require_control)]
+    )
+    async def align_ab(embryo_id: str, payload: dict = Body(default={})):  # noqa: B008
+        """Bring side A and side B onto one another on this embryo.
+
+        Measures how far apart the embryo sits in the two cameras' frames and,
+        unless ``{"move": false}``, moves the stage to close the gap
+        (gently.app.ab_align: what it checks before it moves, and that it puts
+        the stage back when a move does not help). An aligned embryo's XY is
+        then the stage's: "once aligned we update the xy in the embryo xy
+        positions". Refused while a run is going: a run owns the stage.
+        """
+        agent = _require_agent_with_experiment()
+        if embryo_id not in agent.experiment.embryos:
+            raise HTTPException(status_code=404, detail=f"unknown embryo {embryo_id}")
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        orch = getattr(agent, "timelapse_orchestrator", None)
+        if getattr(getattr(orch, "_status", None), "value", None) == "running":
+            raise HTTPException(status_code=409, detail="A run is going. Pause or stop it first.")
+
+        from gently.app.ab_align import align_embryo
+        from gently.app.tools.calibration_tools import persist_calibration
+
+        embryo = agent.experiment.embryos[embryo_id]
+        try:
+            result = await align_embryo(client, embryo, move=payload.get("move") is not False)
+        except Exception as exc:
+            logger.exception("A/B alignment of %s failed", embryo_id)
+            raise HTTPException(status_code=502, detail=f"alignment failed: {exc}") from exc
+        if result.get("aligned") and result.get("moved_um"):
+            at = {"x": float(result["position"]["x"]), "y": float(result["position"]["y"])}
+            embryo.position_coarse = dict(at)
+            embryo.position_fine = dict(at)
+            result["persisted"] = persist_calibration(agent, embryo)
+            agent.experiment.notify_embryos_changed()
+        return result
+
+    @router.post(
         "/api/devices/embryos/{embryo_id}/calibrate",
         dependencies=[Depends(require_control)],
     )

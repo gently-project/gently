@@ -851,6 +851,12 @@
                         {# Only where there is a fit to discard. Two clicks:
                            the numbers it drops cost ~70 exposures to measure. #}
                         <button class="op-btn op-btn-quiet" id="op-cal-clear" type="button" hidden>Clear fit</button>
+                        {# Brings the two views onto one another on the selected
+                           embryo by moving the stage, and writes the stage's
+                           position back as the embryo's. Needs a fit on both
+                           sides and the laser on (gently/app/ab_align.py). #}
+                        <button class="op-btn" id="op-ab-align" type="button"
+                                title="Move the stage until the selected embryo sits at the same place in side A's and side B's frames. Needs a fit on both sides and the laser routed.">Align A and B</button>
                       </div>
                     </div>
                   </div>

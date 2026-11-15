@@ -1940,6 +1940,28 @@ const OperateManager = (function () {
         } catch (e) { toastFail(`Could not open the folder (${why(e)})`); }
     }
 
+    // ── aligning the two sides ──────────────────────────────────────────────
+    // The server measures how far apart the embryo sits in the two cameras'
+    // frames and moves the stage to close it, or says why it will not
+    // (gently/app/ab_align.py). An aligned embryo's XY comes back as the
+    // stage's, with the embryo list.
+    async function alignAB() {
+        if (!_selected) { toastFail('Select an embryo first'); return; }
+        if (!mayTakeFromRun('Aligning the two sides')) return;
+        const b = $('op-ab-align');
+        const was = b ? b.textContent : '';
+        if (b) { b.disabled = true; b.textContent = 'Aligning…'; }
+        try {
+            const d = await postJSON(`/api/devices/embryos/${_selected}/align_ab`, {});
+            (d.ok ? toast : toastFail)(d.says || 'No answer from the alignment');
+            try { onEmbryosUpdate(await getJSON('/api/embryos/current')); } catch (_) { /* the broadcast will */ }
+        } catch (e) {
+            toastFail(`Not aligned (${why(e)})`);
+        } finally {
+            if (b) { b.disabled = false; b.textContent = was; }
+        }
+    }
+
     // ── borrowing a fit ─────────────────────────────────────────────────────
     // Named, not generic: an operator about to copy numbers onto a live embryo
     // should see whose numbers and how good they are before pressing anything.
@@ -4625,6 +4647,8 @@ const OperateManager = (function () {
             const b = e.target.closest('[data-cal-img]');
             if (b) openCalImage(Number(b.dataset.calImg));
         });
+        const abAlign = $('op-ab-align');
+        if (abAlign) abAlign.addEventListener('click', alignAB);
         const keptOpen = $('op-cal-kept-open');
         if (keptOpen) keptOpen.addEventListener('click', openCalFolder);
         // From what the last run kept to every run and every raw exposure.

@@ -121,7 +121,7 @@ def test_a_calibration_asks_however_it_is_asked_for() -> None:
 
 def test_nothing_that_stops_or_holds_the_rig_is_asked_about() -> None:
     callers = re.findall(r"mayTakeFromRun\('([^']+)'", OPERATE)
-    assert len(callers) == 8, callers
+    assert len(callers) == 9, callers
     for what in callers:
         assert not re.search(r"halt|stop|pause", what, re.I), what
     # HALT does not pass through the question, and neither does anything
