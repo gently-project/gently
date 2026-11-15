@@ -62,11 +62,16 @@ CONTROLS = {
     "op-clear": "$('op-clear')",
     "op-cam-toggle": "$('op-cam-toggle')",
     "op-target-scope": "$('op-target-scope')",
-    "op-gv-in": "$('op-gv-in')",
-    "op-pz-in": "$('op-pz-in')",
-    # The same two numbers, typed (panels/numrow.js binds each to its line).
-    "op-gv": "$('op-gv')",
-    "op-pz": "$('op-pz')",
+    # Both sheets' two axes, each a line and the same number typed
+    # (panels/numrow.js binds each to its line), bound for side A and side B.
+    "op-gv-{a,b}-in": "$(`op-gv-${k}-in`)",
+    "op-pz-{a,b}-in": "$(`op-pz-${k}-in`)",
+    "op-gv-{a,b}": "$(`op-gv-${k}`)",
+    "op-pz-{a,b}": "$(`op-pz-${k}`)",
+    # A side's name puts it on screen; the embryos a walk calibrates.
+    "[data-sheet-view]": "[data-sheet-view]",
+    "[data-pick-set]": "[data-pick-set]",
+    "op-cal-pick": "$('op-cal-pick')",
     # The head, to a typed height.
     "op-fd-go": "$('op-fd-go')",
     "op-fd-goto": "$('op-fd-goto')",

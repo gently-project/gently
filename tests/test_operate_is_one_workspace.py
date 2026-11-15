@@ -171,10 +171,13 @@ def test_no_control_is_switched_off_by_which_surface_is_up() -> None:
     for line in code.splitlines():
         if "_pane" in line:
             assert "disabled" not in line, line.strip()
-    axis = _fn(OPERATE, "    function renderAxis(id, row, ext, v, off) {")
+    axis = _fn(OPERATE, "    function renderAxis(id, row, ext, v, unknown) {")
     assert "_pane" not in axis
+    # Nor by which side is on screen: a sheet's line is how its side is
+    # brought there, so it is never off.
+    assert "const off = false;" in axis
     pose = _fn(OPERATE, "    function renderPose() {")
-    assert "const multi = _side === 'Multi';" in pose and "_pane" not in pose
+    assert "['A', 'B'].forEach(side => {" in pose and "_pane" not in pose
 
 
 def test_scope_in_the_toolbar_comes_back_to_the_camera_it_last_showed() -> None:

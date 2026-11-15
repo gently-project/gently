@@ -183,3 +183,14 @@ def test_the_chip_has_one_writer_and_the_menu_says_what_was_read():
     assert (
         ".rig-btn-stop:not(:disabled) {" in css and ".rig-btn-stop.is-armed:not(:disabled) {" in css
     )
+
+
+def test_halt_is_in_the_menu_and_so_on_every_tab():
+    """HALT was on Scope only. It also puts the light out now, and what it
+    stops may have been started from any tab."""
+    header = (WEB / "templates" / "_header.html").read_text(encoding="utf-8")
+    menu = header[header.index('id="status-popover"') :]
+    assert menu.index('id="rig-halt"') < menu.index('id="rig-dl-start"')
+    js = RIG_JS.read_text(encoding="utf-8")
+    assert "post('/api/devices/motion/halt', {})" in js
+    assert "did NOT stop" in js  # a refusal names what is still moving or lit

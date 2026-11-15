@@ -2779,3 +2779,42 @@ details.op-calfit-opts[open] > summary { margin-bottom: 8px; }
 details.op-calfit-opts .cal-opts, details.op-calfit-opts .op-actions { flex-wrap: wrap; }
 details.op-calfit-opts .cal-says { margin-left: 0; }
 details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
+
+/* ── Sheets: both sides, each with its two axes ─────────────────────────── */
+.op-sheet-side { padding: 4px 0 2px; border-top: 1px solid var(--op-rule2); }
+.op-sheet-side:first-of-type { border-top: 0; }
+.op-sheet-who {
+    display: flex; align-items: baseline; gap: 7px; width: 100%; padding: 2px 0 3px;
+    border: 0; background: none; cursor: pointer; text-align: left; font: 12px var(--op-ui); color: var(--op-ink-dim);
+}
+.op-sheet-who b { font: 600 13px var(--op-mono); color: var(--op-ink); min-width: 12px; }
+.op-sheet-who span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-sheet-who:hover span { color: var(--op-ink); }
+.op-sheet-who:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.op-sheet-on { display: none; font-style: normal; font-size: 11px; color: var(--accent); }
+.op-sheet-side.is-on .op-sheet-on { display: inline; }
+.op-sheet-side.is-on .op-sheet-who b { color: var(--accent); }
+/* A sheet this page has not read yet: its line is there to be moved, dimmed. */
+.op-range.is-unknown { opacity: 0.45; }
+
+/* ── Calibration: a panel of its own ─────────────────────────────────────── */
+.op-calib-fits { display: grid; grid-template-columns: 1fr; gap: 3px; margin: 2px 0 6px; }
+.op-calib-fits:empty { display: none; }
+.op-calib-fit { display: flex; align-items: baseline; gap: 7px; padding: 4px 7px; border: 1px solid var(--op-rule2); border-radius: 4px; min-width: 0; }
+.op-calib-fit b { font: 600 12px var(--op-mono); color: var(--op-ink-dim); }
+.op-calib-fit span { font: 12px var(--op-mono); color: var(--op-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-calib-fit.is-none span { color: var(--op-ink-dim); font-family: var(--op-ui); }
+#op-calib .op-fitrow { gap: 6px; align-items: center; }
+#op-calib .op-fitrow .cal-opt { margin-right: auto; }
+#op-calib .op-fit-says { display: block; margin: 4px 0 2px; min-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#op-calib details.op-calfit-opts > summary em { margin-left: 4px; }
+.op-cal-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; margin: 2px 0 6px; }
+.op-cal-pick-row { display: flex; align-items: center; gap: 6px; font: 12px var(--op-ui); color: var(--op-ink); cursor: pointer; min-width: 0; }
+.op-cal-pick-row span:first-of-type { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.op-cal-pick-fits i { font: 600 11px var(--op-mono); font-style: normal; margin-left: 3px; }
+.op-cal-pick-fits .is-fit { color: var(--accent-green, #3fb950); }
+.op-cal-pick-fits .is-none { color: var(--op-ink-dim); opacity: 0.6; text-decoration: line-through; }
+.op-cal-pick-quick { gap: 6px; margin-bottom: 6px; }
+.op-cal-then-align { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.op-cal-then-align input:disabled + .op-label { opacity: 0.5; }
+#op-calib .cal-align { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--op-rule2); align-items: center; gap: 8px; }

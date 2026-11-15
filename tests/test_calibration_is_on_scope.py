@@ -43,6 +43,8 @@ SHEET = SCOPE[
         '<div class="op-inst-col">', SCOPE.index('id="op-sheet"')
     )
 ]
+CALIB = SCOPE[SCOPE.index('id="op-calib"') :]
+CALIB = CALIB[: CALIB.index('<div class="op-inst-col">')]
 FIT = SCOPE[SCOPE.index('id="op-cam-cal"') : SCOPE.index('<div class="op-bar">')]
 OPTIONS = SCOPE[SCOPE.index('id="op-display-cal"') :]
 OPTIONS = OPTIONS[: OPTIONS.index("</details>")]
@@ -96,7 +98,7 @@ def test_the_step_has_a_name_on_screen() -> None:
     assert "fit" not in re.findall(r'data-source="(\w+)"', strip)
     row = SCOPE[SCOPE.index('class="op-row op-fitrow"') :][:1400]
     assert 'id="op-fit-show" data-source="fit"' in row
-    assert row.index('id="op-fit-show"') < row.index('id="op-calibrate"')
+    assert row.index('id="op-calibrate"') < row.index('id="op-fit-show"')
     assert OPERATE.count("'#op-source [data-source], #op-fit-show'") == 2
     choose = _fn("    function chooseSource(src) {")
     # A toggle: pressed with the graphs up, back to the camera before them.
@@ -111,16 +113,64 @@ def test_the_step_has_a_name_on_screen() -> None:
 # ── the Sheet panel's row ─────────────────────────────────────────────────
 
 
-def test_the_verb_sits_with_its_result_in_the_sheet_panel() -> None:
+def test_the_sheets_panel_shows_both_sides() -> None:
+    """The rig has two views, and the panel showed whichever one the camera
+    strip was on. Each side has its galvo and its piezo, always."""
+    sheet = SHEET[: SHEET.index('id="op-calib"')]
+    for side in ("a", "b"):
+        for part in (f'id="op-gv-{side}-in"', f'id="op-gv-{side}"', f'id="op-pz-{side}-in"'):
+            assert part in sheet, part
+    assert sheet.index('data-side="A"') < sheet.index('data-side="B"')
+    assert 'id="op-gv-in"' not in INDEX and 'id="op-pz"' not in INDEX
+    # No fit and no verb in it: those are the Calibration panel's.
+    assert 'id="op-calibrate"' not in sheet and 'id="op-cal-result"' not in sheet
+    # Moving a side's sheet puts that side on screen, and tells the device layer.
+    move = _fn("    function setAxis(side, key, v) {")
+    assert "if (_side !== side) setSpimSide(side);" in move and "postLsParams();" in move
+    # A side not yet read shows no number, and can still be moved.
+    assert (
+        "renderAxis(`op-gv-${k}`, _axisRow[side].galvo, r.galvo, p.galvo, !_poseKnown[side]);"
+        in OPERATE
+    )
+
+
+def test_calibration_is_a_panel_of_its_own_under_the_sheets() -> None:
     """#108's other half: "its result appeared in another tab; the control
-    belonged with the result". They are one row, with the sheet the fit is of."""
-    row = SHEET[SHEET.index('class="op-row op-fitrow"') :]
-    row = row[: row.index("</div>")]
-    for part in ('id="op-cal-result"', 'id="op-calibrate"', 'id="op-cal-abort"'):
-        assert part in row, part
-    assert SHEET.index('id="op-pz"') < SHEET.index('class="op-row op-fitrow"')
+    belonged with the result". The fit of each side, the verb, its graphs and
+    its settings are one panel."""
+    assert SCOPE.index('id="op-sheet"') < SCOPE.index('id="op-calib"')
+    for part in (
+        'id="op-cal-fits"',
+        'id="cal-side"',
+        'id="op-calibrate"',
+        'id="op-cal-abort"',
+        'id="op-fit-show"',
+        'id="op-cal-result"',
+        'id="op-ab-align"',
+    ):
+        assert part in CALIB, part
     # Abort is there only while a calibration runs.
-    assert re.search(r'id="op-cal-abort"[^>]* hidden>', row)
+    assert re.search(r'id="op-cal-abort"[^>]* hidden>', CALIB)
+    # Both sides' fits, always, from what the page already holds.
+    fits = _fn("    function renderFits(emb) {")
+    assert "[['A', cal], ['B', cal.B]]" in fits and "'no fit'" in fits
+    assert "fetch(" not in fits and "getJSON(" not in fits
+
+
+def test_several_embryos_can_be_chosen_and_calibrated_in_one_go() -> None:
+    """The walk a person did by selecting each embryo and pressing Calibrate."""
+    several = CALIB[CALIB.index('id="op-cal-several"') :]
+    several = several[: several.index("</details>")]
+    for part in ('id="op-cal-pick"', 'data-pick-set="unfitted"', 'id="op-cal-then-align"'):
+        assert part in several, part
+    assert 'id="op-cal-all"' in several
+    walk = _fn("    async function calibrateAll() {")
+    assert "Object.assign({ embryo_ids: ids, align }, calibrationSettings())" in walk
+    assert "(d.why || {})[id]" in walk  # each failure with its reason
+    # Aligning needs both sides asked for.
+    assert "align.disabled = _calSide !== 'AB';" in OPERATE
+    # Until somebody chooses, the ones with no fit on the side asked for.
+    assert "all.filter(lacksAFit).forEach(e => _calPick.add(e.id));" in OPERATE
 
 
 def test_the_row_is_on_screen_with_any_camera() -> None:
@@ -130,9 +180,9 @@ def test_the_row_is_on_screen_with_any_camera() -> None:
     row = _fn("    function renderFitRow() {")
     assert "fetch(" not in row and "getJSON(" not in row
     assert "fitted ? 'Recalibrate' : 'Calibrate'" in row
-    # The fit of the side chosen under Fit: each side has its own.
+    # The fit of the side chosen: each side has its own.
     assert "const c = sideFit(emb);" in row
-    assert "'no embryo selected'" in row and "not calibrated" in row
+    assert "renderFits(emb);" in row
 
 
 def test_pressing_it_brings_up_what_it_looks_at() -> None:
@@ -163,20 +213,16 @@ def test_the_fit_view_holds_what_a_run_looks_at() -> None:
     assert 'data-src="cal" hidden' in FIT[:200]
 
 
-def test_all_of_calibration_is_in_the_sheets_panel() -> None:
-    """It was two panels: the fit and Calibrate in Sheet, and the settings,
-    the other verbs and Align under the frame, shown only with the graphs
-    up. They are one, folded under the fit in the Sheet panel, and there
-    whichever camera is on screen."""
-    assert '<details class="op-calfit-opts" id="op-display-cal">' in SHEET
-    assert SHEET.index('id="op-calibrate"') < SHEET.index('id="op-display-cal"')
-    assert 'data-src="cal"' not in SHEET
-    # The settings More... opens are with the row that opens them.
+def test_the_settings_are_folded_under_the_verb() -> None:
+    """Method, depth, what More... opens, borrowing and clearing: folded in
+    the Calibration panel, there whichever camera is on screen."""
+    assert '<details class="op-calfit-opts" id="op-display-cal">' in CALIB
+    assert CALIB.index('id="op-calibrate"') < CALIB.index('id="op-display-cal"')
+    assert 'data-src="cal"' not in CALIB
     assert 'id="cal-adv"' in OPTIONS and 'id="cal-adv"' not in FIT
     for part in ('id="cal-method"', 'id="cal-zbuf"', 'id="cal-more"'):
         assert part in OPTIONS, part
-    # The three verbs that are not Calibrate.
-    for part in ('id="op-cal-borrow"', 'id="op-cal-all"', 'id="op-cal-clear"'):
+    for part in ('id="op-cal-borrow"', 'id="op-cal-clear"'):
         assert part in OPTIONS, part
     assert 'id="op-calibrate"' not in OPTIONS
 
@@ -194,17 +240,13 @@ def test_the_instrument_does_not_move_when_fit_is_chosen() -> None:
     ) in box
 
 
-def test_the_settings_say_what_they_are_and_align_is_not_one_more_fit() -> None:
-    """ "not clear Align A and B feature being present in the embryo calibration
-    feature -- especially the embryo calibration stuff is not clearly stated".
-    One unlabelled row held the fit's settings, the other ways to a fit, and a
-    stage move."""
-    assert OPTIONS.index(">Measure<") < OPTIONS.index(">Or<") < OPTIONS.index(">Align views<")
-    assert "<summary>Calibration settings <em>and aligning the two views</em></summary>" in OPTIONS
-    assert 'class="op-actions cal-align"' in OPTIONS
-    assert "saves that as its position" in OPTIONS
+def test_align_is_a_stage_move_set_apart_and_both_sides_is_one_press() -> None:
+    """Align is not one more way to a fit: it is on a line of its own in the
+    Calibration panel and says it is a stage move."""
+    assert 'class="op-actions cal-align"' in CALIB and "a stage move" in CALIB
+    assert CALIB.index('id="op-cal-several"') < CALIB.index('id="op-ab-align"')
     # Both sides in one press, for a script as much as for a person.
-    assert '<option value="AB"' in OPTIONS and "A then B" in OPTIONS
+    assert '<option value="AB"' in CALIB and "A then B" in CALIB
     assert "if (_calSide === 'AB') body.side = 'both';" in OPERATE
 
 

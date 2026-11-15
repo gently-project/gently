@@ -2038,6 +2038,93 @@ def create_router(server) -> APIRouter:
         labelled = _persist_detection_labels(agent, payload, markers)
         return {"success": True, "registered": registered, "labelled": labelled}
 
+    def _no_run_is_going(agent, what: str) -> None:
+        """A run owns the stage, the lasers and the cameras. Calibrating or
+        aligning under it interleaves two embryos' work through one client."""
+        orch = getattr(agent, "timelapse_orchestrator", None)
+        if getattr(getattr(orch, "_status", None), "value", None) == "running":
+            raise HTTPException(
+                status_code=409, detail=f"A run is going. Pause or stop it to {what}."
+            )
+
+    async def _fit_side(agent, client, embryo_id: str, payload: dict) -> str:
+        """One embryo, one side: the agent's calibrate_embryo tool, run through
+        the registry so the context is injected as the agent's own call does.
+        Raises the HTTP error the pane reads: 502 a failure, 409 a refusal."""
+        import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
+        from gently.app.tools.calibration_tools import NO_OBJECT_PREFIX
+        from gently.harness.tools.registry import get_tool_registry
+
+        args: dict = {"embryo_id": embryo_id, **_calibration_args(payload)}
+        # Pre-flight object check, on unless the operator says otherwise. The
+        # pane sends require_object=false only after seeing the refusal and the
+        # frames behind it.
+        if payload.get("require_object") is not None:
+            args["require_object"] = bool(payload["require_object"])
+        try:
+            message = await get_tool_registry().execute(
+                "calibrate_embryo", args, {"agent": agent, "client": client}
+            )
+        except Exception as exc:
+            logger.exception("Calibration failed for %s", embryo_id)
+            raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
+        if isinstance(message, str) and message.startswith("Error"):
+            raise HTTPException(status_code=502, detail=message)
+        # "Nothing is there" is a refusal, not a failure: the run was declined
+        # after one frame, nothing is broken, and the operator can override it.
+        # 409 so the pane can tell those apart: a 502 would read as a crash.
+        if isinstance(message, str) and message.startswith(NO_OBJECT_PREFIX):
+            raise HTTPException(status_code=409, detail=message)
+        return str(message)
+
+    def _sides_asked(payload: dict) -> tuple[str, ...]:
+        side = str(payload.get("side") or "A").lower()
+        return ("A", "B") if side in ("both", "ab") else (("B",) if side == "b" else ("A",))
+
+    async def _fit(agent, client, embryo_id: str, payload: dict) -> dict:
+        """One embryo, the side asked for or both. Both is A, then B, each as
+        it would run alone; side B is the scan routine's, and so is both."""
+        sides = _sides_asked(payload)
+        if len(sides) == 1:
+            return {"message": await _fit_side(agent, client, embryo_id, payload)}
+        fits: dict[str, str] = {}
+        for side in sides:
+            try:
+                fits[side] = await _fit_side(
+                    agent, client, embryo_id, {**payload, "side": side, "method": "scan"}
+                )
+            except HTTPException as exc:
+                # The reason first, as for one side; then which side, and
+                # what was already found and kept.
+                kept = "; side A calibrated and kept" if fits else ""
+                raise HTTPException(
+                    status_code=exc.status_code, detail=f"{exc.detail} (side {side}{kept})"
+                ) from None
+        return {
+            "message": " | ".join(f"side {s}: {m}" for s, m in fits.items()),
+            "sides": fits,
+        }
+
+    async def _align(agent, client, embryo_id: str, move: bool = True) -> dict:
+        """Bring the two views onto one another on this embryo, and write the
+        stage's position back as the embryo's when it moved."""
+        from gently.app.ab_align import align_embryo
+        from gently.app.tools.calibration_tools import persist_calibration
+
+        embryo = agent.experiment.embryos[embryo_id]
+        try:
+            result = await align_embryo(client, embryo, move=move)
+        except Exception as exc:
+            logger.exception("A/B alignment of %s failed", embryo_id)
+            raise HTTPException(status_code=502, detail=f"alignment failed: {exc}") from exc
+        if result.get("aligned") and result.get("moved_um"):
+            at = {"x": float(result["position"]["x"]), "y": float(result["position"]["y"])}
+            embryo.position_coarse = dict(at)
+            embryo.position_fine = dict(at)
+            result["persisted"] = persist_calibration(agent, embryo)
+            agent.experiment.notify_embryos_changed()
+        return result
+
     @router.post(
         "/api/devices/embryos/{embryo_id}/align_ab", dependencies=[Depends(require_control)]
     )
@@ -2057,26 +2144,8 @@ def create_router(server) -> APIRouter:
         client = _resolve_client()
         if client is None or not getattr(client, "is_connected", False):
             raise HTTPException(status_code=503, detail="Microscope not connected")
-        orch = getattr(agent, "timelapse_orchestrator", None)
-        if getattr(getattr(orch, "_status", None), "value", None) == "running":
-            raise HTTPException(status_code=409, detail="A run is going. Pause or stop it first.")
-
-        from gently.app.ab_align import align_embryo
-        from gently.app.tools.calibration_tools import persist_calibration
-
-        embryo = agent.experiment.embryos[embryo_id]
-        try:
-            result = await align_embryo(client, embryo, move=payload.get("move") is not False)
-        except Exception as exc:
-            logger.exception("A/B alignment of %s failed", embryo_id)
-            raise HTTPException(status_code=502, detail=f"alignment failed: {exc}") from exc
-        if result.get("aligned") and result.get("moved_um"):
-            at = {"x": float(result["position"]["x"]), "y": float(result["position"]["y"])}
-            embryo.position_coarse = dict(at)
-            embryo.position_fine = dict(at)
-            result["persisted"] = persist_calibration(agent, embryo)
-            agent.experiment.notify_embryos_changed()
-        return result
+        _no_run_is_going(agent, "align the views")
+        return await _align(agent, client, embryo_id, move=payload.get("move") is not False)
 
     @router.post(
         "/api/devices/embryos/{embryo_id}/calibrate",
@@ -2100,54 +2169,10 @@ def create_router(server) -> APIRouter:
         if client is None or not getattr(client, "is_connected", False):
             raise HTTPException(status_code=503, detail="Microscope not connected")
 
-        # Both sides in one request: A, then B, each as it would be alone
-        # ("there should be an option to find both sides fitting": two presses
-        # with a select turned between them is not something a script or a
-        # batch can lean on). Side B is the scan routine's; so is this.
-        if str(payload.get("side") or "").lower() in ("both", "ab"):
-            fits: dict[str, str] = {}
-            last: dict = {}
-            for side in ("A", "B"):
-                try:
-                    last = await calibrate_embryo_route(
-                        embryo_id, {**payload, "side": side, "method": "scan"}
-                    )
-                except HTTPException as exc:
-                    # The reason first, as for one side; then which side, and
-                    # what was already found and kept.
-                    kept = "; side A calibrated and kept" if fits else ""
-                    raise HTTPException(
-                        status_code=exc.status_code, detail=f"{exc.detail} (side {side}{kept})"
-                    ) from None
-                fits[side] = str(last.get("message") or "")
-            return {
-                "success": True,
-                "message": " | ".join(f"side {s}: {m}" for s, m in fits.items()),
-                "sides": fits,
-                "calibration": last.get("calibration") or {},
-            }
-
-        # Ensure the calibration tools are registered on the global registry,
-        # then run via the registry so context (agent/client) is injected the
-        # same way the agent invokes it. Calling the @tool wrapper directly would
-        # drop the positional embryo_id.
-        import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
-        from gently.app.tools.calibration_tools import NO_OBJECT_PREFIX
-        from gently.harness.tools.registry import get_tool_registry
-
-        args: dict = {"embryo_id": embryo_id, **_calibration_args(payload)}
-        # Pre-flight object check, on unless the operator says otherwise. The
-        # pane sends require_object=false only after seeing the refusal and the
-        # frames behind it.
-        if payload.get("require_object") is not None:
-            args["require_object"] = bool(payload["require_object"])
-
-        registry = get_tool_registry()
+        _no_run_is_going(agent, "calibrate")
         try:
-            message = await _run_cancellable_calibration(
-                agent,
-                registry.execute("calibrate_embryo", args, {"agent": agent, "client": client}),
-                embryo_id,
+            out = await _run_cancellable_calibration(
+                agent, _fit(agent, client, embryo_id, payload), embryo_id
             )
         except CalibrationAborted:
             # 409, like the pre-flight refusal: nothing is broken, the operator
@@ -2155,21 +2180,10 @@ def create_router(server) -> APIRouter:
             raise HTTPException(
                 status_code=409, detail=f"Calibration of {embryo_id} aborted by operator"
             ) from None
-        except Exception as exc:
-            logger.exception("Calibration failed for %s", embryo_id)
-            raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
-        if isinstance(message, str) and message.startswith("Error"):
-            raise HTTPException(status_code=502, detail=message)
-        # "Nothing is there" is a refusal, not a failure: the run was declined
-        # after one frame, nothing is broken, and the operator can override it.
-        # 409 so the pane can tell those apart — a 502 would read as a crash.
-        if isinstance(message, str) and message.startswith(NO_OBJECT_PREFIX):
-            raise HTTPException(status_code=409, detail=message)
-
         emb = agent.experiment.embryos.get(embryo_id)
         calibration = dict(getattr(emb, "calibration", {}) or {}) if emb else {}
         agent.experiment.notify_embryos_changed()
-        return {"success": True, "message": message, "calibration": calibration}
+        return {"success": True, **out, "calibration": calibration}
 
     @router.get("/api/devices/spim/alignment")
     async def get_spim_alignment():
@@ -2281,34 +2295,49 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/calibrate/all", dependencies=[Depends(require_control)])
     async def calibrate_all_route(payload: dict = Body(default={})):  # noqa: B008
-        """Calibrate several embryos in one go. Body: {scope, ...cal settings}.
+        """Calibrate several embryos in one go, one after another.
 
-        `scope` is "uncalibrated" (the default) or "all"; an explicit
-        `embryo_ids` list overrides both.
+        Body: the calibration settings, and
+        - ``embryo_ids``: the embryos, in the order given. Without it, ``scope``
+          chooses: "uncalibrated" (the default) or "all".
+        - ``side``: "A" (the default), "B" or "both".
+        - ``align``: true to bring the two views onto one another on each
+          embryo once it has a fit on both sides, and fit it again where the
+          stage moved for that: the fit is of where the embryo is.
 
-        The default is deliberate. The underlying tool, called with no ids,
-        takes `list(experiment.embryos.keys())` — every embryo, including the
-        ones already calibrated and the ones marked skip. Each of those is
-        sixty to eighty exposures of laser on a live sample, so "calibrate
-        all" as written re-burns dose on embryos that need nothing. This route
-        resolves the list itself and defaults to the embryos that actually
-        lack a fit.
+        The default scope is deliberate: each calibration is sixty to eighty
+        exposures of laser on a live sample, and "all" would spend that on
+        embryos that need nothing. An embryo that fails does not stop the
+        rest; the reply says which failed and why. An abort stops the walk.
         """
-        import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
-        from gently.harness.tools.registry import get_tool_registry
-
         agent = _require_agent_with_experiment()
         client = _resolve_client()
         if client is None or not getattr(client, "is_connected", False):
             raise HTTPException(status_code=503, detail="Microscope not connected")
+        _no_run_is_going(agent, "calibrate")
 
         embryos = agent.experiment.embryos
+        sides = _sides_asked(payload)
+        align = bool(payload.get("align"))
+        if align and sides != ("A", "B"):
+            raise HTTPException(
+                status_code=400, detail="Aligning the views needs a fit on both: side must be both"
+            )
+
+        def lacks_a_fit(emb) -> bool:
+            cal = emb.calibration or {}
+            have = {
+                "A": cal.get("slope_um_per_deg"),
+                "B": (cal.get("B") or {}).get("slope_um_per_deg"),
+            }
+            return any(not have[s] for s in sides)
+
         requested = payload.get("embryo_ids")
         if requested:
             unknown = [eid for eid in requested if eid not in embryos]
             if unknown:
                 raise HTTPException(status_code=404, detail=f"unknown embryos: {unknown}")
-            targets = list(requested)
+            targets = list(dict.fromkeys(requested))
         else:
             scope = str(payload.get("scope") or "uncalibrated")
             if scope not in ("uncalibrated", "all"):
@@ -2316,42 +2345,52 @@ def create_router(server) -> APIRouter:
             targets = [
                 eid
                 for eid, emb in embryos.items()
-                if not emb.should_skip
-                and (scope == "all" or not (emb.calibration or {}).get("slope_um_per_deg"))
+                if not emb.should_skip and (scope == "all" or lacks_a_fit(emb))
             ]
         if not targets:
             raise HTTPException(status_code=409, detail="No embryos need calibrating")
 
-        args = {"embryo_ids": targets, **_calibration_args(payload)}
-        registry = get_tool_registry()
-        try:
-            message = await _run_cancellable_calibration(
-                agent,
-                registry.execute("calibrate_all_embryos", args, {"agent": agent, "client": client}),
-                "all",
-            )
-        except CalibrationAborted:
-            raise HTTPException(status_code=409, detail="Calibration aborted by operator") from None
-        except Exception as exc:
-            logger.exception("Batch calibration failed")
-            raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
-        if isinstance(message, str) and message.startswith("Error"):
-            raise HTTPException(status_code=502, detail=message)
+        settings = {k: v for k, v in payload.items() if k not in ("embryo_ids", "scope", "align")}
+        calibrated: list[str] = []
+        aligned: dict[str, dict] = {}
+        why: dict[str, str] = {}
 
-        calibrated = [
-            eid
-            for eid in targets
-            if (getattr(embryos.get(eid), "calibration", {}) or {}).get("slope_um_per_deg")
-        ]
-        agent.experiment.notify_embryos_changed()
+        async def walk() -> None:
+            for eid in targets:
+                try:
+                    await _fit(agent, client, eid, settings)
+                    if align:
+                        result = await _align(agent, client, eid)
+                        aligned[eid] = {
+                            k: result.get(k) for k in ("aligned", "moved_um", "gap_um", "reason")
+                        }
+                        if result.get("aligned") and result.get("moved_um"):
+                            await _fit(agent, client, eid, settings)
+                    calibrated.append(eid)
+                except HTTPException as exc:
+                    why[eid] = str(exc.detail)
+                agent.experiment.notify_embryos_changed()
+
+        try:
+            await _run_cancellable_calibration(agent, walk(), "all")
+        except CalibrationAborted:
+            done = f" after {', '.join(calibrated)}" if calibrated else ""
+            raise HTTPException(
+                status_code=409, detail=f"Calibration aborted by operator{done}"
+            ) from None
+
         # Which ones FAILED is the part an operator acts on, so it is reported
-        # rather than buried in the tool's prose.
+        # with its reason rather than buried in prose.
         return {
             "success": True,
             "attempted": targets,
             "calibrated": calibrated,
             "failed": [eid for eid in targets if eid not in calibrated],
-            "message": message,
+            "why": why,
+            "aligned": aligned,
+            "sides": list(sides),
+            "message": f"{len(calibrated)} of {len(targets)} calibrated"
+            + (f"; {len(why)} failed" if why else ""),
         }
 
     @router.delete(
