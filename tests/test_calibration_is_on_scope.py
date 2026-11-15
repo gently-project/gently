@@ -44,7 +44,8 @@ SHEET = SCOPE[
     )
 ]
 FIT = SCOPE[SCOPE.index('id="op-cam-cal"') : SCOPE.index('<div class="op-bar">')]
-OPTIONS = SCOPE[SCOPE.index('id="op-display-cal"') : SCOPE.index('<aside class="op-inst"')]
+OPTIONS = SCOPE[SCOPE.index('id="op-display-cal"') :]
+OPTIONS = OPTIONS[: OPTIONS.index("</details>")]
 
 
 def _fn(head: str) -> str:
@@ -154,7 +155,6 @@ def test_the_fit_view_holds_what_a_run_looks_at() -> None:
         'id="op-preview"',
         'id="op-cal-kept"',  # what the last run kept
         'id="op-cal-kept-all"',  # and the way to every run: the archive
-        'id="cal-adv"',  # the settings behind More…
     ):
         assert part in FIT, part
     # Kesavan on the walkthrough: "it should show what is the method it is
@@ -163,8 +163,16 @@ def test_the_fit_view_holds_what_a_run_looks_at() -> None:
     assert 'data-src="cal" hidden' in FIT[:200]
 
 
-def test_how_it_is_done_is_under_the_picture_in_displays_place() -> None:
-    assert 'class="op-panel op-block-display op-calfit-opts" id="op-display-cal"' in SCOPE
+def test_all_of_calibration_is_in_the_sheets_panel() -> None:
+    """It was two panels: the fit and Calibrate in Sheet, and the settings,
+    the other verbs and Align under the frame, shown only with the graphs
+    up. They are one, folded under the fit in the Sheet panel, and there
+    whichever camera is on screen."""
+    assert '<details class="op-calfit-opts" id="op-display-cal">' in SHEET
+    assert SHEET.index('id="op-calibrate"') < SHEET.index('id="op-display-cal"')
+    assert 'data-src="cal"' not in SHEET
+    # The settings More... opens are with the row that opens them.
+    assert 'id="cal-adv"' in OPTIONS and 'id="cal-adv"' not in FIT
     for part in ('id="cal-method"', 'id="cal-zbuf"', 'id="cal-more"'):
         assert part in OPTIONS, part
     # The three verbs that are not Calibrate.
@@ -192,7 +200,7 @@ def test_the_settings_say_what_they_are_and_align_is_not_one_more_fit() -> None:
     One unlabelled row held the fit's settings, the other ways to a fit, and a
     stage move."""
     assert OPTIONS.index(">Measure<") < OPTIONS.index(">Or<") < OPTIONS.index(">Align views<")
-    assert '<h3 class="op-panel-name">Calibration <em>of the selected embryo</em></h3>' in OPTIONS
+    assert "<summary>Calibration settings <em>and aligning the two views</em></summary>" in OPTIONS
     assert 'class="op-actions cal-align"' in OPTIONS
     assert "saves that as its position" in OPTIONS
     # Both sides in one press, for a script as much as for a person.
