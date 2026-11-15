@@ -962,12 +962,15 @@ def create_router(server) -> APIRouter:
         Non-blocking: the controller ramps and the status poll reflects progress
         (and the SYSTEM LOCKED state once it stabilizes).
         """
+        from gently.settings import WATER_SETPOINT_C
+
         try:
             target = float(payload.get("target_c"))  # type: ignore[arg-type]  # None -> caught
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="target_c must be a number") from None
-        if not (0.0 <= target <= 99.9):
-            raise HTTPException(status_code=400, detail="target_c must be between 0.0 and 99.9 C")
+        lo, hi = WATER_SETPOINT_C
+        if not (lo <= target <= hi):
+            raise HTTPException(status_code=400, detail=f"target_c must be between {lo} and {hi} C")
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")

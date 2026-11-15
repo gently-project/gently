@@ -227,3 +227,9 @@ class Settings:
 
 # Singleton — import this everywhere
 settings = Settings()
+
+
+# What the water may be set to with a sample in it, in degrees C. The
+# controller takes 0 to 99.9; a sample does not. One number for the page's
+# route and the device layer, which each checked a range of their own.
+WATER_SETPOINT_C = (4.0, 40.0)

@@ -247,7 +247,7 @@ const RigMenu = (function () {
         const v = parseFloat(_el.tempInput.value);
         if (!Number.isFinite(v)) { say('Enter a target temperature', true); return; }
         try {
-            await post('/api/devices/temperature/set', { temperature_c: v });
+            await post('/api/devices/temperature/set', { target_c: v });
             say('Water target set to ' + v.toFixed(1) + '°');
             refreshAmbient();
         } catch (e) { say('Could not set the temperature (' + e.message + ')', true); }

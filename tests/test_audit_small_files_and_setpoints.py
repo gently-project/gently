@@ -124,3 +124,20 @@ def test_the_inbox_is_built_off_the_event_loop():
     src = (REPO / "gently/ui/web/routes/inbox.py").read_text(encoding="utf-8")
     assert src.count("await asyncio.to_thread(inbox_for, store, cs, me)") == 2
     assert "@one_writer\ndef mark_seen(" in src
+
+
+def test_the_page_and_the_device_layer_bound_the_water_by_one_number():
+    """The page's route kept its own 0 to 99.9 after the device layer was
+    bounded, and the rig menu's Apply sent a field the route does not read:
+    it had never set the water."""
+    from gently import settings as settings_module
+    from gently.hardware.dispim import device_layer
+
+    assert device_layer.TEMPERATURE_SETPOINT_C is settings_module.WATER_SETPOINT_C
+    route = (REPO / "gently/ui/web/routes/data.py").read_text(encoding="utf-8")
+    assert (
+        "lo, hi = WATER_SETPOINT_C" in route
+        and "99.9" not in route[route.index('"/api/devices/temperature/set"') :][:1200]
+    )
+    menu = (REPO / "gently/ui/web/static/js/rig-menu.js").read_text(encoding="utf-8")
+    assert "{ target_c: v }" in menu and "temperature_c: v" not in menu
