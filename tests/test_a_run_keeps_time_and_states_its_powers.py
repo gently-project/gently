@@ -12,7 +12,7 @@ line the plan gives no power runs at whatever it was last set to by hand.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -115,3 +115,44 @@ def test_a_run_is_not_started_on_a_power_nobody_chose():
     route = (REPO / "gently/ui/web/routes/data.py").read_text(encoding="utf-8")
     start = route[route.index("    async def timelapse_start(") :]
     assert start.index('"left_high_by_hand"') < start.index("await orchestrator.start(")
+
+
+def test_utc_is_read_from_the_clock_or_the_instrument_not_worked_back(tmp_path):
+    """A local time in the hour the clocks go back cannot be worked back to
+    UTC for certain. A stack's UTC time is the instrument's own moment; a
+    note's and a session's are read from the clock as they are written."""
+    from gently.core.file_store import utc_now, utc_of_epoch
+    from gently.harness.memory.file_store import FileContextStore
+    from gently.harness.memory.notebook import Note, NoteKind
+
+    # 2026-11-01 06:30:00 UTC is 01:30 Eastern for the second time that night.
+    second_0130 = datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc).timestamp()
+    assert utc_of_epoch(second_0130) == "2026-11-01T06:30:00.000000Z"
+    assert utc_of_epoch(second_0130 - 3600) == "2026-11-01T05:30:00.000000Z"
+
+    store = FileStore(tmp_path)
+    store.create_session("s1", name="night")
+    store.register_embryo("s1", "embryo_1")
+    path = store.put_volume(
+        "s1",
+        "embryo_1",
+        0,
+        np.zeros((2, 4, 4), dtype=np.uint16),
+        acquired_at="2026-11-01T01:30:00",
+        acquired_at_utc=utc_of_epoch(second_0130),
+    )
+    meta = yaml.safe_load(Path(str(path).replace(".tif", ".meta.yaml")).read_text())
+    assert meta["acquired_at_utc"] == "2026-11-01T06:30:00.000000Z"
+    assert str(store.get_session("s1")["created_at_utc"]).endswith("Z")
+
+    cs = FileContextStore(tmp_path / "agent")
+    nid = cs.notebook.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="hatched"))
+    first = cs.notebook.get_note(nid).created_at_utc
+    assert first and first.endswith("Z") and first <= utc_now()
+    # Written again (a status change), it keeps the moment it was first written.
+    note = cs.notebook.get_note(nid)
+    cs.notebook.write_note(note)
+    assert cs.notebook.get_note(nid).created_at_utc == first
+    # The run hands the store the instrument's moment.
+    run = (REPO / "gently/app/orchestration/timelapse.py").read_text(encoding="utf-8")
+    assert 'extra["acquired_at_utc"] = utc_of_epoch(r["acquired_at_epoch"])' in run
