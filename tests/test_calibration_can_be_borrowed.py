@@ -236,8 +236,8 @@ def test_the_sources_listing_excludes_the_embryo_asking() -> None:
 def _batch_app(embryos: dict[str, EmbryoState], executed: list, monkeypatch) -> TestClient:
     """Like `_app`, but with a connected client and the tool stubbed.
 
-    The real `calibrate_all_embryos` drives hardware. What is under test is
-    which embryos the route hands it and which settings ride along.
+    The real `calibrate_embryo` drives hardware. What is under test is which
+    embryos the route walks, one call each, and which settings ride along.
     """
     import gently.harness.tools.registry as registry_mod
 
@@ -251,10 +251,10 @@ def _batch_app(embryos: dict[str, EmbryoState], executed: list, monkeypatch) -> 
 
     async def _execute(name, args, ctx):
         executed.append((name, args))
-        for eid in args.get("embryo_ids") or []:
-            emb = embryos.get(eid)
-            if emb is not None and eid != "stubborn":
-                emb.calibration = {"slope_um_per_deg": 100.0, "r_squared": 0.9}
+        eid = args["embryo_id"]
+        if eid == "stubborn":
+            return "Error: no fit could be made"
+        embryos[eid].calibration = {"slope_um_per_deg": 100.0, "r_squared": 0.9}
         return "done"
 
     reg = MagicMock()
@@ -280,7 +280,7 @@ def test_the_batch_skips_embryos_that_already_have_a_fit(monkeypatch) -> None:
     }
     r = _batch_app(embryos, executed, monkeypatch).post("/api/devices/calibrate/all", json={})
     assert r.status_code == 200, r.text
-    assert executed[0][1]["embryo_ids"] == ["todo"], (
+    assert [a["embryo_id"] for _, a in executed] == ["todo"], (
         "the batch re-calibrated an embryo that already had a fit, or reached for one marked skip"
     )
 
@@ -295,7 +295,7 @@ def test_scope_all_means_all_but_still_not_the_skipped(monkeypatch) -> None:
     _batch_app(embryos, executed, monkeypatch).post(
         "/api/devices/calibrate/all", json={"scope": "all"}
     )
-    assert sorted(executed[0][1]["embryo_ids"]) == ["done", "todo"]
+    assert sorted(a["embryo_id"] for _, a in executed) == ["done", "todo"]
 
 
 def test_the_batch_runs_the_same_recipe_as_one_embryo(monkeypatch) -> None:
@@ -321,6 +321,8 @@ def test_a_partial_batch_names_what_failed(monkeypatch) -> None:
     body = r.json()
     assert body["calibrated"] == ["todo"]
     assert body["failed"] == ["stubborn"]
+    # With its reason, and the one after it was still tried.
+    assert body["why"] == {"stubborn": "Error: no fit could be made"}
 
 
 def test_nothing_to_calibrate_is_a_refusal(monkeypatch) -> None:
