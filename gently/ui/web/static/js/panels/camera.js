@@ -36,15 +36,20 @@ const CameraPanel = (() => {
         bottom: {
             label: 'Bottom camera',
             read: '/api/devices/camera/exposure',
+            // The device layer answers `{success: false, error: ...}` with
+            // HTTP 200 when the camera is absent, so `r.ok` is not enough.
+            parse: d => (d && d.success !== false && d.exposure_ms != null) ? Number(d.exposure_ms) : null,
             write: '/api/devices/camera/exposure',
             body: ms => ({ exposure_ms: ms }),
         },
         spim: {
             label: 'Light sheet',
             // The light-sheet streamer takes exposure with its other live
-            // params; there is no separate read, so the panel shows what was
-            // last set and says so rather than implying a hardware read.
-            read: null,
+            // params, and answers a read of those params with what it holds:
+            // the exposure it will expose the next frame at, kept across an
+            // app restart or a page reload. Read from there, not remembered.
+            read: '/api/devices/lightsheet/live/params',
+            parse: d => (d && d.params && d.params.exposure != null) ? Number(d.params.exposure) : null,
             write: '/api/devices/lightsheet/live/params',
             body: ms => ({ exposure: ms }),
         },
@@ -72,10 +77,7 @@ const CameraPanel = (() => {
             const r = await fetch(m.cfg.read);
             if (r.ok) {
                 const d = await r.json();
-                // The device layer answers `{success: false, error: ...}` with
-                // HTTP 200 when the camera is absent, so `r.ok` is not enough.
-                const ms = d && d.success !== false && d.exposure_ms != null
-                    ? Number(d.exposure_ms) : null;
+                const ms = m.cfg.parse(d);
                 m.exposureMs = Number.isFinite(ms) ? ms : null;
                 m.confirmed = m.exposureMs != null;
                 m.readAt = Date.now();

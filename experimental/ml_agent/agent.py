@@ -23,21 +23,15 @@ class MLSubagent:
     ----------
     context_store : ContextStore
     gently_store : GentlyStore, optional
-    verse_map : VerseMap, optional
-    peer_client : PeerClient, optional
     """
 
     def __init__(
         self,
         context_store,
         gently_store=None,
-        verse_map=None,
-        peer_client=None,
     ):
         self._context_store = context_store
         self._gently_store = gently_store
-        self._verse_map = verse_map
-        self._peer_client = peer_client
         self._registry = ToolRegistry()
         self._running = False
         self._task: str | None = None
@@ -48,8 +42,6 @@ class MLSubagent:
             self._registry,
             context_store=context_store,
             gently_store=gently_store,
-            verse_map=verse_map,
-            peer_client=peer_client,
         )
 
     @property
@@ -86,9 +78,7 @@ class MLSubagent:
                 {"status": "assessing_data", "detail": "Inventorying datasets..."},
                 source="ml_subagent",
             )
-            inventory_result = await self._registry.execute(
-                "inventory_datasets", {"include_remote": True}
-            )
+            inventory_result = await self._registry.execute("inventory_datasets", {})
             inventory = json.loads(inventory_result)
 
             # Step 2: Check coverage

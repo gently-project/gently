@@ -8,7 +8,7 @@ from _harness import exists, goto
 META = {
     "id": "US-41",
     "title": "Settings: effective config / prefs / advanced",
-    "cluster": "14 Config, session & mesh",
+    "cluster": "14 Config & session",
     "mode": "headless",
     "needs_account": False,
 }

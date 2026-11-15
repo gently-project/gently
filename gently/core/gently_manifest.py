@@ -31,7 +31,7 @@ MANIFEST = {
             "cross-session embryo tracking."
         ),
         "logs": "Process-level logs (not session-scoped). One file per process run.",
-        "config": "Instance-level configuration — hardware profile, mesh identity.",
+        "config": "Instance-level configuration — hardware profile.",
         "incoming": (
             "Transient staging directory for device-to-agent volume transfer. "
             "Files here are moved to sessions/ within seconds."

@@ -3,7 +3,7 @@
  *
  *     BrightfieldRefs.mount('op-bfref-host');
  *
- * Lives in the Bottom cam pane's Overview frames block, under the plan's
+ * Lives in the rail's Overview frames box on Scope, under the plan's
  * light, LED brightness and exposure fields, and reads them, so the
  * references are taken for exactly the frames the plan will take — and
  * beside the live view and the stage pad, because the flat needs the stage

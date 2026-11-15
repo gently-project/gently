@@ -233,7 +233,10 @@ def test_typing_in_the_pane_marks_the_plan_dirty_inside_wire():
     wire = OPERATE[OPERATE.index("if (_wired) return;") :]
     assert "addEventListener('input', () => { _planDirty = true; renderPlan(); });" in wire
     change = wire[wire.index("planPanel.addEventListener('change'") :][:120]
-    assert "_planDirty = true;" in change
+    # Through the one place that also un-names a loaded plan.
+    assert "planTouched();" in change
+    touched = OPERATE[OPERATE.index("    function planTouched() {") :][:200]
+    assert "_planDirty = true;" in touched
 
 
 def test_fill_is_the_inverse_of_read():
@@ -254,7 +257,9 @@ def test_fill_is_the_inverse_of_read():
         "op-tl-monitor",
     ):
         assert f"'{field}'" in fn, f"fillPlan never sets {field}"
-    assert "renderOverrideRows();" in fn and "plan.overrides.forEach" in fn
+    # An embryo's own ending is kept in `_endings` and drawn on its row.
+    assert "_endings = {};" in fn and "plan.overrides.forEach" in fn
+    assert "renderEndings();" in fn
     assert "_bfPins = plan.bf.position === 'here'" in fn
 
 

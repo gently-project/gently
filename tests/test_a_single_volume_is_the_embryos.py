@@ -166,10 +166,8 @@ class TestWithoutAnEmbryo:
 
 class TestThePane:
     def test_the_toast_says_what_the_acquisition_said(self):
-        branch = OPERATE[
-            OPERATE.index("if (_mode === 'single') {") : OPERATE.index(
-                "if (_mode === 'adaptive') {"
-            )
-        ]
+        # A test volume is a button beside the pictures now, not a mode of
+        # Start (tests/test_acquisition_is_two_states.py).
+        branch = OPERATE[OPERATE.index("    async function testVolume() {") :][:2600]
         assert "const d = await postJSON('/api/devices/acquire/volume'" in branch
         assert "(d && d.message) || 'Volume acquired'" in branch

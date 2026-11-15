@@ -17,7 +17,6 @@ from gently.harness.session.manager import SessionManager
 ROOT = Path(__file__).resolve().parents[1]
 AGENT = (ROOT / "gently" / "app" / "agent.py").read_text(encoding="utf-8")
 LAUNCH = (ROOT / "launch_gently.py").read_text(encoding="utf-8")
-MESH = (ROOT / "gently" / "mesh" / "capability_provider.py").read_text(encoding="utf-8")
 
 
 def _manager():
@@ -66,8 +65,3 @@ def test_shutdown_saves_the_session_before_the_server_stops():
     save = tail.index("agent.save_session()")
     stop = tail.index("await agent.viz_server.stop()")
     assert save < stop
-
-
-def test_the_gpu_probe_reads_the_attribute_torch_has():
-    assert "props.total_memory" in MESH and "props.total_mem " not in MESH
-    assert "total_mem /" not in MESH

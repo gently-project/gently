@@ -136,6 +136,21 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
     except Exception as e:
         logger.warning("Could not create camera_b: %s", e)
 
+    # Micro-Manager's "Multi Camera" utility device: both SPIM cameras exposed
+    # at once as two channels of one frame. The live view's Multi mode, named
+    # as the ASIdiSPIM plugin names its button, snaps this device.
+    try:
+        from .devices import DiSPIMCamera as _DiSPIMCamera
+
+        multi_name = cfg.get("multi_camera_name", "Multi Camera")
+        if multi_name in list(core.getLoadedDevices()):
+            devices["camera_multi"] = _DiSPIMCamera(device_name=multi_name, core=core)
+            logger.info("Created camera_multi: %s", multi_name)
+        else:
+            logger.warning("camera_multi (%s) not in loaded devices; skipping", multi_name)
+    except Exception as e:
+        logger.warning("Could not create camera_multi: %s", e)
+
     # Defensively register the side-B galvo scanner (Scanner:CD:33).
     # Absent on single-side rigs — skip + log, do not crash.
     try:
@@ -267,6 +282,34 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
             logger.warning("Skipping bottom camera (missing LED device)")
     except Exception as e:
         logger.warning("Could not create bottom camera: %s", e)
+
+    # The same compound devices for side B, when its trio is there. A plan
+    # takes either by name (volume_scanner='volume_scanner_b'); nothing else
+    # about the plan changes, which is the point.
+    try:
+        b_scanner = devices.get("scanner_b")
+        b_camera = devices.get("camera_b")
+        b_piezo = devices.get("piezo_b")
+        if b_scanner and b_camera and b_piezo and laser_control:
+            devices["volume_scanner_b"] = DiSPIMVolumeScanner(
+                scanner=b_scanner,
+                camera=b_camera,
+                piezo=b_piezo,
+                laser_control=laser_control,
+                core=core,
+                name="volume_scanner_b",
+                side="B",
+            )
+            devices["lightsheet_snap_b"] = DiSPIMLightSheetSnap(
+                scanner=b_scanner,
+                camera=b_camera,
+                name="lightsheet_snap_b",
+            )
+            logger.info("Created volume scanner and lightsheet snap for side B")
+        else:
+            logger.info("No side-B volume scanner: scanner_b, camera_b or piezo_b absent")
+    except Exception as e:
+        logger.warning("Could not create side-B compound devices: %s", e)
 
     try:
         if scanner and camera:

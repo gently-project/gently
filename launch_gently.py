@@ -474,16 +474,6 @@ async def main(
         no_api=no_api,
     )
 
-    # Generate TLS certificate for mesh communication
-    cert_path, key_path = None, None
-    try:
-        from gently.mesh.tls import ensure_tls_cert, get_cert_fingerprint
-
-        _config_dir = Path(__file__).parent / "config"
-        cert_path, key_path = ensure_tls_cert(_config_dir)
-    except Exception:
-        pass
-
     # Start visualization server for real-time feedback (plain HTTP —
     # self-signed certs trigger browser "unsafe" warnings for visitors).
     await agent.start_viz_server(port=settings.network.viz_port)
@@ -493,128 +483,6 @@ async def main(
         if agent.viz_server is not None
         else None
     )
-
-    # ── Mesh discovery ──────────────────────────────────────────────
-    mesh = None
-    try:
-        import uuid as _uuid
-
-        from gently.mesh import MeshService, register_mesh_routes
-        from gently.mesh.audit import MeshAuditLog
-        from gently.mesh.pairing import PairingManager
-
-        # Persistent instance ID
-        instance_id_path = Path(__file__).parent / "config" / "mesh_instance_id"
-        if instance_id_path.exists():
-            instance_id = instance_id_path.read_text().strip()
-        else:
-            instance_id = str(_uuid.uuid4())
-            instance_id_path.parent.mkdir(parents=True, exist_ok=True)
-            instance_id_path.write_text(instance_id)
-
-        def _capability_provider():
-            caps = {
-                "has_microscope": client.is_connected if client else False,
-                "has_sam": client.has_sam if client else False,
-                "has_gpu": False,
-                "gpu_name": "",
-                "gpu_vram_gb": 0.0,
-                "storage_free_gb": 0.0,
-                "organism": config.get("organism", "celegans"),
-                "hardware_profile": config.get("hardware", "dispim"),
-                "tool_categories": [],
-            }
-            # GPU detection — try torch first, fall back to nvidia-smi
-            try:
-                import torch
-
-                if torch.cuda.is_available():
-                    caps["has_gpu"] = True
-                    caps["gpu_name"] = torch.cuda.get_device_name(0)
-                    caps["gpu_vram_gb"] = round(
-                        torch.cuda.get_device_properties(0).total_memory / (1024**3), 1
-                    )
-            except ImportError:
-                try:
-                    import subprocess as _sp
-
-                    out = _sp.check_output(
-                        [
-                            "nvidia-smi",
-                            "--query-gpu=name,memory.total",
-                            "--format=csv,noheader,nounits",
-                        ],
-                        timeout=5,
-                        text=True,
-                    ).strip()
-                    if out:
-                        parts = out.split(",", 1)
-                        caps["has_gpu"] = True
-                        caps["gpu_name"] = parts[0].strip()
-                        if len(parts) > 1:
-                            caps["gpu_vram_gb"] = round(float(parts[1].strip()) / 1024, 1)
-                except Exception:
-                    pass
-            # Free disk space
-            try:
-                usage = shutil.disk_usage(str(storage_dir))
-                caps["storage_free_gb"] = round(usage.free / (1024**3), 1)
-            except OSError:
-                pass
-            return caps
-
-        def _status_provider():
-            import gently as _gently
-
-            return {
-                "session_id": agent.session_id or "",
-                "acquisition_status": "idle",
-                "embryo_count": len(agent.experiment.embryos),
-                "total_timepoints": 0,
-                "uptime_seconds": 0.0,
-                "agent_mode": agent.mode,
-                "active_plan": "",
-                "version": getattr(_gently, "__version__", "dev"),
-            }
-
-        import socket as _socket
-
-        config_dir = Path(__file__).parent / "config"
-        audit_log = MeshAuditLog(config_dir)
-        pairing_mgr = PairingManager(
-            instance_id=instance_id,
-            hostname=_socket.gethostname(),
-            config_dir=config_dir,
-            audit_log=audit_log,
-        )
-
-        # Set TLS cert fingerprint on pairing manager
-        if cert_path:
-            try:
-                pairing_mgr.cert_fingerprint = get_cert_fingerprint(cert_path)
-            except Exception:
-                pass
-
-        mesh = MeshService(
-            instance_id=instance_id,
-            viz_port=settings.network.viz_port,
-            capability_provider=_capability_provider,
-            status_provider=_status_provider,
-            pairing_manager=pairing_mgr,
-            audit_log=audit_log,
-        )
-
-        if agent.viz_server is not None:
-            register_mesh_routes(agent.viz_server, mesh, audit_log=audit_log)
-            agent.viz_server.mesh_service = mesh
-
-        await mesh.start()
-    except Exception as e:
-        import logging as _log
-
-        _log.getLogger(__name__).warning(f"Mesh discovery failed to start: {e}")
-        mesh = None
-    # ── End mesh ────────────────────────────────────────────────────
 
     # Attach the agent bridge to the viz server
     from gently.harness.bridge import AgentBridge
@@ -630,7 +498,6 @@ async def main(
             "viz_url": viz_url,
             "log_path": str(log_file),
             "resumed": session_to_resume is not None,
-            "mesh_service": mesh,
         }
     )
 
@@ -736,12 +603,6 @@ async def main(
 
         _logging.getLogger("uvicorn.error").setLevel(_logging.CRITICAL)
         _logging.getLogger("uvicorn").setLevel(_logging.CRITICAL)
-        # Cleanup: stop mesh service
-        if mesh is not None:
-            try:
-                await mesh.stop()
-            except (asyncio.CancelledError, RuntimeError, OSError, Exception):
-                pass
         # The session snapshot, at the end. Ctrl-C, the desktop shell's quit
         # and SIGTERM all come through here, and none of them saved it: what
         # the next resume read was whatever the last conversation turn left.
@@ -771,7 +632,7 @@ def _run_with_reload(main_kwargs: dict) -> None:
     Uses watchfiles (the same watcher uvicorn --reload uses) to run the server in
     a child process and restart it on any .py change under gently/ (or
     launch_gently.py). This is a WHOLE-backend restart, not an in-place reload —
-    gently's app is built from runtime state (agent, store, mesh), so there is no
+    gently's app is built from runtime state (agent, store), so there is no
     static import for uvicorn's native reloader to hot-swap. A running device
     layer restarts too, so this is for UI / backend dev, not live hardware.
     After a restart, refresh the browser / Tauri window (Ctrl+R) to see changes.

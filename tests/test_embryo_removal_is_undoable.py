@@ -330,7 +330,7 @@ class TestThePage:
         fn = ROSTER[ROSTER.index("    function removed(opts) {") :][:600]
         assert "if (!opts.actions.includes('remove') || !list.length) return '';" in fn
         assert 'data-verb="restore"' in ROSTER
-        assert "+ removed(opts);" in ROSTER
+        assert ".concat([removed(opts)])" in ROSTER
 
     def test_the_list_follows_the_roster_whoever_changed_it(self):
         assert "SharedState.on('embryos', removedMayHaveChanged);" in ROSTER

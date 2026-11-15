@@ -2414,15 +2414,24 @@ const DevicesManager = (function () {
             const el = document.getElementById(`devices-view-${v}`);
             if (el) el.style.display = (v === viewName) ? '' : 'none';
         }
+        // Operate has no button of its own in this strip: its three surfaces
+        // sit beside it in the toolbar and mark themselves (operate.js), so
+        // with Operate up nothing here is lit.
         if (typeof updateViewButtons === 'function') {
             updateViewButtons('devices-view-switcher', viewName);
         }
+        // The page's padding is the view's to set: the Operate workspace
+        // takes the room to its edges (operate.css).
+        const box = document.querySelector('#devices-content .devices-container');
+        if (box) box.dataset.view = viewName;
         // The 3D optical-space view owns its own WebGL module. Build it lazily
         // on first activation (the panel was display:none, so its container had
         // no size until now); init() is idempotent and resizes on re-entry.
         if (viewName === 'optical3d' && typeof Occupancy3DManager !== 'undefined') {
             Occupancy3DManager.init();
         }
+        // The properties are read while the table is on screen, and not otherwise.
+        watchProperties(viewName === 'details');
         // Initialize temperature graph for the active view. The TemperatureGraph
         // is a singleton; reinit on view switch ensures only one graph target
         // is live at a time. ClientEventBus.off/on in TemperatureGraph.init
@@ -2439,7 +2448,11 @@ const DevicesManager = (function () {
         // Entering Manual view — gate lasers off immediately (brightfield-safe).
         // populateLaserPresets() runs after setLaserOff() so the select is always
         // seeded with the entry-safety state first.
-        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
+        // Opening Manual puts the lasers out, so it starts from dark. Not
+        // while a run is running: the run owns the lasers, and "ALL OFF"
+        // sent by a look at this view lands in whatever volume is being taken.
+        if (viewName === 'manual' && document.body.dataset.run !== 'running') setLaserOff();
+        if (viewName === 'manual') { populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
         // The Operate view owns its own module; activate/deactivate it so its
         // camera + SPIM streams only run while it's the visible view.
         if (typeof OperateManager !== 'undefined') {
@@ -2481,13 +2494,73 @@ const DevicesManager = (function () {
         _previousTs = _lastTs;
 
         renderPositions(payload.positions);
-        if (payload.properties) {
+        // A poll tick carries positions only. The properties arrive when they
+        // have been read: at the device layer's start, and on request (below).
+        if (payload.properties && Object.keys(payload.properties).length) {
             // The controller's own limits are drawn separately; the working
             // region comes from the shared store, not from these properties.
             renderPropertiesTable(payload.properties);
             _lastPropertyMap = payload.properties;
+            _propsReadAt = Date.now();
+            renderPropsAge();
         }
         scheduleStaleCheck();
+    }
+
+    // =====================================================================
+    // Properties — read when someone is looking
+    // =====================================================================
+    // The device layer does not sweep every property on a timer any more: a
+    // sweep holds the controller's serial port for about two seconds, behind
+    // which every button on this page waited, and a tick that carried the
+    // result had each browser redraw this table six times a second. So the
+    // table is read on opening Details, on "Read again", and every
+    // PROPS_EVERY_MS while Details stays on screen. The device layer
+    // broadcasts what it read, which is what draws the table — here and on
+    // any other screen showing it.
+    const PROPS_EVERY_MS = 15000;
+    let _propsReadAt = 0;
+    let _propsBusy = false;
+    let _propsTimer = null;
+
+    function detailsOnScreen() {
+        const el = document.getElementById('devices-view-details');
+        return !!(el && el.offsetParent !== null);
+    }
+
+    function renderPropsAge() {
+        const el = document.getElementById('devices-props-age');
+        if (!el) return;
+        if (_propsBusy) { el.textContent = 'reading…'; return; }
+        if (!_propsReadAt) { el.textContent = 'not read yet'; return; }
+        const s = Math.round((Date.now() - _propsReadAt) / 1000);
+        el.textContent = s < 2 ? 'read just now' : `read ${s} s ago`;
+    }
+
+    /** The snapshot as the device layer holds it; `fresh` has every property read now. */
+    async function readProperties(fresh) {
+        if (_propsBusy) return;
+        _propsBusy = true;
+        renderPropsAge();
+        try {
+            const r = await fetch(`/api/devices/state${fresh ? '?refresh=1' : ''}`);
+            if (!r.ok) return;                     // no microscope: the table keeps what it has
+            const d = await r.json();
+            // On the bus rather than straight into handlePayload: the 3D view
+            // takes the stage's firmware box from the same properties.
+            if (d && typeof ClientEventBus !== 'undefined') ClientEventBus.emit('DEVICE_STATE_UPDATE', d);
+        } catch (_) { /* the next read, or the next broadcast, fills it */ }
+        finally { _propsBusy = false; renderPropsAge(); }
+    }
+
+    function watchProperties(on) {
+        if (_propsTimer) { clearInterval(_propsTimer); _propsTimer = null; }
+        if (!on) return;
+        readProperties(true);
+        _propsTimer = setInterval(() => {
+            renderPropsAge();
+            if (detailsOnScreen() && Date.now() - _propsReadAt >= PROPS_EVERY_MS) readProperties(true);
+        }, 1000);
     }
 
     // Single availability signal (from the launcher's device-layer watcher).
@@ -2801,7 +2874,39 @@ const DevicesManager = (function () {
         else if (_currentView === 'operate') OperateManager.activate();
     }
 
+    // Manual is a second set of the instrument's controls (sheet, lasers, LED,
+    // snap, burst, the room light, the water's setpoint), and none of them
+    // knew about a run. While one is running they are locked: the view can be
+    // looked at, and one deliberate press unlocks it for a minute. Burst, the
+    // room light and the setpoint are only here, so the view stays.
+    const MANUAL_UNLOCK_MS = 60000;
+    let _manualUnlockedUntil = 0;
+    function lockManualUnderARun() {
+        const view = document.getElementById('devices-view-manual');
+        if (!view) return;
+        let bar = document.getElementById('devices-manual-lock');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'devices-manual-lock';
+            bar.className = 'devices-manual-lock';
+            bar.innerHTML = '<span>A run is going. These controls act on the instrument it is using, so they are locked.</span>'
+                + '<button type="button" class="view-btn">Unlock for a minute</button>';
+            bar.querySelector('button').addEventListener('click', () => {
+                _manualUnlockedUntil = Date.now() + MANUAL_UNLOCK_MS;
+                lockManualUnderARun();
+                setTimeout(lockManualUnderARun, MANUAL_UNLOCK_MS + 50);
+            });
+            view.prepend(bar);
+        }
+        const locked = document.body.dataset.run === 'running' && Date.now() >= _manualUnlockedUntil;
+        bar.hidden = !locked;
+        [...view.children].forEach(el => { if (el !== bar) el.inert = locked; });
+    }
+
     function init() {
+        lockManualUnderARun();
+        // The shell keeps the run's state on <body>; the lock follows it.
+        new MutationObserver(lockManualUnderARun).observe(document.body, { attributes: true, attributeFilter: ['data-run'] });
         cacheDom();
         setupViewSwitcher();
         setupRegionEditor();
@@ -2813,6 +2918,11 @@ const DevicesManager = (function () {
         loadCoverslip();
         loadEmbryosSnapshot();
         switchView(_currentView);
+        // Once, as the device layer holds them: the 3D view's stage box and a
+        // table that is not empty on first opening. No controller traffic.
+        readProperties(false);
+        const readBtn = document.getElementById('devices-props-read');
+        if (readBtn) readBtn.addEventListener('click', () => readProperties(true));
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('TAB_CHANGED', onTabChanged);
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);

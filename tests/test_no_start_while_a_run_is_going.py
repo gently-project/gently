@@ -14,8 +14,11 @@ OPERATE = (
 
 
 def test_the_button_is_disabled_and_says_why_while_a_run_is_going():
-    fn = OPERATE[OPERATE.index("    function renderRunButton() {") :][:500]
-    assert "b.disabled = _runBusy;" in fn
+    fn = OPERATE[OPERATE.index("    function renderRunButton() {") :][:900]
+    # A run going disables it whatever else is true; so does anything that
+    # would refuse the run (tests/test_before_a_run_starts.py), and a run
+    # going is said first.
+    assert "b.disabled = _runBusy || v.blocked > 0;" in fn
     assert "_runBusy ? 'A run is going'" in fn
     assert "Stop the run before starting another" in fn
 

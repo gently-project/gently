@@ -66,14 +66,6 @@ def _storage_root_is_never_the_real_one(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def config_dir(tmp_path):
-    """Temporary config directory for mesh/transfer state files."""
-    d = tmp_path / "config"
-    d.mkdir()
-    return d
-
-
-@pytest.fixture
 def store(tmp_path):
     """Fresh GentlyStore for tests."""
     from gently.core.store import GentlyStore

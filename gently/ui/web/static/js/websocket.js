@@ -27,14 +27,12 @@ function loadInitialData() {
         })
         .catch(e => console.warn('Failed to load snapshots:', e));
 
-    fetch('/api/calibration')
-        .then(r => r.json())
-        .then(data => {
-            state.calibration = data.calibration || [];
-            updateCalibrationCount();
-            renderCalibrationGallery();
-        })
-        .catch(e => console.warn('Failed to load calibration:', e));
+    // Every calibration image pushed this session used to be fetched here,
+    // for the Calibration tab's Profile and Gallery. After a night of
+    // calibrating that answer was 678 MB: every page load downloaded it, and
+    // the server spent four seconds on it while every other request waited
+    // (Home's two lists sat at "Loading" for five to ten seconds). Those
+    // views are gone; the tab reads the runs on disk, a run at a time.
 
     // Bootstrap from the CURRENT (in-memory experiment) embryos, not the disk
     // store: embryos registered this session live in memory until a volume is

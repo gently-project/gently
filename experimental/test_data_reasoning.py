@@ -164,7 +164,7 @@ class TestDataAssessment:
             gt_per_embryo={("s1", "e1"): ["early"]},
         )
         engine = DataAssessmentEngine(gently_store=store)
-        inventory = await engine.build_inventory(include_remote=False)
+        inventory = await engine.build_inventory()
         assert inventory.total_embryos == 1
         assert len(inventory.local_sessions) == 1
         assert len(inventory.remote_sessions) == 0

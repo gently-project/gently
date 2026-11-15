@@ -221,17 +221,19 @@ const Mentions = {
     RE: /(^|[^\w@])@([a-z0-9][a-z0-9-]*)/gi,
     // The line as html: the people it asks as chips, everything else escaped.
     html(text, mentions) {
-        const asked = new Set(mentions || []);
+        // By lower case, as the server reads them: "@Ryan" asks ryan.
+        const asked = new Map((mentions || []).map(p => [String(p).toLowerCase(), p]));
         const s = text || '';
         let out = '', last = 0, m;
         const re = new RegExp(this.RE.source, 'gi');
         while ((m = re.exec(s)) !== null) {
-            const id = m[2].replace(/-+$/, '');
-            if (!asked.has(id)) continue;
+            const typed = m[2].replace(/-+$/, '');
+            const id = asked.get(typed.toLowerCase());
+            if (!id) continue;
             const at = m.index + m[1].length;
             out += escapeHtml(s.slice(last, at))
                 + `<b class="rd-mention" style="--who:${escapeHtml(Who.color(id))}" title="${escapeHtml(id)}">@${escapeHtml(Who.name(id))}</b>`;
-            last = at + 1 + id.length;
+            last = at + 1 + typed.length;
         }
         return out + escapeHtml(s.slice(last));
     },

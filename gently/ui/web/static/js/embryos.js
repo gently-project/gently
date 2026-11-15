@@ -4,6 +4,39 @@
  */
 
 const EmbryosManager = {
+    // Which imaging path the pictures are of. A run can take a volume from
+    // each side a round; B is filed beside A and was on disk with no way to
+    // see it. The switch shows only for a session that has a side B.
+    side: 'A',
+    _sideSeen: {},          // session id -> true once a side-B picture answered
+    sideQ() { return this.side === 'B' ? '&side=B' : ''; },
+    setSide(side) {
+        if (side !== 'A' && side !== 'B') return;
+        this.side = side;
+        this.renderSideSwitch();
+        this.render();
+    },
+    renderSideSwitch() {
+        const host = document.getElementById('embryos-side');
+        if (!host) return;
+        host.hidden = !this._sideSeen[this.currentSessionId];
+        if (host.hidden && this.side !== 'A') this.side = 'A';
+        host.querySelectorAll('[data-side]').forEach(b => {
+            const on = b.dataset.side === this.side;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+    },
+    // One request per session and timepoint count: does this embryo have a side B?
+    async lookForSideB(embryoId, tp) {
+        const sid = this.currentSessionId;
+        if (!sid || !tp || this._sideSeen[sid] || this._sideAsked === `${sid}|${embryoId}|${tp}`) return;
+        this._sideAsked = `${sid}|${embryoId}|${tp}`;
+        try {
+            const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryoId)}&t=${tp}&side=B`);
+            if (r.ok) { this._sideSeen[sid] = true; this.renderSideSwitch(); }
+        } catch (_) { /* no side B to show */ }
+    },
     // Session ID for tracking experiment boundaries
     // When session_id changes, all state is cleared (new experiment)
     currentSessionId: null,
@@ -472,7 +505,7 @@ const EmbryosManager = {
         document.addEventListener('keydown', (e) => {
             if (typeof state !== 'undefined' && state.tab !== TABS.EMBRYOS) return;
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
-            const viewMap = { '1': 'default', '2': 'board', '3': 'filmstrip', '4': 'vitals' };
+            const viewMap = { '1': 'default', '2': 'board', '3': 'vitals' };   // Film is no longer offered
             if (viewMap[e.key]) {
                 e.preventDefault();
                 this.switchView(viewMap[e.key]);
@@ -2081,10 +2114,11 @@ const EmbryosManager = {
         const shortLabel = embryo.embryoId.replace(/embryo_?/i, 'E');
         const tp = Number(embryo.timepoints) || (latest ? latest.timepoint : 0) || 0;
         const sid = this.currentSessionId;
-        const thumb = sid && tp > 0 ? `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryo.embryoId)}&t=${tp}` : null;
+        const thumb = sid && tp > 0 ? `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryo.embryoId)}&t=${tp}${this.sideQ()}` : null;
+        if (thumb) this.lookForSideB(embryo.embryoId, tp);
         // The tile shows the counts (gently.core.u16), drawn by the viewer at the
         // size a tile has; the JPEG is the fallback, mounted in _wireTileScrub.
-        const thumbU16 = thumb ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryo.embryoId)}/volumes/${tp}/projection.u16?max=256` : null;
+        const thumbU16 = thumb ? `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryo.embryoId)}/volumes/${tp}/projection.u16?max=256${this.sideQ()}` : null;
         const bar = reasoning.length
             ? `<span class="stage-bar" aria-hidden="true">${reasoning.map(r => `<span style="background:${(typeof stageColor === 'function') ? stageColor(r.stage) : '#8b949e'}" title="t${r.timepoint} · ${this.escapeHtml(this.formatStageName(r.stage || ''))}"></span>`).join('')}</span>`
             : '<span class="stage-bar is-empty" aria-hidden="true"><span></span></span>';
@@ -2129,7 +2163,7 @@ const EmbryosManager = {
             const n = Number(el.dataset.tp) || 0;
             const eid = el.dataset.embryo;
             const cap = el.querySelector('.tile-thumb-cap');
-            const jpg = t => `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(eid)}&t=${t}`;
+            const jpg = t => `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(eid)}&t=${t}${this.sideQ()}`;
             const host = el.querySelector('.tile-pix');
             let view = null;
             if (host) {
@@ -2414,12 +2448,12 @@ const EmbryosManager = {
         for (let t = 1; t <= n; t++) {
             const c = calls[t];
             out.push({
-                url: `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryoId)}&t=${t}`,
+                url: `/api/sessions/${encodeURIComponent(sid)}/projection?embryo=${encodeURIComponent(embryoId)}&t=${t}${this.sideQ()}`,
                 scalable: false,            // the projection route serves the JPEG as it is
                 // the same picture in counts, for the stage (gently.core.u16)
-                u16: `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/projection.u16`,
+                u16: `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/projection.u16?side=${this.side}`,
                 // and any one plane of the volume behind it
-                slice: z => `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/slice/${z}.u16`,
+                slice: z => `/api/sessions/${encodeURIComponent(sid)}/embryos/${encodeURIComponent(embryoId)}/volumes/${t}/slice/${z}.u16?side=${this.side}`,
                 frame: t,
                 when: c && c.timestamp ? c.timestamp : null,
                 stage: c && !c._pending ? c.stage : null,

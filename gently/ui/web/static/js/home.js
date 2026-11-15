@@ -171,6 +171,15 @@ const HomeApp = (() => {
         return `<span class="home-tag home-tag-project" title="Its project">▣ ${escapeHtml(name)}</span>`;
     }
 
+    // What an unnamed session holds, in the server's words. They end with how
+    // its run ended, read off the last checkpoint: for the live session with
+    // a run still going that said "cut short". The live tag beside the name
+    // says how it stands, so the ending is left off.
+    function said(s) {
+        const words = s.suggested_name || '';
+        return s.active ? words.replace(/ · (cut short|complete)$/, '') : words;
+    }
+
     async function loadSessions() {
         const el = document.getElementById('home-recent-sessions');
         if (!el) return;
@@ -192,7 +201,7 @@ const HomeApp = (() => {
                     `<button class="home-resume" data-resume="${escapeHtml(s.session_id)}">Resume</button>`;
                 return `<div class="home-item">
                     <div class="home-item-main">
-                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || s.session_id)}</span>${live}${diag}${projectChip(s)}${whoChip(s)}</div>
+                        <div class="home-item-row"><span class="home-item-name">${escapeHtml(s.name || said(s) || s.session_id)}</span>${live}${diag}${projectChip(s)}${whoChip(s)}</div>
                         <span class="home-item-meta">${escapeHtml(relTime(s.last_active))} · ${s.embryo_count || 0} embryos</span>
                     </div>${resume}
                 </div>`;

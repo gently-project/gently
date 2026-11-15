@@ -411,6 +411,8 @@ body {
     position: absolute; top: calc(100% - 2px); left: 14px; z-index: 70; display: grid; gap: 2px; padding: 6px;
     background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
 }
+/* The list hangs from the box's own container, wherever a box offers people. */
+.nb-ask, .pj-form { position: relative; }
 .mention-opt { font: inherit; text-align: left; background: none; border: 0; border-radius: 7px; padding: 4px 8px; cursor: pointer; }
 .mention-opt.on, .mention-opt:hover { background: var(--bg-hover); }
 .presence-pop-item.is-current { font-weight: 600; color: var(--accent); }
@@ -4180,6 +4182,11 @@ kbd {
 }
 
 /* Timelapse Status Badge */
+/* The run's controls on the tab it is watched on (shell.js). */
+.run-controls { display: inline-flex; align-items: center; gap: 4px; }
+.run-controls [hidden] { display: none; }
+.run-controls .run-plan-link { color: var(--text-muted); }
+
 .timelapse-status {
     display: flex;
     align-items: center;
@@ -9259,6 +9266,7 @@ body.modal-open {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.6rem;
     padding: 0.6rem 0.85rem;
     border-bottom: 1px solid var(--border);
 }
@@ -9269,6 +9277,23 @@ body.modal-open {
     font-weight: 500;
     color: var(--text);
 }
+
+.devices-props-age {
+    margin-left: auto;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.devices-props-read {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+}
+.devices-props-read:hover { border-color: var(--accent); color: var(--accent); }
 
 .devices-filter {
     background: var(--bg);
@@ -12045,3 +12070,22 @@ button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset
 .u16-overlay-body .u16-c { max-height: calc(100vh - 120px); }
 .u16-overlay-body .u16-bar { color: #c9d1d9; }
 .u16-overlay-body .u16-l output, .u16-overlay-body .u16-auto { color: #e7eef4; background: rgba(255,255,255,.06); }
+
+/* Devices > Manual, locked while a run is running (devices.js). */
+.devices-manual-lock { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; padding: 6px 10px; border: 1px solid var(--accent-amber); border-radius: 4px; font-size: 12.5px; color: var(--accent-amber); }
+.devices-manual-lock[hidden] { display: none; }
+.devices-manual-lock .view-btn { margin-left: auto; }
+#devices-view-manual > [inert] { opacity: 0.45; }
+
+/* The Gallery's tiles show the whole picture. A projection is three times
+   wider than tall and its embryo sits to one side; a square tile filled by
+   its middle showed the empty third, and the gallery looked black. */
+.gallery-tab-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.gallery-tab-thumb, .gallery-tab-thumb.u16 { aspect-ratio: 3 / 1; width: 100%; height: auto; object-fit: contain; background: #04070b; }
+.gallery-tab-thumb.u16 .u16-c { object-fit: contain; }
+
+/* A control wears the typeface of where it sits. Browsers give buttons,
+   inputs and selects their own (Arial here), so every page that did not say
+   otherwise mixed it in: four faces on Devices, three on Sessions' old cards.
+   Sizes are left as each page set them. */
+button, input, select, textarea { font-family: inherit; }

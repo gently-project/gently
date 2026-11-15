@@ -217,9 +217,12 @@ def test_a_restored_run_gets_a_resume_button_and_no_stop():
 
 
 def test_rows_of_a_run_that_is_not_running_say_waiting_and_offer_no_stop():
-    fn = OPERATE[OPERATE.index("function runRow(id, r, live)") :][:1900]
+    fn = OPERATE[OPERATE.index("function runRow(id, r, live)") :][:2600]
     assert ": !live ? 'waiting'" in fn
-    assert "r.is_complete || !live ? '' : `next ${fmtWhen(due)}`" in fn
+    # Where a live row says when it is next due, one that is not says its
+    # state: "waiting", not "next now".
+    assert "const next = r.is_complete || !live ? state" in fn
+    assert ": state !== 'running' ? state : `next ${fmtWhen(due)}`;" in fn
     assert "(r.is_complete || !live ? '<span></span><span></span>' :" in fn
     assert "runRow(id, rows[id], running)" in OPERATE
     assert ".op-runrow.is-waiting" in CSS

@@ -224,3 +224,48 @@ def test_the_asks_are_one_list_in_time_order_with_seen_and_answered_flags(tmp_pa
         False,
         True,
     ]
+
+
+def test_an_ask_makes_a_conversation_and_a_reply_reaches_the_one_who_asked(tmp_path, monkeypatch):
+    """ "kesavan asks ryan by tagging him ... then ryan replies in that. but
+    kesavan does not get a notification ... a tagging of a person should make
+    them part of the conversation." On the rig Ryan had answered eight asks,
+    some with questions back, and Kesavan's inbox stayed empty."""
+    k, store, cs = _client(tmp_path, monkeypatch, "kesavan")
+    store.create_session("s1", name="monday")
+    store.create_session("s2", name="tuesday")
+    before = k.post("/api/notebook/notes", json={"body": "set up", "sessions": ["s1"]})
+    ask = k.post(
+        "/api/notebook/notes", json={"body": "@ryan please mark this", "sessions": ["s1"]}
+    ).json()["note"]["id"]
+
+    r = TestClient(k.app)
+    r.cookies.set("gently_operator", "ryan")
+    reply = r.post(
+        "/api/notebook/notes", json={"body": "done. which channel?", "sessions": ["s1"]}
+    ).json()["note"]["id"]
+    r.post("/api/notebook/notes", json={"body": "unrelated", "sessions": ["s2"]})
+
+    box = k.get("/api/inbox").json()
+    # Ryan's line on the asked session, and only that: not his line elsewhere.
+    assert [(i["note"]["id"], i["reply_to"], i["seen"]) for i in box["asks"]] == [
+        (reply, ask, False)
+    ]
+    assert [i["note"]["id"] for i in box["new"]] == [reply]
+
+    # Kesavan writes back without an @: Ryan is in the conversation too.
+    back = k.post("/api/notebook/notes", json={"body": "the 488", "sessions": ["s1"]}).json()[
+        "note"
+    ]["id"]
+    mine = r.get("/api/inbox").json()["asks"]
+    assert [i["note"]["id"] for i in mine] == [back, ask]
+    assert "reply_to" not in mine[1] and mine[0]["reply_to"] == ask
+    # What Kesavan wrote before asking was not part of it.
+    assert before.json()["note"]["id"] not in [i["note"]["id"] for i in mine]
+    # Writing back answered Ryan's reply, for Kesavan.
+    assert k.get("/api/inbox").json()["asks"][0]["answered"] is True
+
+    # Somebody who was never asked hears none of it.
+    h = TestClient(k.app)
+    h.cookies.set("gently_operator", "hari")
+    assert h.get("/api/inbox").json()["asks"] == []

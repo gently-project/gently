@@ -26,9 +26,28 @@ const ReviewApp = {
 
     _initialized: false,
     _loadRun: 0,            // the click a session detail answers; an older answer is dropped
+    _listRun: 0,            // the load the list is drawn from; an older answer is dropped
     _stale: false,          // rows changed while the tab was hidden
 
+    wireLog() {
+        const list = document.getElementById('session-list');
+        if (!list || this._logWired) return;
+        this._logWired = true;
+        const sort = e => { const th = e.target.closest && e.target.closest('th[data-sort]'); if (th) { e.preventDefault(); this.setSort(th.dataset.sort); } };
+        list.addEventListener('click', e => { if (e.target.closest('th[data-sort]')) sort(e); });
+        list.addEventListener('keydown', e => {
+            if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('th[data-sort]')) { sort(e); return; }
+            this.onListKey(e);
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key !== '/' || !this.showing() || /INPUT|SELECT|TEXTAREA/.test((e.target.tagName || '')) || e.target.isContentEditable) return;
+            const find = document.getElementById('session-search');
+            if (find) { e.preventDefault(); find.focus(); }
+        });
+    },
+
     async init() {
+        this.wireLog();
         if (this._initialized) return;
         this._initialized = true;
         fetch('/api/tools').then(r => r.json()).then(d => { window.GentlyToolCatalog = d.tools || []; }).catch(() => {});
@@ -49,8 +68,15 @@ const ReviewApp = {
         if (!this.sessions.length) list.innerHTML = '<div class="loading">Loading sessions...</div>';
 
         try {
-            const [resp] = await Promise.all([fetch('/api/sessions'), this.loadProjects()]);
+            // The rows are drawn as soon as they arrive. The projects are
+            // asked for beside them and the rows drawn again when those come:
+            // all they add is a project's name on a row and in the filters,
+            // and the list waited for them, 200 ms after it had its own answer.
+            const run = ++this._listRun;
+            const projects = this.loadProjects();
+            const resp = await fetch('/api/sessions');
             const data = await resp.json();
+            if (run !== this._listRun) return;      // a newer load took over
             this.sessions = data.sessions || [];
             this.sessions.forEach(s => {
                 s._hay = [s.name, s.suggested_name, s.session_id, s.description, this.formatDate(s.created_at)]
@@ -58,6 +84,13 @@ const ReviewApp = {
             });
             this.renderSessionList();
             this.fillSizes();
+            projects.then(() => {
+                if (run !== this._listRun) return;
+                this.renderSessionList();
+                // A session opened in the meantime names its projects too.
+                const filed = document.getElementById('session-filed');
+                if (filed && this.currentSession) filed.innerHTML = this.renderFiled(this.currentSession);
+            });
         } catch (e) {
             if (!this.sessions.length) list.innerHTML = '<div class="error">Failed to load sessions</div>';
             console.error('Failed to load sessions:', e);
@@ -102,25 +135,9 @@ const ReviewApp = {
 
     /** What a row says it holds, repainted in place for these sessions only. */
     repaintHoldings(sessions) {
-        const list = document.getElementById('session-list');
-        if (!list) return;
         sessions.forEach(s => {
-            const meta = list.querySelector(`.session-item[data-session-id="${CSS.escape(s.session_id)}"] .session-meta`);
-            if (!meta) return;
-            meta.innerHTML = this.metaHtml(s);
+            if (document.querySelector(`.session-item[data-session-id="${CSS.escape(s.session_id)}"]`)) this.repaintRow(s.session_id);
         });
-    },
-
-    // A row's second line: when, what it holds, how its run ended, and the
-    // pills — live now, recorded with diagnostics on. The pills are here,
-    // where the line wraps, and not on the name: that is one line cut with an
-    // ellipsis, and a pill on it ran under the row's buttons.
-    metaHtml(s) {
-        return `<span>${this.formatDate(s.created_at)}</span>`
-            + this.holdings(s).map(h => `<span class="dot"></span><span>${h}</span>`).join('')
-            + this.runBadge(this.runOf(s))
-            + (s.active ? '<span class="session-active-badge">active</span>' : '')
-            + (s.advanced_diagnostics ? '<span class="session-active-badge session-diag-badge" title="Recorded with Advanced diagnostics on">advanced diagnostics</span>' : '');
     },
 
     // ---- projects: a session has one home, and may serve items elsewhere ----
@@ -245,7 +262,17 @@ const ReviewApp = {
         const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(sid)}"]`);
         const s = this.sessions.find(x => x.session_id === sid);
         if (!el || !s) { this.renderSessionList(); return; }
-        el.outerHTML = this.rowHtml(s);
+        // In place: the row itself stays. Sizes arrive in the background and
+        // repaint rows; a row replaced whole between the press and the release
+        // of a click swallows the click, and the session did not open.
+        const fresh = document.createElement('tbody');
+        fresh.innerHTML = this.rowHtml(s);
+        const row = fresh.firstElementChild;
+        const stop = el.tabIndex;
+        el.className = row.className;
+        el.setAttribute('aria-selected', row.getAttribute('aria-selected'));
+        el.innerHTML = row.innerHTML;
+        el.tabIndex = stop;
     },
 
     repaintFiled() {
@@ -407,6 +434,10 @@ const ReviewApp = {
         const content = document.getElementById('session-content');
         const same = !!(this.currentSession && this.currentSession.session_id === sessionId);
         this.highlightActiveSession(sessionId);                 // the row answers the click now
+        // The page goes to its three zones: the log narrows to the columns
+        // that tell sessions apart.
+        const page = document.getElementById('review-container');
+        if (page) page.dataset.open = sessionId;
         if (!same) content.innerHTML = '<div class="loading-content">Loading session...</div>';
         const run = ++this._loadRun;
 
@@ -428,8 +459,70 @@ const ReviewApp = {
 
     highlightActiveSession(sessionId) {
         document.querySelectorAll('.session-item').forEach(el => {
-            el.classList.toggle('active', el.dataset.sessionId === sessionId);
+            const on = el.dataset.sessionId === sessionId;
+            el.classList.toggle('active', on);
+            el.setAttribute('aria-selected', on ? 'true' : 'false');
         });
+    },
+
+    /** Back to the log alone, on the row that was open. */
+    closeSession() {
+        const sid = this.currentSession && this.currentSession.session_id;
+        this._loadRun++;                                        // an answer still on its way is not drawn
+        this.currentSession = null;
+        const page = document.getElementById('review-container');
+        if (page) delete page.dataset.open;
+        const content = document.getElementById('session-content');
+        if (content) content.innerHTML = '';
+        this.highlightActiveSession(null);
+        this.updateStatusbar();
+        const row = sid && document.querySelector(`.session-item[data-session-id="${CSS.escape(sid)}"]`);
+        if (row) row.focus({ preventScroll: true });
+    },
+
+    // The log is a list to the keyboard: up and down move, Enter opens, Esc
+    // closes. With a session open, moving opens the one moved to.
+    onListKey(e) {
+        const tr = e.target.closest && e.target.closest('tr.session-item');
+        if (!tr || e.target !== tr) return;
+        const go = e.key === 'ArrowDown' ? tr.nextElementSibling : e.key === 'ArrowUp' ? tr.previousElementSibling : null;
+        if (go) {
+            e.preventDefault();
+            tr.tabIndex = -1; go.tabIndex = 0; go.focus();
+            if (this.currentSession) this.loadSession(go.dataset.sessionId);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            this.loadSession(tr.dataset.sessionId);
+        } else if (e.key === 'Escape' && this.currentSession) {
+            e.preventDefault();
+            this.closeSession();
+        }
+    },
+
+    // When, for the log: the day of the week first. "Which night was that"
+    // is asked by the day far more often than by the date.
+    whenWords(iso) {
+        const d = new Date(iso);
+        if (isNaN(d)) return '';
+        return `${d.toLocaleDateString([], { weekday: 'short' })} ${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+    },
+
+    /** How long a session's run lasted, in hours, or null. */
+    lasted(s) {
+        const r = s.last_run || s.run || {};
+        const a = Date.parse(r.started_at), b = Date.parse(s.last_image_at || r.saved_at);
+        return Number.isFinite(a) && Number.isFinite(b) && b > a ? (b - a) / 3600e3 : null;
+    },
+    fmtLasted(h) {
+        if (h == null) return '';
+        return h < 0.1 ? `${Math.max(1, Math.round(h * 60))} min` : `${h.toFixed(1)} h`;
+    },
+    /** How a session's run ended, as the word the log sorts by. */
+    endedWord(s) {
+        if (s.active) return 'live';
+        const run = this.runOf(s);
+        if (run && run.status) return String(run.status);
+        return s.embryo_count ? 'never ran' : '';
     },
 
     // ---- what a session holds, in words ----------------------------------
@@ -554,10 +647,20 @@ const ReviewApp = {
         project: { label: 'Project', dynamic: true, chips: {}, defaults: [] },
     },
 
+    // The log's columns, by the key a heading sorts on. `desc` is the way a
+    // first press orders: the most and the newest first, words from A.
     SORTS: {
-        newest: { label: 'newest', key: s => s.created_at || '', desc: true },
-        timepoints: { label: 'most timepoints', key: s => Number(s.timepoints) || 0, desc: true },
-        size: { label: 'largest', key: s => Number(s.bytes) || 0, desc: true },
+        newest: { key: s => s.created_at || '', desc: true },
+        embryos: { key: s => Number(s.embryo_count) || 0, desc: true },
+        timepoints: { key: s => Number(s.timepoints) || 0, desc: true },
+        every: { key: s => Number((s.last_run || s.run || {}).interval_seconds) || 0, desc: false },
+        lasted: { key: (s, app) => app.lasted(s) || 0, desc: true },
+        brightfield: { key: s => Number(s.bf_frames) || 0, desc: true },
+        ended: { key: (s, app) => app.endedWord(s), desc: false },
+        size: { key: s => Number(s.bytes) || 0, desc: true },
+        project: { key: (s, app) => (app.linksOf(s)[0] ? app.projectName(app.linksOf(s)[0].id) : '~'), desc: false },
+        by: { key: s => (s.operators || []).join(',') || '~', desc: false },
+        name: { key: s => (s.name || s.description || '~').toLowerCase(), desc: false },
     },
 
     // A group's chips: the static table, or the projects the loaded sessions belong to.
@@ -589,6 +692,7 @@ const ReviewApp = {
             state.on[g] = def.dynamic ? want : want.filter(k => def.chips[k]);
         });
         if (saved && this.SORTS[saved.sort]) state.sort = saved.sort;
+        if (saved && typeof saved.desc === 'boolean') state.desc = saved.desc;
         if (saved && typeof saved.open === 'boolean') state.open = saved.open;
         this._filterState = state;
         return state;
@@ -607,9 +711,25 @@ const ReviewApp = {
         this.renderSessionList();
     },
 
+    // A heading pressed orders by its column; pressed again, the other way.
     setSort(key) {
         if (!this.SORTS[key]) return;
-        this.filterState().sort = key;
+        const st = this.filterState();
+        st.desc = st.sort === key ? !this.sortDesc(st) : this.SORTS[key].desc;
+        st.sort = key;
+        this.saveFilterState();
+        this.renderSessionList();
+    },
+    sortDesc(st) {
+        return typeof st.desc === 'boolean' ? st.desc : (this.SORTS[st.sort] || this.SORTS.newest).desc;
+    },
+
+    /** The empties, shown or put away: the line at the foot of the log. */
+    toggleEmpties() {
+        const st = this.filterState();
+        const on = new Set(st.on.content || []);
+        if (on.has('empty')) on.delete('empty'); else { on.add('empty'); on.add('nonempty'); }
+        st.on.content = [...on];
         this.saveFilterState();
         this.renderSessionList();
     },
@@ -667,42 +787,25 @@ const ReviewApp = {
         return bits;
     },
 
-    toggleFilters() {
-        const st = this.filterState();
-        st.open = !st.open;
-        this.saveFilterState();
-        this.renderSessionList();
-    },
-
     renderFilters(searchedSessions, table) {
         const host = document.getElementById('session-filters');
         if (!host) return;
         const st = this.filterState();
-        const summary = this.filterSummary(st);
-        const isDefault = summary.length === 0;
+        const isDefault = this.filterSummary(st).length === 0;
         table = table || this.chipTable();
-        // The counts are only drawn when the panel is open, so they are only counted then.
-        const groups = !st.open ? '' : Object.entries(this.FILTERS).map(([g, def]) => {
+        const groups = Object.entries(this.FILTERS).map(([g, def]) => {
             // The count a chip shows: the searched sessions that pass every OTHER
             // group and this chip — what turning it on alone would keep.
             const others = s => Object.keys(this.FILTERS).filter(o => o !== g).every(o => this.passesGroup(s, o, st.on[o] || [], table));
             const chips = Object.entries(table[g]).map(([k, chip]) => {
                 const n = searchedSessions.filter(s => others(s) && chip.test(s, this)).length;
                 const on = (st.on[g] || []).includes(k);
-                return `<button type="button" class="session-chip${on ? ' is-on' : ''}${n ? '' : ' is-empty'}" onclick="ReviewApp.toggleChip('${g}','${k}')" title="${def.any ? 'Require' : 'Show'} sessions: ${this.escapeHtml(chip.label)}">${this.escapeHtml(chip.label)}${n ? `<span class="n">${n}</span>` : ''}</button>`;
+                return `<button type="button" class="session-chip${on ? ' is-on' : ''}${n ? '' : ' is-empty'}" aria-pressed="${on}" onclick="ReviewApp.toggleChip('${g}','${k}')" title="${def.label}: ${def.any ? 'require' : 'show'} ${this.escapeHtml(chip.label)}">${this.escapeHtml(chip.label)}<small>${n}</small></button>`;
             }).join('');
-            return `<div class="session-filter-label">${def.label}</div><div class="session-filter-chips">${chips}</div>`;
+            return chips ? `<span class="session-filter-group" role="group" aria-label="${def.label}">${chips}</span>` : '';
         }).join('');
-        const sorts = Object.entries(this.SORTS).map(([k, so]) =>
-            `<button type="button" class="session-chip${st.sort === k ? ' is-on' : ''}" onclick="ReviewApp.setSort('${k}')">${so.label}</button>`).join('');
-        host.innerHTML = `
-            <button type="button" class="session-filters-toggle${isDefault ? '' : ' is-set'}" onclick="ReviewApp.toggleFilters()" aria-expanded="${st.open ? 'true' : 'false'}">
-                <span class="session-filters-caret">${st.open ? '▾' : '▸'}</span>
-                <span class="session-filters-word">Filters</span>
-                <span class="session-filters-summary">${isDefault ? 'non-empty · newest' : this.escapeHtml(summary.join(' · '))}</span>
-            </button>
-            ${st.open ? `<div class="session-filters-grid">${groups}<div class="session-filter-label">Sort</div><div class="session-filter-chips">${sorts}</div></div>
-            ${isDefault ? '' : '<button type="button" class="session-filters-reset" onclick="ReviewApp.resetFilters()">Back to the usual view</button>'}` : ''}`;
+        host.innerHTML = groups
+            + (isDefault ? '' : '<button type="button" class="session-filters-reset" onclick="ReviewApp.resetFilters()">Back to the usual view</button>');
     },
 
     applyFilters(sessions, table) {
@@ -710,11 +813,14 @@ const ReviewApp = {
         table = table || this.chipTable();
         const kept = sessions.filter(s => Object.keys(this.FILTERS).every(g => this.passesGroup(s, g, st.on[g] || [], table)));
         const so = this.SORTS[st.sort] || this.SORTS.newest;
+        const desc = this.sortDesc(st);
         kept.sort((a, b) => {
-            const ka = so.key(a), kb = so.key(b);
+            const ka = so.key(a, this), kb = so.key(b, this);
             const c = ka < kb ? -1 : ka > kb ? 1 : 0;
-            return so.desc ? -c : c;
+            return desc ? -c : c;
         });
+        // The live session is the first line, whatever the order.
+        kept.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0));
         return kept;
     },
 
@@ -742,26 +848,72 @@ const ReviewApp = {
             return;
         }
 
-        list.innerHTML = filtered.map(s => this.rowHtml(s)).join('');
+        const st = this.filterState();
+        const th = (key, label, cls, title) => {
+            const on = st.sort === key;
+            return `<th scope="col" class="${cls || ''}" data-sort="${key}" tabindex="0" role="columnheader" aria-sort="${on ? (this.sortDesc(st) ? 'descending' : 'ascending') : 'none'}"${title ? ` title="${title}"` : ''}>${label}</th>`;
+        };
+        list.innerHTML = `<table class="slog" role="grid" aria-label="Sessions, one to a line">
+            <thead><tr>
+                ${th('newest', 'When', 'w-when')}
+                ${th('embryos', 'Emb', 'n w-emb', 'Embryos')}
+                ${th('timepoints', 'Timepoints', 'n w-tp c-tp', 'How far the light-sheet run got: the most timepoints any one embryo has')}
+                ${th('every', 'Every', 'n w-ev c-ev', 'The cadence the run was started with')}
+                ${th('lasted', 'Lasted', 'n w-las c-las')}
+                ${th('brightfield', 'Brightfield', 'n w-bf c-bf', 'Brightfield frames')}
+                ${th('ended', 'Ended', 'w-end')}
+                ${th('size', 'Size', 'n w-size c-size', 'Everything in the session’s folder')}
+                ${th('project', 'Project', 'w-proj c-proj')}
+                ${th('by', 'By', 'w-by c-by')}
+                ${th('name', 'Name or note', 'c-name', 'What someone wrote on it: its name, or the first line of its description')}
+            </tr></thead>
+            <tbody>${filtered.map(s => this.rowHtml(s)).join('')}</tbody></table>`;
         if (scroller) scroller.scrollTop = top;
+        // One row is the list's tab stop: the open one, else the first.
+        const stop = list.querySelector('tr.session-item.active') || list.querySelector('tr.session-item');
+        if (stop) stop.tabIndex = 0;
+        this.renderFoot(searchedSessions, filtered);
     },
 
+    /** How many are showing, and the empty sessions as one line. */
+    renderFoot(searched, shown) {
+        const count = document.getElementById('session-count');
+        if (count) count.innerHTML = `<b>${shown.length}</b> of ${this.sessions.length}`;
+        const foot = document.getElementById('session-empties');
+        if (!foot) return;
+        const empty = searched.filter(s => this.FILTERS.content.chips.empty.test(s)).length;
+        const showing = (this.filterState().on.content || []).includes('empty');
+        const bytes = shown.reduce((n, s) => n + (Number(s.bytes) || 0), 0);
+        foot.innerHTML = (empty
+            ? `<span>${empty} session${empty === 1 ? '' : 's'} with nothing in ${empty === 1 ? 'it' : 'them'}${showing ? ', in the table' : ''}</span>
+               <button type="button" class="slog-link" onclick="ReviewApp.toggleEmpties()">${showing ? 'Hide' : 'Show'}</button>`
+            : '<span></span>')
+            + (bytes ? `<span class="slog-total">${this.fmtBytes(bytes)} in the ${shown.length} shown</span>` : '');
+    },
+
+    // One session, one line. What it holds is the columns; what a person
+    // wrote on it (its name, or the first line of its description) is the
+    // last one, with the room that is left.
     rowHtml(s) {
-            const open = this.currentSession && this.currentSession.session_id === s.session_id;
-            return `
-            <div class="session-item ${s.active ? 'active-session' : ''}${open ? ' active' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
-                <div class="session-name${s.name ? '' : ' is-suggested'}" title="${s.name ? '' : 'Not named yet — this is read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}</div>
-                <div class="session-meta">${this.metaHtml(s)}</div>
-                <div class="session-project">${this.projectChip(s)}</div>
-                ${this._filing && this._filing.sid === s.session_id && this._filing.where === 'list' ? this.renderFilingPopover(s) : ''}
-                ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
-                <div class="session-row-actions">
-                    ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
-                    ${typeof Reveal !== 'undefined' ? Reveal.button(
-                        { what: 'session', session_id: s.session_id }, 'show',
-                        { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
-                </div>
-            </div>`;
+        const sid = s.session_id;
+        const open = this.currentSession && this.currentSession.session_id === sid;
+        const run = s.last_run || s.run || {};
+        const wrote = s.name || String(s.description || '').split('\n')[0];
+        const ended = s.active ? '<span class="session-active-badge">live</span>'
+            : (this.runBadge(this.runOf(s)) || (s.embryo_count ? '<span class="slog-dim">never ran</span>' : ''));
+        return `<tr class="session-item${s.active ? ' active-session' : ''}${open ? ' active' : ''}" data-session-id="${sid}" tabindex="-1" aria-selected="${open ? 'true' : 'false'}" onclick="ReviewApp.loadSession('${sid}')">
+            <td class="slog-when">${this.whenWords(s.created_at)}</td>
+            <td class="n">${s.embryo_count || ''}</td>
+            <td class="n c-tp">${s.timepoints || ''}</td>
+            <td class="n c-ev">${this.fmtInterval(run.interval_seconds)}</td>
+            <td class="n c-las">${this.fmtLasted(this.lasted(s))}</td>
+            <td class="n c-bf">${s.bf_frames || ''}${s.brightfield_references ? '<span class="slog-mark" title="Has dark and flat reference frames">d/f</span>' : ''}</td>
+            <td>${ended}</td>
+            <td class="n c-size">${s.bytes ? this.fmtBytes(s.bytes) : ''}</td>
+            <td class="c-proj slog-proj">${this.projectChip(s)}${this._filing && this._filing.sid === sid && this._filing.where === 'list' ? this.renderFilingPopover(s) : ''}</td>
+            <td class="c-by">${(s.operators || []).map(o => this.escapeHtml(Who.name(o))).join(', ')}</td>
+            <td class="c-name session-name${s.name ? '' : ' is-suggested'}" title="${this.escapeHtml(wrote || `${s.suggested_name || sid} (not named yet: read off the session itself)`)}">${this.escapeHtml(wrote || 'not named')}${s.advanced_diagnostics ? '<span class="slog-mark" title="Recorded with Advanced diagnostics on">diagnostics</span>' : ''}</td>
+        </tr>`;
     },
 
     // Two intents, said apart. Looking at a session is this tab: nothing
@@ -816,58 +968,92 @@ const ReviewApp = {
         const embryos = s.embryos || [];
         const frames = s.bf_frames || [];
 
+        // Two zones beside the log. What the session holds, first and all at
+        // once: the pictures, sized to the room there is. Then its record, in
+        // four panels that keep their places. The pictures used to come last,
+        // 633 px down an 889 px window.
         content.innerHTML = `
-            <div class="session-header">
-                <div class="session-header-row">
-                    <div class="session-title">
-                        <h2 class="${s.name ? '' : 'is-suggested'}" title="${s.name ? '' : 'Not named yet — read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}</h2>
-                        ${s.name ? '' : '<span class="session-title-hint">not named yet</span>'}
-                        <button class="session-edit-btn" onclick="ReviewApp.editName()" title="Name this session">${s.name ? 'Rename' : 'Name it'}</button>
+            <section class="session-view" aria-label="What the session holds">
+                <div class="session-viewbar">
+                    <div class="session-tabs">
+                        <button class="tab ${this.currentTab === 'embryos' ? 'active' : ''}" data-tab="embryos">
+                            Embryos
+                            <span class="tab-count">${embryos.length}</span>
+                        </button>
+                        <button class="tab ${this.currentTab === 'conversation' ? 'active' : ''}" data-tab="conversation">
+                            Conversation
+                            <span class="tab-count">${(s.conversation || []).length}</span>
+                        </button>
+                        <button class="tab ${this.currentTab === 'tools' ? 'active' : ''}" data-tab="tools">
+                            Tools
+                            <span class="tab-count">${(s.tools || []).length}</span>
+                        </button>
                     </div>
+                    <label class="session-scrub" id="session-scrub" hidden title="Puts every picture at one moment of the run">
+                        <input type="range" id="session-scrub-in" min="1" max="1" value="1" aria-label="The timepoint every picture shows">
+                        <span class="session-scrub-at" id="session-scrub-at"></span>
+                    </label>
+                </div>
+                <div class="session-tab-content" id="session-tab-content">
+                    ${this.renderCurrentTab()}
+                </div>
+            </section>
+
+            <aside class="session-record" aria-label="The session's record">
+                <div class="srec-panel session-header">
+                    <h3 class="srec-name">This session</h3>
+                    <div class="session-header-row">
+                        <div class="session-title">
+                            <h2 class="${s.name ? '' : 'is-suggested'}" title="${s.name ? '' : 'Not named yet — read off the session itself'}">${this.escapeHtml(s.name || s.suggested_name || s.session_id)}</h2>
+                            ${s.name ? '' : '<span class="session-title-hint">not named yet</span>'}
+                        </div>
+                        <button class="session-edit-btn" onclick="ReviewApp.editName()" title="Name this session">${s.name ? 'Rename' : 'Name it'}</button>
+                        <button class="srec-close" onclick="ReviewApp.closeSession()" title="Close (Esc from the log)" aria-label="Close this session">×</button>
+                    </div>
+                    <div id="session-name-form"></div>
+                    <div id="session-filed">${this.renderFiled(s)}</div>
+                    ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
+                    <div class="session-stats">
+                        <span>Created: ${this.formatDateTime(s.created_at)}</span>
+                        ${s.last_active ? `<span>Last active: ${this.formatDateTime(s.last_active)}</span>` : ''}
+                        ${(s.operators || []).length ? `<span>Worked by ${s.operators.map(o => Who.chip(o)).join(' ')}</span>` : ''}
+                        ${s.edited && s.edited.by ? `<span>Last edit ${Who.chip(s.edited.by, { when: s.edited.at })} (${this.escapeHtml(s.edited.what || '')})</span>` : ''}
+                        ${s.bytes != null ? `<span title="Everything in the session's folder">On disk: ${this.fmtBytes(s.bytes)}</span>` : ''}
+                    </div>
+                </div>
+                <div class="srec-panel">
+                    <h3 class="srec-name">The run</h3>
+                    ${this.renderRun(this.runOf(s)) || '<div class="session-run">No run in this session.</div>'}
+                    ${this.keptCadence(s)}
+                    ${this.renderPlan(s.acquisition)}
+                </div>
+                <div class="srec-panel">
+                    <h3 class="srec-name">Notes</h3>
+                    <div class="session-stream" id="session-stream"></div>
+                </div>
+                <div class="srec-panel">
+                    <h3 class="srec-name">Take out</h3>
+                    <div class="session-export" id="session-export"></div>
+                    <div class="session-movies" id="session-movies"></div>
+                    ${typeof Reveal !== 'undefined' ? Reveal.button(
+                        { what: 'session', session_id: s.session_id }, 'show',
+                        { label: 'Folder', title: 'Open this session’s folder', cls: 'session-folder-btn' }) : ''}
+                </div>
+                <div class="srec-foot">
                     ${s.active ? '<span class="session-active-badge">live now</span>'
-                        : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>`}
+                        : `<button class="session-resume-btn session-resume-main" onclick="ReviewApp.resumeSession('${s.session_id}')" title="New images, chat and stage targets will belong to this session">Make live</button>
+                           <p class="srec-note">Makes this the live session. The one that is live now is saved first. It asks before it does.</p>`}
                 </div>
-                <div id="session-name-form"></div>
-                <div id="session-filed">${this.renderFiled(s)}</div>
-                ${s.description ? `<p class="session-description">${this.escapeHtml(s.description)}</p>` : ''}
-                <div class="session-stats">
-                    <span>Created: ${this.formatDateTime(s.created_at)}</span>
-                    ${s.last_active ? `<span>Last active: ${this.formatDateTime(s.last_active)}</span>` : ''}
-                    ${(s.operators || []).length ? `<span>Worked by ${s.operators.map(o => Who.chip(o)).join(' ')}</span>` : ''}
-                    ${s.edited && s.edited.by ? `<span>Last edit ${Who.chip(s.edited.by, { when: s.edited.at })} (${this.escapeHtml(s.edited.what || '')})</span>` : ''}
-                    ${s.bytes != null ? `<span title="Everything in the session's folder">On disk: ${this.fmtBytes(s.bytes)}</span>` : ''}
-                </div>
-                ${this.renderRun(this.runOf(s))}
-                <div class="session-export" id="session-export"></div>
-                <div class="session-movies" id="session-movies"></div>
-            </div>
-
-            <div class="session-stream" id="session-stream"></div>
-
-            ${this.renderPlan(s.acquisition)}
-
-            <div class="session-tabs">
-                <button class="tab ${this.currentTab === 'embryos' ? 'active' : ''}" data-tab="embryos">
-                    Embryos
-                    <span class="tab-count">${embryos.length}</span>
-                </button>
-                <button class="tab ${this.currentTab === 'conversation' ? 'active' : ''}" data-tab="conversation">
-                    Conversation
-                    <span class="tab-count">${(s.conversation || []).length}</span>
-                </button>
-                <button class="tab ${this.currentTab === 'tools' ? 'active' : ''}" data-tab="tools">
-                    Tools
-                    <span class="tab-count">${(s.tools || []).length}</span>
-                </button>
-            </div>
-
-            <div class="session-tab-content" id="session-tab-content">
-                ${this.renderCurrentTab()}
-            </div>
+            </aside>
         `;
 
         this.setupTabHandlers();
         this.wireScrub();
+        this.fitTiles();
+        if (!this._fitWatch && typeof ResizeObserver !== 'undefined') {
+            this._fitWatch = new ResizeObserver(() => this.fitTiles());
+            this._fitWatch.observe(content);
+        }
         this.pollExport(true);
         this.pollMovie(true);
         this.mountStream(s.session_id);
@@ -1246,7 +1432,71 @@ const ReviewApp = {
 
     // ---- scrubbing through an embryo's timepoints ------------------------
 
+    // The cadence a run kept, beside the one it was asked for: how long it
+    // lasted over the rounds it took. Every round runs a few seconds long.
+    keptCadence(s) {
+        const row = this.sessions.find(x => x.session_id === s.session_id) || s;
+        const asked = Number((row.last_run || row.run || {}).interval_seconds);
+        const h = this.lasted(row), tp = Number(row.timepoints) || 0;
+        if (!asked || h == null || tp < 2) return '';
+        const kept = (h * 3600) / (tp - 1);
+        return `<div class="session-run session-kept" title="How long the run lasted, over the rounds it took">Kept ${kept.toFixed(1)} s a round for the ${this.fmtInterval(asked)} asked</div>`;
+    },
+
+    // The largest tile at which every embryo is on screen with nothing to
+    // scroll: eleven embryos used to be three rows and a 1,751 px pane. The
+    // room under a picture is measured, not assumed. Below a tile worth
+    // looking at the grid scrolls instead.
+    fitTiles(again) {
+        const grid = document.querySelector('#session-tab-content .embryo-grid');
+        const host = document.getElementById('session-tab-content');
+        if (!grid || !host) return;
+        const cards = [...grid.children];
+        const n = cards.length;
+        if (!n) return;
+        // What sits under a picture, from the tile that has the most to say.
+        const under = Math.max(...cards.map(c => {
+            const thumb = c.querySelector('.embryo-thumb');
+            return thumb ? c.offsetHeight - thumb.offsetHeight : 0;
+        }));
+        const top = grid.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
+        const W = host.clientWidth, H = host.clientHeight - top, gap = 8, ratio = 4 / 3;
+        let best = { w: 0, across: 1 };
+        for (let across = 1; across <= n; across++) {
+            const down = Math.ceil(n / across);
+            const w = Math.min((W - gap * (across - 1)) / across, ((H - gap * (down - 1)) / down - under) * ratio);
+            if (w > best.w) best = { w, across };
+        }
+        const w = Math.max(120, Math.min(420, Math.floor(best.w)));
+        grid.style.setProperty('--tile-w', `${w}px`);
+        grid.style.setProperty('--across', String(Math.max(1, Math.min(n, Math.floor((W + gap) / (w + gap))))));
+        // A wider tile has a shorter caption (its words stop wrapping), so
+        // the room is measured once more at the size just chosen.
+        if (!again) this.fitTiles(true);
+    },
+
+    // One line moves every picture together, so the dish can be put at any
+    // moment of the run: what did it look like at 3 am. Each picture shows
+    // the newest timepoint it has at or before the moment chosen.
+    _scrubT: null,              // null is "the newest"
+    scrubAll(t) {
+        this._scrubT = t;
+        document.querySelectorAll('.embryo-thumb[data-embryo]').forEach(el => { if (el._showAt) el._showAt(t); });
+        const at = document.getElementById('session-scrub-at'), input = document.getElementById('session-scrub-in');
+        if (at && input) at.textContent = `t ${t == null ? input.max : t} of ${input.max}`;
+    },
+
     wireScrub() {
+        const bar = document.getElementById('session-scrub'), input = document.getElementById('session-scrub-in');
+        const most = Math.max(0, ...((this.currentSession && this.currentSession.embryos) || [])
+            .map(e => Math.max(0, ...(e.projection_timepoints || [0]))));
+        this._scrubT = null;
+        if (bar && input) {
+            bar.hidden = this.currentTab !== 'embryos' || most < 2;
+            input.max = String(Math.max(1, most)); input.value = input.max;
+            input.oninput = () => this.scrubAll(Number(input.value) >= most ? null : Number(input.value));
+            this.scrubAll(null);
+        }
         document.querySelectorAll('.embryo-thumb[data-embryo]').forEach(el => {
             const eid = el.dataset.embryo;
             // The card's picture is the counts, drawn by the viewer at the size a
@@ -1291,12 +1541,16 @@ const ReviewApp = {
                 if (img.dataset.loading) { want = t; return; }
                 apply(t);
             };
+            // The moment the page's one scrubber asks for: the newest
+            // timepoint this embryo has at or before it.
+            el._showAt = t => show(t == null ? tps[tps.length - 1] : (tps.filter(x => x <= t).pop() || tps[0]));
             el.addEventListener('mousemove', ev => {
                 const r = el.getBoundingClientRect();
                 const i = Math.min(tps.length - 1, Math.max(0, Math.floor(((ev.clientX - r.left) / r.width) * tps.length)));
                 show(tps[i]);
             });
-            el.addEventListener('mouseleave', () => show(tps[tps.length - 1]));
+            // Leaving a picture puts it back at the page's moment, not at its last.
+            el.addEventListener('mouseleave', () => el._showAt(this._scrubT));
         });
     },
 
@@ -1419,6 +1673,7 @@ const ReviewApp = {
                 document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
                 this.wireScrub();
                 this.mountTools();
+                this.fitTiles();
             });
         });
     },
@@ -1520,7 +1775,7 @@ const ReviewApp = {
                             : '<div class="embryo-thumb embryo-thumb-empty">no image</div>'}
                         <div class="embryo-header">
                             <h3>${this.escapeHtml(name)}${sub ? ` <small>${this.escapeHtml(sub)}</small>` : ''}</h3>
-                            ${e.role ? `<span class="chip embryo-role" title="Its role in the run">${this.escapeHtml(e.role)}</span>` : ''}
+                            ${e.role && e.role !== 'unassigned' ? `<span class="chip embryo-role" title="Its role in the run">${this.escapeHtml(e.role)}</span>` : ''}
                             ${e.is_complete ? '<span class="status-badge complete">Complete</span>' : ''}
                         </div>
                         <div class="embryo-details">

@@ -139,29 +139,45 @@
 }
 
 /* ── the temperature fold (Devices tab) ─────────────────────────
-   The chart is history; the number is the fact. Collapsed, this costs one
-   line and still answers "is the water where I set it". */
+   The chart is history; the number is the fact. The number is one reading
+   in the tab's toolbar (the button below), which costs no line at all and
+   still answers "is the water where I set it"; the chart, when asked for,
+   lies over the foot of the page instead of pushing the page up. It was a
+   strip under every view of the tab, 50 px the picture did not get. */
+.devices-container { position: relative; }
 .devices-tempwrap {
-    margin-top: 10px;
-    border-top: 1px solid var(--border);
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 8px;
+    z-index: 30;
+    padding: 6px 10px 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
 }
+.devices-tempwrap.is-collapsed { display: none; }
 .devices-tempwrap-head {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    width: 100%;
-    padding: 0.5rem 0.25rem;
+    gap: 0.4rem;
+    padding: 0.18rem 0.5rem;
     background: none;
-    border: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
     cursor: pointer;
     font: inherit;
     color: var(--text-muted);
     text-align: left;
+    white-space: nowrap;
 }
+.devices-tempwrap-head[aria-expanded="true"] { border-color: var(--border); color: var(--text); }
+.devices-tempwrap-head[hidden] { display: none; }
 .devices-tempwrap-head:hover { color: var(--text); }
 .devices-tempwrap-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 .devices-tempwrap-chev { flex: none; transition: transform 0.15s ease; }
-.devices-tempwrap:not(.is-collapsed) .devices-tempwrap-chev { transform: rotate(90deg); }
+.devices-tempwrap-head[aria-expanded="true"] .devices-tempwrap-chev { transform: rotate(90deg); }
 .devices-tempwrap-title {
     font-size: 0.68rem;
     letter-spacing: 0.08em;

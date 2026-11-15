@@ -38,7 +38,6 @@ class TestSchema:
             "plan_templates",
             "plan_snapshots",
             "agent_state",
-            "campaign_participants",
         }
         for t in expected:
             assert t in table_names, f"Missing table: {t}"
@@ -105,22 +104,6 @@ class TestCampaigns:
         assert counts["campaigns"] == 2
         assert context_store.get_campaign(root) is None
         assert context_store.get_campaign(child) is None
-
-    def test_share_and_unshare_campaign(self, context_store):
-        cid = context_store.create_campaign(description="Shared campaign")
-        assert len(context_store.get_shared_campaigns()) == 0
-        context_store.share_campaign(cid)
-        shared = context_store.get_shared_campaigns()
-        assert len(shared) == 1
-        context_store.unshare_campaign(cid)
-        assert len(context_store.get_shared_campaigns()) == 0
-
-    def test_campaign_participants(self, context_store):
-        cid = context_store.create_campaign(description="Collab")
-        context_store.add_campaign_participant(cid, "peer-1", "workstation-1")
-        context_store.add_campaign_participant(cid, "peer-2", "microscope-1")
-        participants = context_store.get_campaign_participants(cid)
-        assert len(participants) == 2
 
 
 class TestPlanItems:
@@ -190,33 +173,6 @@ class TestPlanItems:
         assert status["total"] == 2
         assert status["completed"] == 1
         assert status["planned"] == 1
-
-    def test_claim_plan_item(self, context_store):
-        cid = context_store.create_campaign(description="C1")
-        item_id = context_store.create_plan_item(
-            campaign_id=cid,
-            type="imaging",
-            title="T1",
-        )
-        success = context_store.claim_plan_item(item_id, "peer-1", "workstation")
-        assert success is True
-        item = context_store.get_plan_item(item_id)
-        assert item.claimed_by == "peer-1"
-        # Another peer should fail to claim
-        success2 = context_store.claim_plan_item(item_id, "peer-2", "other")
-        assert success2 is False
-
-    def test_unclaim_plan_item(self, context_store):
-        cid = context_store.create_campaign(description="C1")
-        item_id = context_store.create_plan_item(
-            campaign_id=cid,
-            type="imaging",
-            title="T1",
-        )
-        context_store.claim_plan_item(item_id, "peer-1", "ws")
-        context_store.unclaim_plan_item(item_id)
-        item = context_store.get_plan_item(item_id)
-        assert item.claimed_by is None
 
     def test_delete_plan_item(self, context_store):
         cid = context_store.create_campaign(description="C1")

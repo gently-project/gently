@@ -38,7 +38,7 @@ class SessionSummary:
 
 @dataclass
 class NetworkDataInventory:
-    """Aggregated inventory of all data across the mesh."""
+    """Aggregated inventory of all local data."""
 
     local_sessions: list[SessionSummary] = field(default_factory=list)
     remote_sessions: list[SessionSummary] = field(default_factory=list)

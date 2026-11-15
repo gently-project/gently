@@ -42,7 +42,7 @@ def test_the_list_says_it_once_above_itself():
     fn = _fn("legend")
     assert "selected</b> for a run" in fn
     assert "The instrument acts on" in fn
-    assert "host.innerHTML = legend(embryos, selected, inSet)" in ROSTER
+    assert "patch(host, [legend(embryos, selected, inSet)]" in ROSTER
 
 
 def test_it_says_how_the_set_is_changed():

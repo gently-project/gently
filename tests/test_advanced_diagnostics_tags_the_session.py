@@ -113,4 +113,6 @@ class TestTheTag:
     def test_the_lists_carry_and_show_it(self) -> None:
         assert '"advanced_diagnostics": bool(' in SESSIONS_PY
         assert "s.advanced_diagnostics" in HOME_JS and "home-tag-diag" in HOME_JS
-        assert "s.advanced_diagnostics" in REVIEW_JS and "session-diag-badge" in REVIEW_JS
+        # In the log it is a quiet mark on the row's last cell.
+        assert "s.advanced_diagnostics" in REVIEW_JS
+        assert "Recorded with Advanced diagnostics on" in REVIEW_JS

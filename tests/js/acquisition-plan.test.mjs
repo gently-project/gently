@@ -204,3 +204,30 @@ test('the embryos do not all fit in one field: a frame from each pinned position
     assert.equal('positions' in P.toPayload(one, IDS).bf, false);
     assert.deepEqual(P.toPayload(one, IDS).bf.position, { x: -500, y: -400 });
 });
+
+// ── which sides a round takes ─────────────────────────────────────────────
+
+test('a plan on side A alone sends no sides, as before', () => {
+
+    const body = P.toPayload(P.fromForm({ interval: 60, intervalUnit: 's', volumes: true }), ['embryo_1']);
+    assert.equal('sides' in body, false);
+    assert.deepEqual(P.fromForm({ interval: 60, intervalUnit: 's', sides: 'A' }).spim.sides, ['A']);
+});
+
+test('a plan that takes side B says which sides, and keeps them when saved', () => {
+
+    const both = P.fromForm({ interval: 60, intervalUnit: 's', volumes: true, sides: 'AB' });
+    assert.deepEqual(P.toPayload(both, ['embryo_1']).sides, ['A', 'B']);
+    assert.deepEqual(P.toPayload(P.fromForm({ interval: 60, intervalUnit: 's', volumes: true, sides: 'B' }), []).sides, ['B']);
+    assert.deepEqual(P.fromStructure(P.toStructure(both)).spim.sides, ['A', 'B']);
+    assert.deepEqual(P.fromForm({ interval: 60, intervalUnit: 's', sides: 'nonsense' }).spim.sides, ['A']);
+});
+
+test('a kept plan whose ending came as a kind and a number apart keeps its number', () => {
+    // The first two-sided run was started with {stop_condition: "duration", condition_value: 16}
+    // and the page said "after 1 h" over it.
+    const plan = P.fromStructure({ interval: 300, stop_condition: 'duration', condition_value: 16, volumes: true });
+    assert.deepEqual(plan.stop, { kind: 'duration', value: 16 });
+    assert.match(P.describe(plan, [{ id: 'embryo_2', label: '2' }]), /after 16 h/);
+    assert.equal(P.fromStructure({ interval: 300, stop_condition: 'duration:8', condition_value: 16 }).stop.value, 8);
+});

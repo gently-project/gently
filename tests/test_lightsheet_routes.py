@@ -108,6 +108,24 @@ def test_live_params_forwards():
     )
 
 
+def test_live_params_get_reads_without_writing():
+    """GET params asks the device layer with an empty post: what it holds, unchanged."""
+    client = MagicMock()
+    client.is_connected = True
+    client.set_lightsheet_live_params = AsyncMock(
+        return_value={"params": {"galvo": 0.3, "piezo": -12.0, "exposure": 20.0, "side": "B"}}
+    )
+    r = _app(client=client).get("/api/devices/lightsheet/live/params")
+    assert r.status_code == 200
+    assert r.json()["params"]["side"] == "B"
+    client.set_lightsheet_live_params.assert_awaited_once_with()
+
+
+def test_live_params_get_no_client_503():
+    r = _app(client=None).get("/api/devices/lightsheet/live/params")
+    assert r.status_code == 503
+
+
 def test_live_params_no_client_503():
     server = MagicMock()
     server.agent_bridge.agent.client = None

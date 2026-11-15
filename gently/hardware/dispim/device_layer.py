@@ -122,22 +122,28 @@ class DeviceLayerServer(Service):
         # Device-state streaming (ASIdiSPIM StagePositionUpdater pattern)
         # ------------------------------------------------------------------
         # Positions polled at 2 Hz, full system state cache every 15 s.
-        # Properties (exposure, gain, laser/shutter state, etc.) almost never
-        # change unless something calls a setter, so a slow refresh is fine.
-        # Positions change continuously during stage moves and must stay live.
-        # Both pollers contend for pymmcore's internal `g_core_lock`, so a
-        # short property interval would starve position reads —
-        # updateSystemStateCache() takes ~1.5 s on this hardware (Tiger
-        # controller over serial).
+        # Every Tiger device shares one serial port and one adapter lock, so a
+        # poll is not free: whatever an operator presses waits behind the read
+        # in flight. On 2026-11-08, with XY asked for at 5 Hz (2 exchanges a
+        # read), piezo + galvo + F + bottom-Z at 1 Hz (5 exchanges) and every
+        # property swept each 15 s, the pollers' own reads were logging slow
+        # (XY over 0.4 s, the others over 0.6 s, the sweep 1.5-2.8 s) and a
+        # beam write took ~135 ms, ~200 ms under the live view. The cadences
+        # below ask for a third of the exchanges those did (5 a second, not 16):
+        #   XY                  2 Hz    the joystick moves it; 2 exchanges
+        #   F-drive, bottom Z   0.5 Hz  a knob can move them; 2 exchanges
+        #   piezo, galvo        when something has moved them (a live-view
+        #                       pose, a plan), else every 10 s; 3 exchanges
+        #   properties          not polled. Read once at start, and again when
+        #                       someone asks (GET /api/devices/state?refresh=1).
         # Plans that own MMCore for performance-critical sections (volume
         # acquisition, calibration sweeps, focus sweeps) bracket themselves
-        # with `pause_state_updates()` so the poller goes quiet while they
-        # run. Plain stage moves / LED changes / snaps don't pause — the
-        # adapter's per-device mutex handles the contention fine, and we
-        # want the readout to stay live.
-        self._state_pos_interval_sec = 0.2  # 5 Hz target for XY (hard floor ~4 Hz on ASI)
-        self._state_slow_pos_interval_sec = 1.0  # 1 Hz piezo + galvo
-        self._state_prop_interval_sec = 15.0  # ~0.07 Hz full-state cadence
+        # with `pause_state_updates()` so the pollers go quiet while they
+        # run. Plain stage moves / LED changes / snaps don't pause.
+        self._state_pos_interval_sec = 0.5  # 2 Hz XY
+        self._state_slow_pos_interval_sec = 2.0  # 0.5 Hz F-drive + bottom Z
+        self._state_optics_interval_sec = 10.0  # piezo + galvo, unless marked moved
+        self._state_optics_moved = True  # read them on the first slow tick
         self._state_pause_counter = 0
         self._state_updating_now = False
         self._state_latest: dict[str, Any] = {
@@ -204,6 +210,7 @@ class DeviceLayerServer(Service):
             "mode": "snap",
         }
         self._ls_seq_started: bool = False
+        self._ls_range: dict[str, dict] = {}  # per side, the axes' extents, read once
         self._ls_applied: dict = {}  # last-applied galvo/piezo/exposure
         self._ls_parked: dict = {}  # last-parked galvo/piezo setPosition values
         self._ls_spim_idle: bool = False  # whether SPIM state machine was set Idle this session
@@ -661,6 +668,8 @@ class DeviceLayerServer(Service):
             self._state_pause_counter = max(0, self._state_pause_counter - 1)
             if self._state_pause_counter == 0:
                 self._state_latest["paused"] = False
+                # Whatever held MMCore may have moved the piezo or the galvo.
+                self._state_optics_moved = True
 
     def _read_xy_position(self) -> dict[str, Any]:
         """Read just the XY stage via the ophyd device's ``read()``.
@@ -685,15 +694,17 @@ class DeviceLayerServer(Service):
                 logger.debug("XY position read failed: %s", exc)
         return out
 
-    def _read_slow_positions(self) -> dict[str, Any]:
-        """Read piezo + galvo via their ophyd ``read()`` methods.
+    def _read_slow_positions(self, optics: bool = True) -> dict[str, Any]:
+        """Read the axes that are not XY via their ophyd ``read()`` methods.
 
-        These rarely change on their own — piezo by Z-knob or commands, galvo
-        only programmatically — so a 1 Hz cadence is plenty.
+        Two kinds, on two cadences. The F-drive and the bottom Z can be moved
+        at the controller, so they are read on every slow tick. The piezo and
+        the galvo move only when something here moves them, so ``optics`` asks
+        for them only then (and now and again, in case something did not say).
         """
         out: dict[str, Any] = {}
 
-        piezo = self.devices.get("piezo")
+        piezo = self.devices.get("piezo") if optics else None
         if piezo is not None:
             try:
                 data = piezo.read()
@@ -704,7 +715,7 @@ class DeviceLayerServer(Service):
             except Exception as exc:
                 logger.debug("Piezo position read failed: %s", exc)
 
-        scanner = self.devices.get("scanner")
+        scanner = self.devices.get("scanner") if optics else None
         if scanner is not None:
             try:
                 data = scanner.read()
@@ -717,7 +728,7 @@ class DeviceLayerServer(Service):
             except Exception as exc:
                 logger.debug("Galvo position read failed: %s", exc)
 
-        # SPIM-head F-drive — not on its own knob loop, so 1 Hz is plenty.
+        # SPIM-head F-drive — not on its own knob loop, so 0.5 Hz is plenty.
         # Streamed so the Operate view can show head height + distance-to-floor.
         fdrive = self.devices.get("fdrive")
         if fdrive is not None:
@@ -785,12 +796,42 @@ class DeviceLayerServer(Service):
 
         return by_device
 
-    async def _position_poller(self):
-        """Fast loop: only reads positions and broadcasts.
+    def _tick_payload(self, **extra: Any) -> dict[str, Any]:
+        """What a poll tick broadcasts: the snapshot without its properties.
 
-        Runs at `_state_pos_interval_sec` (default 2 Hz) and stays responsive
-        even when the property poller is busy with a slow MMCore property
-        snapshot.
+        The properties are several hundred values that change only when
+        something sets one. Riding on every tick they cost each browser 24 KB
+        and a redraw of the whole table, six times a second, to say nothing
+        had changed. They travel when they have been read: `_sweep_properties`.
+        """
+        payload = {k: v for k, v in self._state_latest.items() if k != "properties"}
+        payload.update(extra)
+        return payload
+
+    async def _sweep_properties(self, positions: bool = False) -> bool:
+        """Read every property of every device, once, and broadcast the whole
+        snapshot. At start, and when someone asks for it. Not while a plan
+        owns MMCore, and not twice at once; says whether it read."""
+        if self._state_pause_counter > 0 or self._state_updating_now:
+            return False
+        self._state_updating_now = True
+        try:
+            fresh: dict[str, Any] = {}
+            if positions:
+                xy = await asyncio.to_thread(self._read_xy_position)
+                slow = await asyncio.to_thread(self._read_slow_positions)
+                fresh["positions"] = {**self._state_latest.get("positions", {}), **xy, **slow}
+            fresh["properties"] = await asyncio.to_thread(self._read_full_state)
+            self._state_latest = {**self._state_latest, **fresh, "t": time.time(), "paused": False}
+            await self._broadcast_state(self._state_latest)
+            return True
+        finally:
+            self._state_updating_now = False
+
+    async def _position_poller(self):
+        """Fast loop: reads XY and broadcasts the positions.
+
+        Runs at `_state_pos_interval_sec` (2 Hz).
 
         Honours `_state_pause_counter`: while > 0 it emits heartbeats every
         ~2 s so the browser can show a "paused" indicator.
@@ -808,12 +849,7 @@ class DeviceLayerServer(Service):
                     now = time.time()
                     if now - last_heartbeat > 2.0:
                         await self._broadcast_state(
-                            {
-                                **self._state_latest,
-                                "t": now,
-                                "paused": True,
-                                "heartbeat": True,
-                            }
+                            self._tick_payload(t=now, paused=True, heartbeat=True)
                         )
                         last_heartbeat = now
                     await asyncio.sleep(self._state_pos_interval_sec)
@@ -824,7 +860,7 @@ class DeviceLayerServer(Service):
                 read_elapsed = time.monotonic() - read_start
                 # XY is two serial round-trips on ASI Tiger (~250 ms). Warn if
                 # we exceed 400 ms — that means something else is holding the
-                # MMCore lock.
+                # adapter's lock.
                 if read_elapsed > 0.4:
                     logger.warning(
                         "XY position read slow: %.2fs (target<%.2fs)",
@@ -845,7 +881,7 @@ class DeviceLayerServer(Service):
                     "t": now,
                     "paused": False,
                 }
-                await self._broadcast_state(self._state_latest)
+                await self._broadcast_state(self._tick_payload())
                 last_heartbeat = now
 
             except asyncio.CancelledError:
@@ -858,11 +894,11 @@ class DeviceLayerServer(Service):
             await asyncio.sleep(max(0.0, self._state_pos_interval_sec - elapsed))
 
     async def _slow_positions_poller(self):
-        """Piezo + galvo polling. Joystick doesn't move these, so 1 Hz is plenty.
-
-        Splitting these off the XY fast path was the key to getting XY up to
-        ~4 Hz: each ASI serial round-trip is ~125 ms, and XY alone takes two.
+        """The axes that are not XY: F-drive and bottom Z on every tick, piezo
+        and galvo when something has moved them or `_state_optics_interval_sec`
+        has gone by. Off the XY path, since each exchange is ~110 ms.
         """
+        last_optics = 0.0
         logger.info(
             "Slow-positions poller started (target=%.2f Hz)",
             1.0 / self._state_slow_pos_interval_sec,
@@ -876,9 +912,16 @@ class DeviceLayerServer(Service):
                     continue
 
                 read_start = time.monotonic()
-                slow_positions = await asyncio.to_thread(self._read_slow_positions)
+                optics = (
+                    self._state_optics_moved
+                    or read_start - last_optics >= self._state_optics_interval_sec
+                )
+                if optics:
+                    self._state_optics_moved = False
+                    last_optics = read_start
+                slow_positions = await asyncio.to_thread(self._read_slow_positions, optics)
                 read_elapsed = time.monotonic() - read_start
-                if read_elapsed > 0.6:
+                if read_elapsed > 0.8:
                     logger.warning(
                         "Slow-positions read slow: %.2fs",
                         read_elapsed,
@@ -894,7 +937,7 @@ class DeviceLayerServer(Service):
                     "positions": merged_positions,
                     "t": time.time(),
                 }
-                await self._broadcast_state(self._state_latest)
+                await self._broadcast_state(self._tick_payload())
 
             except asyncio.CancelledError:
                 logger.info("Slow-positions poller cancelled")
@@ -904,50 +947,6 @@ class DeviceLayerServer(Service):
 
             elapsed = time.monotonic() - tick_start
             await asyncio.sleep(max(0.0, self._state_slow_pos_interval_sec - elapsed))
-
-    async def _property_poller(self):
-        """Slow loop: refreshes the full MMCore property cache.
-
-        Runs independently of the position poller so a multi-second
-        `updateSystemStateCache()` call cannot stall position updates. Updates
-        `_state_latest['properties']` in place and broadcasts.
-        """
-        logger.info(
-            "Property poller started (target=%.2f Hz)",
-            1.0 / self._state_prop_interval_sec,
-        )
-
-        while not getattr(self, "_shutdown_event", asyncio.Event()).is_set():
-            tick_start = time.monotonic()
-            try:
-                if self._state_pause_counter > 0:
-                    await asyncio.sleep(self._state_prop_interval_sec)
-                    continue
-
-                read_start = time.monotonic()
-                properties = await asyncio.to_thread(self._read_full_state)
-                read_elapsed = time.monotonic() - read_start
-                if read_elapsed > 1.0:
-                    logger.warning(
-                        "Property read slow: %.2fs",
-                        read_elapsed,
-                    )
-
-                self._state_latest = {
-                    **self._state_latest,
-                    "properties": properties,
-                    "t": time.time(),
-                }
-                await self._broadcast_state(self._state_latest)
-
-            except asyncio.CancelledError:
-                logger.info("Property poller cancelled")
-                raise
-            except Exception:
-                logger.exception("Property poller iteration failed")
-
-            elapsed = time.monotonic() - tick_start
-            await asyncio.sleep(max(0.0, self._state_prop_interval_sec - elapsed))
 
     async def _broadcast_state(self, payload: dict[str, Any]):
         """Push a state payload to every SSE subscriber. Drop slow clients."""
@@ -1202,6 +1201,10 @@ class DeviceLayerServer(Service):
         """
         p = self._ls_params
         side = p.get("side", "A")
+        if side == "Multi":
+            # Both cameras, no side of its own: the sheets stay wherever A and
+            # B were last parked, and the beams wherever the operator left them.
+            return
 
         # Resolve scanner for the requested side (with fallback to A).
         if side == "B":
@@ -1240,6 +1243,10 @@ class DeviceLayerServer(Service):
                 except Exception:
                     pass
             self._ls_spim_idle = True
+        # The cache is per side: the same numbers on the other side are a
+        # different scanner and piezo, which have not been parked yet.
+        if self._ls_parked.get("side") != side:
+            self._ls_parked = {"side": side}
         # setPosition only when the value changed from last-applied.
         if scanner is not None:
             want = float(p["galvo"])
@@ -1278,10 +1285,13 @@ class DeviceLayerServer(Service):
         # Resolve the camera for the requested side
         if side == "B" and "camera_b" in self.devices:
             cam = self.devices["camera_b"]
+        elif side == "Multi" and "camera_multi" in self.devices:
+            cam = self.devices["camera_multi"]
         else:
-            if side == "B":
+            if side in ("B", "Multi"):
                 logger.warning(
-                    "Side B requested but camera_b not registered; falling back to side A"
+                    "Side %s requested but its camera is not registered; falling back to side A",
+                    side,
                 )
             cam = self.devices.get("camera")
 
@@ -1353,6 +1363,30 @@ class DeviceLayerServer(Service):
                 _safe_obtain = None
             core = self.system.core
             mode = self._ls_params.get("mode", "snap")
+            multi = (
+                self._ls_params.get("side") == "Multi" and self._ls_applied.get("side") == "Multi"
+            )
+            if multi:
+                # One exposure on both cameras, then each channel is matched
+                # to its camera by name, the way the ASIdiSPIM plugin reads
+                # the "Camera" tag off every frame rather than trusting an
+                # order. The adapter numbers channels in "Physical Camera N"
+                # order, so with the rig's config 0 is A and 1 is B; the
+                # fallback keeps that when names are not readable.
+                core.snapImage()
+                a_name = getattr(self.devices.get("camera"), "name", None)
+                b_name = getattr(self.devices.get("camera_b"), "name", None)
+                by_name: dict[str, Any] = {}
+                try:
+                    for ch in range(int(core.getNumberOfCameraChannels())):
+                        by_name[str(core.getCameraChannelName(ch))] = core.getImage(ch)
+                except Exception:
+                    by_name = {}
+                if a_name in by_name and b_name in by_name:
+                    a, b = by_name[a_name], by_name[b_name]
+                else:
+                    a, b = core.getImage(0), core.getImage(1)
+                return self._compose_multi(np.asarray(a), np.asarray(b))
             if mode == "snap":
                 core.snapImage()
                 img = core.getImage()
@@ -1371,6 +1405,33 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.debug("Lightsheet grab failed: %s", exc)
             return None
+
+    @staticmethod
+    def _compose_multi(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+        """Side A in red, side B in green, each auto-contrasted on its own.
+
+        Returned as an 8-bit BGR frame, which is what the JPEG encoder takes
+        as-is. The two sensors are the same model, but a shape mismatch is
+        cropped to the common size rather than failed.
+        """
+
+        def to8(x: np.ndarray) -> np.ndarray:
+            flat = x.ravel()
+            step = max(1, flat.size // 4096)
+            sample = flat[::step]
+            lo = float(np.percentile(sample, 1))
+            hi = float(np.percentile(sample, 99))
+            if hi <= lo:
+                hi = lo + 1.0
+            return np.clip((x.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(
+                np.uint8
+            )
+
+        h = min(a.shape[0], b.shape[0])
+        w = min(a.shape[1], b.shape[1])
+        red = to8(a[:h, :w])
+        green = to8(b[:h, :w])
+        return np.dstack([np.zeros_like(red), green, red])
 
     def _stop_lightsheet_sequence_sync(self) -> None:
         try:
@@ -1403,7 +1464,10 @@ class DeviceLayerServer(Service):
                 tick = time.monotonic()
                 img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
                 if img is not None:
-                    self._last_ls_frame = img
+                    # Multi's A-red-over-B-green frame is a rendering, drawn from
+                    # its JPEG; the counts route serves one camera's frame or none.
+                    # ponytail: a two-colour U16View would put Multi on counts too.
+                    self._last_ls_frame = img if img.ndim == 2 else None
                 payload = (
                     self._encode_frame_for_stream(
                         img, self._ls_target_max_dim, self._ls_jpeg_quality
@@ -1412,6 +1476,7 @@ class DeviceLayerServer(Service):
                     else None
                 )
                 if payload is not None:
+                    payload["side"] = self._ls_params.get("side", "A")
                     await self._broadcast_lightsheet(payload)
                 elapsed = time.monotonic() - tick
                 # Pace to at least the exposure; peek-rate caps near the camera rate.
@@ -1494,16 +1559,90 @@ class DeviceLayerServer(Service):
     async def handle_lightsheet_params(self, request):
         """POST /api/lightsheet/live/params — update live galvo/piezo/exposure/side.
 
-        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"} (all optional).
+        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"|"Multi"}
+        (all optional). "Multi" is Micro-Manager's Multi Camera, both sides in one frame.
         Galvo/piezo apply on the next grab; exposure or side change triggers sequence restart.
         """
         body = await request.json()
         for k in ("galvo", "piezo", "exposure"):
             if k in body and body[k] is not None:
                 self._ls_params[k] = float(body[k])
-        if "side" in body and body["side"] in ("A", "B"):
+                if k != "exposure":
+                    self._state_optics_moved = True  # read back on the next slow tick
+        if "side" in body and body["side"] in ("A", "B", "Multi"):
+            previous = self._ls_params.get("side", "A")
             self._ls_params["side"] = body["side"]
+            if body["side"] != previous and body["side"] != "Multi":
+                await asyncio.to_thread(self._follow_beam_to_side, body["side"])
         return web.json_response({"params": self._ls_params})
+
+    def _read_lightsheet_range_sync(self, side: str) -> dict[str, Any]:
+        """The extents of a side's galvo and piezo, from the controller.
+
+        The ASIdiSPIM plugin bounds its sheet sliders by the micro-mirror
+        card's deflection limits and sends both axes Home to 0; this is the
+        same source: the card's limits on the slice axis, and the piezo's soft
+        limits, in micrometres. A controller that does not answer leaves the
+        device class's limits. Read once per side; limits do not move.
+        """
+        if side in self._ls_range:
+            return self._ls_range[side]
+        b = side == "B"
+        scanner = self.devices.get("scanner_b" if b and "scanner_b" in self.devices else "scanner")
+        piezo = self.devices.get("piezo_b" if b and "piezo_b" in self.devices else "piezo")
+        out: dict[str, Any] = {"side": side}
+        if scanner is not None:
+            try:
+                out["galvo"] = [
+                    float(scanner.core.getProperty(scanner.name, "MinDeflectionY(deg)")),
+                    float(scanner.core.getProperty(scanner.name, "MaxDeflectionY(deg)")),
+                ]
+            except Exception:
+                out["galvo"] = list(getattr(scanner, "limits", (-5.0, 5.0)))
+        if piezo is not None:
+            try:
+                out["piezo"] = [
+                    1000.0 * float(piezo.core.getProperty(piezo.name, "LowerLim(mm)")),
+                    1000.0 * float(piezo.core.getProperty(piezo.name, "UpperLim(mm)")),
+                ]
+            except Exception:
+                out["piezo"] = list(getattr(piezo, "limits", (-200.0, 200.0)))
+        self._ls_range[side] = out
+        return out
+
+    async def handle_lightsheet_range(self, request):
+        """GET /api/lightsheet/live/range?side=A|B — the galvo and piezo extents
+        of a side, from the controller (see _read_lightsheet_range_sync)."""
+        side = request.query.get("side", "A")
+        if side not in ("A", "B"):
+            return web.json_response({"success": False, "error": "side must be A or B"}, status=400)
+        try:
+            out = await asyncio.to_thread(self._read_lightsheet_range_sync, side)
+            return web.json_response(out)
+        except Exception as exc:
+            logger.exception("[lightsheet] range read failed")
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    def _follow_beam_to_side(self, side: str) -> None:
+        """An armed beam follows the live view to its side.
+
+        Two sheets on at once light each camera with the other side's sheet
+        edge-on, so a view of B with A's beam armed is a view of a stripe. If
+        either side is armed, the chosen side ends armed and the other not;
+        if neither is, nothing is touched. Best effort: the view must not die
+        on a beam write.
+        """
+        try:
+            beam = self._read_beam()
+            if not any(beam.get(k) for k in self._BEAM_SIDES):
+                return
+            for key, dev_name in self._BEAM_SIDES.items():
+                dev = self.devices.get(dev_name)
+                if dev is not None:
+                    dev.enable_beam(key == side.lower())
+            logger.info("[beam] followed the live view to side %s", side)
+        except Exception:
+            logger.warning("[beam] could not follow the live view to side %s", side, exc_info=True)
 
     # =========================================================================
     # MMCore Push Callbacks
@@ -2896,6 +3035,36 @@ class DeviceLayerServer(Service):
             logger.exception("Axis move to %.2f did not complete cleanly", target)
         return float(device.read()[device.name]["value"])
 
+    # What the slow poller calls each axis it reads (`_read_slow_positions`).
+    _AXIS_KINDS = {"fdrive": "fdrive", "z_stage": "bottom_z"}
+
+    async def _move_axis(self, device, target: float) -> float:
+        """Move a fenced axis, and have the snapshot say where it now is.
+
+        Every poll tick carries every axis's last-read position. XY's tick goes
+        out twice a second; the F-drive and the bottom Z are read every two
+        seconds. So after a move the next ticks went on carrying the height
+        from before it, and a page that had just shown the move's own answer
+        stepped back to the old number until the slow read came round: up to
+        two seconds of a wrong height, at the moment the head is being brought
+        down onto a sample by hand. The position the move itself read is put
+        in the snapshot here, on the event loop and after the move, so it
+        lands behind any poll that was already in flight, and is sent.
+        """
+        async with self.pause_state_updates():
+            new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+        positions = dict(self._state_latest.get("positions", {}))
+        kind = next(
+            (k for key, k in self._AXIS_KINDS.items() if self.devices.get(key) is device), None
+        )
+        entry = {**positions.get(device.name, {}), "Position": new_pos}
+        if kind and "kind" not in entry:
+            entry["kind"] = kind
+        positions[device.name] = entry
+        self._state_latest = {**self._state_latest, "positions": positions, "t": time.time()}
+        await self._broadcast_state(self._tick_payload())
+        return new_pos
+
     def _axis_status_response(self, device_key: str, label: str):
         device = self.devices.get(device_key)
         if device is None:
@@ -2952,8 +3121,7 @@ class DeviceLayerServer(Service):
                 status=400,
             )
         try:
-            async with self.pause_state_updates():
-                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+            new_pos = await self._move_axis(device, target)
         except ValueError as exc:  # device-level fence (defensive)
             return web.json_response({"success": False, "error": str(exc)}, status=400)
         except Exception as exc:
@@ -3441,8 +3609,58 @@ class DeviceLayerServer(Service):
             )
         target = float(hi)
         try:
-            async with self.pause_state_updates():
-                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+            new_pos = await self._move_axis(device, target)
+        except Exception as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+        return web.json_response(
+            {
+                "success": True,
+                "position": new_pos,
+                "from": cur,
+                "min": float(lo),
+                "max": float(hi),
+                "distance_to_floor": new_pos - float(lo),
+            }
+        )
+
+    async def handle_goto_fdrive(self, request):
+        """POST /api/spim/fdrive/goto — the SPIM head to an absolute height,
+        fenced to the F-drive's own limits. The pane's one number is 1000 µm:
+        from the load height the head used to come down in ten nudges of 50,
+        when the first 24000 of the way is the same every time. A clean stop
+        well above the sample, from which the nudges take over."""
+        try:
+            data = await request.json()
+            target = round(float(data.get("position")), 2)
+        except Exception:
+            return web.json_response(
+                {"success": False, "error": "numeric 'position' required"}, status=400
+            )
+        device = self.devices.get("fdrive")
+        if device is None:
+            return web.json_response(
+                {"success": False, "error": "F-drive device not found"}, status=503
+            )
+        lo, hi = device.limits
+        try:
+            cur = float(device.read()[device.name]["value"])
+        except Exception as exc:
+            return web.json_response(
+                {"success": False, "error": f"position read failed: {exc}"}, status=502
+            )
+        if not (float(lo) <= target <= float(hi)):
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": f"target {target} outside limits [{lo}, {hi}]",
+                    "position": cur,
+                    "min": float(lo),
+                    "max": float(hi),
+                },
+                status=400,
+            )
+        try:
+            new_pos = await self._move_axis(device, target)
         except Exception as exc:
             return web.json_response({"success": False, "error": str(exc)}, status=500)
         return web.json_response(
@@ -4124,7 +4342,9 @@ class DeviceLayerServer(Service):
         return {"success": False, "error": "Could not read position"}
 
     def _extract_volume(self, documents: dict, params: dict) -> dict:
-        val = self._extract_from_events(documents, ["volume_scanner", "camera", "camera_image"])
+        val = self._extract_from_events(
+            documents, ["volume_scanner", "volume_scanner_b", "camera", "camera_image"]
+        )
         if val is not None:
             result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
@@ -4274,26 +4494,16 @@ class DeviceLayerServer(Service):
     async def handle_devices_state(self, request):
         """GET /api/devices/state - One-shot snapshot of device positions + properties.
 
-        Cheap: returns the most recent poller snapshot without forcing a fresh
-        MMCore read. If the caller needs guaranteed-fresh data they can pass
-        ?refresh=1 and we'll do an on-demand read on the worker thread.
+        Cheap: returns the snapshot as it stands, positions from the pollers
+        and properties from the last time they were read. ?refresh=1 reads
+        every position and every property now (~2 s on the Tiger) and
+        broadcasts the result, so every screen showing them follows. The
+        properties are not polled: this is how they are kept current.
         """
         try:
             refresh = request.query.get("refresh", "0") in ("1", "true", "yes")
-            if refresh and self._state_pause_counter == 0 and not self._state_updating_now:
-                self._state_updating_now = True
-                try:
-                    xy = await asyncio.to_thread(self._read_xy_position)
-                    slow = await asyncio.to_thread(self._read_slow_positions)
-                    properties = await asyncio.to_thread(self._read_full_state)
-                    self._state_latest = {
-                        "positions": {**xy, **slow},
-                        "properties": properties,
-                        "t": time.time(),
-                        "paused": False,
-                    }
-                finally:
-                    self._state_updating_now = False
+            if refresh:
+                await self._sweep_properties(positions=True)
             return web.json_response(self._state_latest)
         except Exception as exc:
             import traceback
@@ -4561,6 +4771,7 @@ class DeviceLayerServer(Service):
         self._app.router.add_get("/api/spim/fdrive", self.handle_get_fdrive)
         self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
         self._app.router.add_post("/api/spim/fdrive/raise", self.handle_raise_fdrive)
+        self._app.router.add_post("/api/spim/fdrive/goto", self.handle_goto_fdrive)
         self._app.router.add_post("/api/motion/halt", self.handle_halt_motion)
         self._app.router.add_get("/api/stage/envelope", self.handle_get_envelope)
         self._app.router.add_post("/api/stage/envelope", self.handle_set_envelope)
@@ -4601,20 +4812,20 @@ class DeviceLayerServer(Service):
         # Lightsheet (SPIM) live stream — continuous sequence acquisition
         self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
         self._app.router.add_post("/api/lightsheet/live/params", self.handle_lightsheet_params)
+        self._app.router.add_get("/api/lightsheet/live/range", self.handle_lightsheet_range)
         self._app.router.add_get("/api/cameras", self.handle_get_cameras)
 
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())
 
-        # Start device-state pollers. Three independent loops so slow MMCore
-        # calls (property cache, piezo/galvo serial) can never stall the XY
-        # fast path:
-        #   - XY position (fast)
-        #   - piezo + galvo (slow, 1 Hz)
-        #   - full property cache (slowest, ~0.07 Hz)
+        # Start device-state pollers. Two independent loops, so the slower
+        # read can never stall the XY path:
+        #   - XY position (2 Hz)
+        #   - F-drive + bottom Z (0.5 Hz), piezo + galvo when moved
+        # The properties are read once, now, and after that when asked for.
         self._state_pos_task = asyncio.create_task(self._position_poller())
         self._state_slow_pos_task = asyncio.create_task(self._slow_positions_poller())
-        self._state_prop_task = asyncio.create_task(self._property_poller())
+        self._state_prop_task = asyncio.create_task(self._sweep_properties())
 
         # Start web server
         # shutdown_timeout limits how long cleanup() waits for active responses
@@ -4770,7 +4981,7 @@ class DeviceLayerServer(Service):
 
         # 2. Cancel pollers. The in-flight to_thread call cannot be aborted;
         #    cancellation takes effect when the thread returns (~position read
-        #    <0.3s, property read <3s, bottom-camera snapImage = exposure +
+        #    <0.3s, the one property read <3s, bottom-camera snapImage = exposure +
         #    transfer). If MMCore is hung or a long exposure is set, we'd
         #    otherwise wait forever — so each task gets a 3 s ceiling. A
         #    timed-out thread leaks until interpreter shutdown reaps it.

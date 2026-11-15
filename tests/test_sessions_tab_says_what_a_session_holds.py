@@ -147,21 +147,18 @@ class TestTheList:
         assert "run.timepoints ?? run.total_timepoints" in run
         assert "timepoint${tp === 1 ? '' : 's'}" in run
 
-    def test_the_pills_sit_on_the_meta_line_not_the_name(self):
+    def test_the_marks_have_cells_of_their_own(self):
         # "the advanced diagnostic text is a bit overlapping on something
-        # else": the name is one line cut with an ellipsis, and a pill on it
-        # ran under the row's Make live and Folder buttons.
-        row = REVIEW_JS[REVIEW_JS.index("rowHtml(s) {") :][:2400]
-        name = row[row.index('<div class="session-name') : row.index("</div>")]
-        assert "badge" not in name
-        assert '<div class="session-meta">${this.metaHtml(s)}</div>' in row
-        meta = REVIEW_JS[REVIEW_JS.index("metaHtml(s) {") :][:900]
-        assert "session-diag-badge" in meta
-        assert '<span class="session-active-badge">active</span>' in meta
-        # A batch of sizes repaints the line whole, pills included.
-        fill = REVIEW_JS[REVIEW_JS.index("repaintHoldings(sessions) {") :][:600]
-        assert "meta.innerHTML = this.metaHtml(s);" in fill
-        assert ".session-meta .session-active-badge { margin-left: 0; }" in REVIEW_CSS
+        # else": as a card, a pill on the name ran under the row's buttons.
+        # In the log each has a place: live is the Ended cell, and the
+        # diagnostics mark is a quiet word after the name.
+        row = REVIEW_JS[REVIEW_JS.index("    rowHtml(s) {") :][:3200]
+        assert """s.active ? '<span class="session-active-badge">live</span>'""" in row
+        assert "Recorded with Advanced diagnostics on" in row
+        # A batch of sizes repaints the row in place: replaced whole between
+        # the press and the release of a click, the click was lost.
+        fill = REVIEW_JS[REVIEW_JS.index("    repaintRow(sid) {") :][:1200]
+        assert "el.innerHTML = row.innerHTML;" in fill and "outerHTML" not in fill.split("//")[0]
 
 
 class TestTheDetail:
@@ -219,7 +216,7 @@ def _with_a_night(store, sid):
         },
         {
             "event_type": "STATUS_CHANGED",
-            "data": {"service": "mesh"},
+            "data": {"service": "device_layer"},
             "timestamp": "2026-10-04T21:00:01",
         },
         {
@@ -268,10 +265,39 @@ class TestNaming:
         sid = _session_with_a_run(store)
         c = _client(store)
         row = c.get("/api/sessions").json()["sessions"][0]
-        assert row["name"] == sid  # the list keeps the id as the fallback name
+        # The list sends no name for a session nobody named: the id in a
+        # name's place stopped the page from saying what the session holds.
+        assert row["name"] is None
         assert row["suggested_name"] == "1 embryo · every 10 min · Oct 4 overnight · complete"
         d = c.get(f"/api/sessions/{sid}").json()
         assert d["name"] is None and d["suggested_name"] == row["suggested_name"]
+
+    def test_every_page_that_lists_sessions_says_what_an_unnamed_one_holds(self):
+        # On the rig 381 of 384 sessions have no name. The list sent the id in
+        # its place, so `s.name || s.suggested_name` never reached the second
+        # word and the Sessions tab was a column of eight hex digits.
+        js = WEB / "static" / "js"
+        for page in ("review.js", "home.js", "campaigns.js"):
+            src = (js / page).read_text(encoding="utf-8")
+            assert "s.name || s.session_id" not in src, page
+            # Home says the derived words through said(), which leaves "cut
+            # short" off the live session: its run is going, not cut short.
+            want = (
+                "s.name || said(s) || s.session_id"
+                if page == "home.js"
+                else ("s.name || s.suggested_name || s.session_id")
+            )
+            assert want in src, page
+
+    def test_what_a_person_wrote_is_the_logs_last_column(self):
+        # A derived name was the row's facts in a sentence; in the log they
+        # are the columns, so the last cell holds only the name, or the first
+        # line of the description, or "not named".
+        row = REVIEW_JS[REVIEW_JS.index("    rowHtml(s) {") :][:3200]
+        assert "const wrote = s.name || String(s.description || '').split(" in row
+        assert "this.escapeHtml(wrote || 'not named')" in row
+        # And the whole derived name is in its title.
+        assert "(not named yet: read off the session itself)" in row
 
     def test_the_derived_name_reads_well_with_little_to_go_on(self):
         assert derive_session_name(created_at="2026-10-06T09:38:00") == "Oct 6"
@@ -405,7 +431,7 @@ class TestTheFilters:
         ):
             assert needle in REVIEW_JS, needle
         # Every chip says how many sessions it would keep.
-        assert '<span class="n">${n}</span>' in REVIEW_JS
+        assert "<small>${n}</small>" in REVIEW_JS
         # The usual view hides empties; the channel chips only narrow when asked.
         # "i think the idea is i want channel filter -- not embryos or brightfield"
         assert "defaults: ['nonempty']" in REVIEW_JS and "defaults: []," in REVIEW_JS
@@ -463,7 +489,7 @@ class TestTheListIsQuick:
         assert c.get("/api/sessions/s1").json()["bytes"] > 0
 
     def test_the_tab_draws_the_list_then_asks_for_sizes_in_batches(self):
-        load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:1200]
+        load = REVIEW_JS[REVIEW_JS.index("async loadSessions() {") :][:2000]
         assert load.index("this.renderSessionList();") < load.index("this.fillSizes();")
         fill = REVIEW_JS[REVIEW_JS.index("async fillSizes() {") :][:1600]
         assert "fetch(`/api/sessions/sizes?ids=" in fill

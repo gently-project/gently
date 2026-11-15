@@ -142,30 +142,6 @@ const OperateMath = (function () {
         return clamp((pos - min) / span);
     }
 
-    // RIG-NOTE: 1000 µm is the band where operators switch to hundred-µm steps.
-    // Confirm against the real geometry before trusting it on the rig.
-    const ENGAGED_WITHIN_UM = 1000;
-
-    /**
-     * Is the sample close enough to the objective that XY motion is unsafe?
-     *
-     * `latch` is a BELIEF (persisted: we commanded the head down). `floor` is a
-     * MEASUREMENT (distance_to_floor from telemetry). Measurement wins when it is
-     * decisive in either direction; the latch only decides inside the hysteresis
-     * band, and is the sole signal when there is no measurement at all.
-     *
-     * Fail safe: with no telemetry, a set latch locks. The `> within * 2` clear is
-     * what lets someone raising the head at the controller box be noticed; the 2x
-     * band stops it chattering at the boundary.
-     */
-    function isEngaged(latch, floor, within) {
-        const w = (within == null) ? ENGAGED_WITHIN_UM : within;
-        if (floor == null || !Number.isFinite(floor)) return !!latch;
-        if (floor < w) return true;
-        if (floor > w * 2) return false;
-        return !!latch;
-    }
-
     // RIG-NOTE: 50 µm is a guess at stage repeatability against embryo spacing —
     // wide enough that arriving at an embryo counts as arrived, tight enough that
     // the neighbour does not. Tune against the real scope; it is not derived.
@@ -193,8 +169,8 @@ const OperateMath = (function () {
     }
 
     return {
-        BASE_UM_PER_PX, ENGAGED_WITHIN_UM, AT_TOL_UM, FD_BANDS,
-        umPerPx, frameToStage, stageToFrame, fdBand, stepAllowed, gaugeFraction, isEngaged,
+        BASE_UM_PER_PX, AT_TOL_UM, FD_BANDS,
+        umPerPx, frameToStage, stageToFrame, fdBand, stepAllowed, gaugeFraction,
         atPosition, centreTarget,
     };
 })();

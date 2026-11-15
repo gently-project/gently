@@ -5,13 +5,16 @@ set on the Acquisition pane, and each needed a trip back to the bottom
 camera's live view to be done at all.
 
 So the fields of view the brightfield overview is taken from are a list of
-their own — the same shape as the embryos' — built on the Bottom cam pane
-beside the stage pad and the live view, kept in the session so a reload and
-the Acquisition pane find it, and read by the plan as "taken from the
-fields". The overview's light, LED brightness, exposure and its dark and
-flat references moved to the same pane, for the same reason: the flat needs
-the stage driven to an empty part of the dish, and the light is chosen by
-looking at the picture.
+their own — the same shape as the embryos' — built beside the stage pad and
+the live view, kept in the session so a reload and the Acquisition pane find
+it, and read by the plan as "taken from the fields". The overview's light,
+LED brightness, exposure and its dark and flat references moved to the same
+surface, for the same reason: the flat needs the stage driven to an empty
+part of the dish, and the light is chosen by looking at the picture.
+
+That surface was the Bottom cam pane. It is Scope now (2026-11-13), the one
+workspace both cameras share, and these sit in its rail: the fields list
+and, under it, the Overview frames box.
 
 CI runs no browser, so the wiring is pinned as source; the route and the
 store are exercised for real.
@@ -63,9 +66,11 @@ def _section(html: str, start: str, end: str) -> str:
     return html[html.index(start) : html.index(end)]
 
 
-BOTTOM = _section(INDEX, 'id="op-pane-bottom"', 'id="op-pane-spim"')
+# Scope: the rail and the workspace beside it, which is everything on screen
+# with the picture.
+SCOPE = _section(INDEX, 'id="op-erail"', 'id="op-pane-acquire"')
 ACQUIRE = _section(INDEX, 'id="op-pane-acquire"', ".op-panearea -->")
-RAIL = _section(INDEX, 'id="op-erail"', ".op-panearea")
+RAIL = _section(INDEX, 'id="op-erail"', 'class="op-panearea"')
 
 
 # ── the store ────────────────────────────────────────────────────────────────
@@ -145,7 +150,7 @@ class TestWhereThingsAre:
         mounts = re.findall(r"FieldsPanel\.mount\('([^']+)'", OPERATE)
         assert set(mounts) == {"op-frail-list", "op-fields"}
 
-    def test_the_overview_light_exposure_and_references_are_on_bottom_cam(self):
+    def test_the_overview_light_exposure_and_references_are_beside_the_picture(self):
         for needed in (
             'id="op-plan-bf-light"',
             'id="op-plan-bf-led"',
@@ -153,14 +158,24 @@ class TestWhereThingsAre:
             'id="op-bfref-host"',
             'id="op-ov-match"',
         ):
-            assert needed in BOTTOM, f"{needed} is not on the Bottom cam pane"
+            assert needed in SCOPE, f"{needed} is not on Scope, beside the picture"
+            assert needed in RAIL, f"{needed} is not in the rail's Overview frames box"
             assert needed not in ACQUIRE, f"{needed} is still on the Acquisition pane"
+
+    def test_they_step_aside_on_calibration_which_has_no_picture(self):
+        at = RAIL.index('id="op-overview-host"')
+        tag = RAIL[RAIL.rindex("<div", 0, at) : RAIL.index(">", at)]
+        assert 'data-surface="scope"' in tag
+        assert '.op-body[data-pane="cal"] [data-surface="scope"] { display: none; }' in CSS
 
     def test_acquisition_keeps_the_choice_and_says_where_the_rest_is_set(self):
         for kept in ('id="op-plan-bf"', 'id="op-plan-bf-every"', 'id="op-plan-bf-pos"'):
             assert kept in ACQUIRE
         assert 'id="op-plan-bf-setup"' in ACQUIRE
-        assert "data-goto-pane" in OPERATE and "Change on Bottom cam" in OPERATE
+        assert "data-goto-pane" in OPERATE and "Change on Scope" in OPERATE
+        # The way there is still the bottom camera's surface: its picture is
+        # what the light and exposure are judged by.
+        assert 'data-goto-pane="bottom"' in OPERATE
         # The old "+ another field, from here" chrome is gone with the select.
         assert "data-bf-pin-add" not in INDEX and "data-bf-pin-add" not in OPERATE
 

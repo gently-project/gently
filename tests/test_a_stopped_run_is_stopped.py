@@ -354,13 +354,16 @@ class TestTheRoutes:
 
 class TestThePage:
     def test_a_stopped_run_is_not_called_interrupted(self):
-        fn = OPERATE[OPERATE.index("    async function renderRun() {") :][:3200]
+        fn = OPERATE[OPERATE.index("    async function renderRun() {") :][:7000]
         assert "st.ended === 'stopped'" in fn
+        # And it is not the business in hand either: the form comes back,
+        # with the way to look at the run under Start.
+        assert "(resumable && st.ended !== 'stopped')" in fn
         assert "'stopped — Resume run carries it on'" in fn
         assert "'interrupted — press Resume run to carry on'" in fn
 
     def test_a_run_that_ended_says_how(self):
-        fn = OPERATE[OPERATE.index("    async function renderRun() {") :][:3200]
+        fn = OPERATE[OPERATE.index("    async function renderRun() {") :][:7000]
         assert "(st.ended && !running ? st.ended : st.status)" in fn
 
     def test_the_gate_does_not_call_a_stopped_run_interrupted(self, store):

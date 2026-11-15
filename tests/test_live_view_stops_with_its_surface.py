@@ -48,8 +48,32 @@ def test_entering_a_surface_never_starts_a_camera():
 
 def test_leaving_a_camera_surface_stops_its_view():
     assert "onLeave() { if (_bottomOn) stopBottom(); }" in _pane("bottom")
-    assert "onLeave() { if (_spimOn) stopSpim(); forceLedOff(); }" in _pane("spim")
+    assert "if (_spimOn) stopSpim();" in _pane("spim")
     assert "onLeave() { if (_spimOn) stopSpim(); forceLedOff(); }" in _pane("cal")
+
+
+def test_choosing_the_other_camera_stops_this_one_and_starts_nothing():
+    """The two cameras are one workspace now, and one strip chooses between
+    them. Choosing is leaving one surface for the other: the view that was
+    live stops, and the one arrived at waits for its Start."""
+    fn = OPERATE[OPERATE.index("    function chooseSource(src) {") :]
+    fn = fn[: fn.index("\n    }")]
+    assert "showPane('bottom')" in fn and "showPane('spim')" in fn
+    assert "toggleSpim" not in fn and "toggleBottomCam" not in fn
+    assert "live/start" not in fn and "stream/start" not in fn
+    show = OPERATE[OPERATE.index("    function showPane(name) {") :]
+    show = show[: show.index("\n    }")]
+    assert "PANES[prev].onLeave(name);" in show
+
+
+def test_the_led_is_left_alone_between_the_cameras_and_closed_on_leaving_scope():
+    """It lights the bottom camera too, and the Light panel beside the frame
+    goes on saying what it is. Leaving Scope closes it, as leaving the SPIM
+    head always did. So does going to Fit, which is on Scope now: under the
+    LED alone a calibration has no nuclei to find."""
+    assert (
+        "onLeave(to) { if (_spimOn) stopSpim(); if (!inScope(to) || to === 'cal') forceLedOff(); }"
+    ) in _pane("spim")
 
 
 def test_leaving_operate_altogether_stops_both():
@@ -75,3 +99,23 @@ def test_leaving_the_devices_tab_is_leaving_every_surface_in_it():
     fn = DEVICES[DEVICES.index("    function onTabChanged(tab) {") :][:400]
     assert "if (tab !== 'devices') OperateManager.deactivate();" in fn
     assert "else if (_currentView === 'operate') OperateManager.activate();" in fn
+
+
+def test_an_led_that_is_already_closed_is_not_told_to_close():
+    """Leaving a surface, or the tab, closes the LED: half of #106. It did so
+    by sending "Closed" every time, whatever the LED was. A brightfield run
+    opens the LED itself for about a second a frame (the settle, then the
+    exposure), and somebody going to the Embryos tab to watch that run sent
+    a close that could land in that second: a dark frame. Seen as a request
+    from a page that was only being looked at, during the first two-sided
+    run; two past brightfield runs (3,360 frames) hold no dark frame, so it
+    had not bitten yet.
+
+    What is read as closed is left alone. Open, or not yet read, is closed
+    as before: unknown must not become a reason to leave a light on."""
+    fn = OPERATE[OPERATE.index("    async function forceLedOff() {") :]
+    fn = fn[: fn.index("renderSubnavMeta();")]
+    skip = "if ((SharedState.get('light') || {}).led === 'Closed') return;"
+    assert fn.index(skip) < fn.index("postJSON('/api/devices/led/set', { state: 'Closed' })")
+    # Only a read of Closed skips it.
+    assert "=== 'Open'" not in fn and "!== 'Open'" not in fn

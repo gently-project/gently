@@ -119,10 +119,6 @@
     "status": "partial",
     "title": "Sessions: list, resume, import"
   },
-  "US-43": {
-    "status": "gap",
-    "title": "Multi-instance / mesh"
-  },
   "US-44": {
     "status": "partial",
     "title": "Auth: log in / gain control / view-only"

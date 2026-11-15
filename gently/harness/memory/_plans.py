@@ -978,8 +978,6 @@ class PlansMixin(StoreProtocol):
             status=PlanItemStatus(d.get("status", "planned")),
             depends_on=deps,
             outcome=d.get("outcome"),
-            claimed_by=d.get("claimed_by"),
-            claimed_by_hostname=d.get("claimed_by_hostname"),
             references=references,
             imaging_spec=imaging_spec,
             bench_spec=bench_spec,

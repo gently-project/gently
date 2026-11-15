@@ -138,12 +138,6 @@ async def sc_temperature_alerts(page, url):
     return f"temperature-alert controls in Settings: {alerts} (no drift/out-of-range/fault alerting exists)"
 
 
-async def sc_mesh_invisible(page, url):
-    await _skip_landing(page)
-    mesh = await _count_text(page, r"mesh|instances|peers|import (session|from)")
-    return f"mesh/instances/session-import controls in the web UI: {mesh} (mesh backend exists but is unexposed)"
-
-
 async def sc_view_only_plan_spins(page, url):
     # account-mode server, logged out → 'Plan an experiment' should spin forever
     await _goto(page, url, "/")
@@ -190,13 +184,6 @@ SCENARIOS = [
         "Temperature alerts do not exist",
         "medium",
         sc_temperature_alerts,
-        False,
-    ),
-    (
-        "mesh-invisible",
-        "Mesh + session import invisible from web",
-        "medium",
-        sc_mesh_invisible,
         False,
     ),
     (
