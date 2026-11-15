@@ -11,6 +11,7 @@ Manages background timelapse acquisition with:
 import asyncio
 import json
 import logging
+import os
 import traceback
 from collections import deque
 from collections.abc import Callable
@@ -1508,7 +1509,38 @@ class TimelapseOrchestrator:
                 sides = ["A"]
 
             results: dict[str, dict] = {}
-            for side in sides:
+            # Both sides in one scan, the way the ASIdiSPIM plugin takes them:
+            # the two stacks begin a scan and 50 ms apart, not 2.4 s. Off
+            # unless asked for (GENTLY_TWO_SIDES_ONE_SCAN=1) until it has been
+            # seen to give a true stack of each side on a sample.
+            one_scan = (
+                acquisition_mode != "snap"
+                and sides == ["A", "B"]
+                and os.environ.get("GENTLY_TWO_SIDES_ONE_SCAN") == "1"
+                and hasattr(self.client, "acquire_volume_two_sided")
+            )
+            if one_scan:
+
+                def scan_of(side: str) -> dict:
+                    cal = self._cal_for(embryo, side) or {}
+                    return {
+                        "galvo_amplitude": cal.get("galvo_amplitude", 0.5),
+                        "galvo_center": cal.get("galvo_center", 0.0),
+                        "piezo_amplitude": cal.get("piezo_amplitude", 25.0),
+                        "piezo_center": cal.get("piezo_center", 50.0),
+                    }
+
+                results = await self.client.acquire_volume_two_sided(
+                    side_a=scan_of("A"),
+                    side_b=scan_of("B"),
+                    num_slices=embryo.num_slices,
+                    exposure_ms=embryo.exposure_ms,
+                    laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+                    **self._volume_lasers(embryo),
+                )
+                num_frames = embryo.num_slices
+                exposure_ms = embryo.exposure_ms
+            for side in [] if one_scan else sides:
                 cal = self._cal_for(embryo, side) or {}
                 galvo_amplitude = cal.get("galvo_amplitude", 0.5)
                 galvo_center = cal.get("galvo_center", 0.0)

@@ -5,6 +5,7 @@ DiSPIM compound acquisition devices (volume scanner and light sheet snap).
 import logging
 import time
 from collections import OrderedDict
+from typing import Any
 
 import numpy as np
 import pymmcore
@@ -341,6 +342,216 @@ class DiSPIMVolumeScanner:
 
     def describe_configuration(self):
         """Required for Bluesky."""
+        return OrderedDict()
+
+
+class DiSPIMTwoSidedVolumeScanner:
+    """Both views in one scan, the way the ASIdiSPIM plugin takes them.
+
+    Taking side A and then side B as two volumes puts 2.4 s between the
+    starts of the two stacks: 0.8 s is side A's scan, the rest is putting A
+    away and setting B up, one setting at a time. The controller can do both
+    sides itself. Everything for both sides is set up first, the card is
+    told two sides with a short wait between them, both cameras are started,
+    and one trigger runs side A, the wait, then side B. The starts of the
+    two stacks are then one scan and the wait apart.
+
+    It reads as two volumes under the names of the two one-sided scanners,
+    so whoever takes a volume by name finds each side where it always was.
+    """
+
+    def __init__(
+        self,
+        a: DiSPIMVolumeScanner,
+        b: DiSPIMVolumeScanner,
+        name: str = "volume_scanner_ab",
+    ):
+        self.name = name
+        self.parent = None  # Required for Bluesky
+        self.a = a
+        self.b = b
+        self.core = a.core
+        self.laser_control = a.laser_control
+        self._configured = False
+        self._num_slices: int | None = None
+        self._laser_config: str | None = None
+        self._volumes: dict[str, np.ndarray] = {}
+        self._started: dict[str, float] = {}
+
+    def configure(
+        self,
+        num_slices: int,
+        exposure_ms: float,
+        side_a: dict,
+        side_b: dict,
+        laser_config: str = "488 and 561",
+        laser_power_488_pct: float | None = None,
+        laser_power_561_pct: float | None = None,
+        laser_power_405_pct: float | None = None,
+        laser_power_637_pct: float | None = None,
+        timing_params: dict | None = None,
+        delay_before_side_ms: float = 50.0,
+    ):
+        """Set both sides up. ``side_a`` and ``side_b`` each carry that side's
+        galvo_amplitude, galvo_center, piezo_amplitude and piezo_center."""
+        t0 = time.perf_counter()
+        # Side B first: each one-sided set-up writes its own side to the card
+        # as the first side, and the last one written must be A.
+        for vs, s in ((self.b, side_b), (self.a, side_a)):
+            vs.camera.configure_for_volume_acquisition(exposure_ms)
+            vs.scanner.configure_for_volume_acquisition(
+                galvo_amplitude=s["galvo_amplitude"],
+                galvo_center=s["galvo_center"],
+                num_slices=num_slices,
+                timing_params=timing_params,
+                first_side=vs.side,
+            )
+            vs.piezo.configure_for_volume_acquisition(
+                amplitude_um=s["piezo_amplitude"],
+                offset_um=s["piezo_center"],
+                num_slices=num_slices,
+            )
+        # The card: two sides, A first, and the wait between them.
+        self.a.scanner.configure_spim_parameters(num_slices=num_slices, num_sides=2, first_side="A")
+        self.core.setProperty(
+            self.a.scanner.name, "SPIMDelayBeforeSide(ms)", float(delay_before_side_ms)
+        )
+        for wavelength, pct in (
+            (488, laser_power_488_pct),
+            (561, laser_power_561_pct),
+            (405, laser_power_405_pct),
+            (637, laser_power_637_pct),
+        ):
+            if pct is not None:
+                self.laser_control.set_power_pct(wavelength, pct)
+        self._num_slices = num_slices
+        self._laser_config = laser_config
+        self._configured = True
+        logger.info("Both sides configured in %.0f ms", (time.perf_counter() - t0) * 1000)
+
+    def _pop(self) -> tuple[Any, str | None]:
+        """The next frame and the camera it came from, when the core says."""
+        try:
+            md = pymmcore.Metadata()
+            img = self.core.popNextImageMD(md)
+            return img, str(md.GetSingleTag("Camera").GetValue())
+        except (AttributeError, TypeError, RuntimeError):
+            return self.core.popNextImage(), None
+
+    def _put_away(self) -> None:
+        for vs in (self.a, self.b):
+            if self.core.isSequenceRunning(vs.camera.name):
+                self.core.stopSequenceAcquisition(vs.camera.name)
+            vs.camera.set_trigger_mode("INTERNAL")
+            vs.piezo.set_spim_state("Idle")
+        self.a.scanner.set_spim_state("Idle")
+        # One side again, for whatever scans next.
+        self.a.scanner.configure_spim_parameters(
+            num_slices=self._num_slices or 1, num_sides=1, first_side="A"
+        )
+        self.core.setConfig(self.laser_control.group_name, "ALL OFF")
+        self.core.waitForConfig(self.laser_control.group_name, "ALL OFF")
+
+    def trigger(self):
+        if not self._configured or self._num_slices is None:
+            raise RuntimeError("Device not configured. Call configure() first.")
+        n = self._num_slices
+        status = Status(obj=self, timeout=120)
+
+        def wait():
+            try:
+                self.core.setConfig(self.laser_control.group_name, self._laser_config)
+                self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
+                if self.core.isSequenceRunning():
+                    self.core.stopSequenceAcquisition()
+                self.core.clearCircularBuffer()
+                if self.core.getBufferTotalCapacity() < 2 * n:
+                    self.core.setCircularBufferMemoryFootprint(1024)
+                for vs in (self.a, self.b):
+                    self.core.prepareSequenceAcquisition(vs.camera.name)
+                    self.core.waitForDevice(vs.camera.name)
+                    self.core.startSequenceAcquisition(vs.camera.name, n, 0, True)
+                    self.core.waitForDevice(vs.camera.name)
+
+                names = {self.a.camera.name: "A", self.b.camera.name: "B"}
+                frames: dict[str, list] = {"A": [], "B": []}
+                started: dict[str, float] = {"A": time.time()}
+                self.a.scanner.set_spim_state("Running")
+
+                timeout_s = settings.timeouts.volume_acquisition
+                t0 = time.time()
+                while len(frames["A"]) + len(frames["B"]) < 2 * n:
+                    if self.core.getRemainingImageCount() > 0:
+                        img, cam = self._pop()
+                        try:
+                            img = _safe_obtain(img)
+                        except (ImportError, AttributeError):
+                            pass
+                        # The camera's name says the side. A core that gives
+                        # no name gives the frames in order: A's, then B's.
+                        side = names.get(cam or "") or ("A" if len(frames["A"]) < n else "B")
+                        if side == "B" and "B" not in started:
+                            started["B"] = time.time()
+                        frames[side].append(img)
+                        continue
+                    if time.time() - t0 > timeout_s:
+                        raise TimeoutError(
+                            f"Two-sided volume timed out after {timeout_s:.1f}s with "
+                            f"{len(frames['A'])} + {len(frames['B'])} of {n} + {n} frames"
+                        )
+                    time.sleep(0.005)
+                if len(frames["A"]) != n or len(frames["B"]) != n:
+                    raise RuntimeError(
+                        f"Two-sided volume: {len(frames['A'])} frames from A and "
+                        f"{len(frames['B'])} from B, wanted {n} of each"
+                    )
+                self._put_away()
+                self._volumes = {"A": np.array(frames["A"]), "B": np.array(frames["B"])}
+                self._started = started
+                logger.info(
+                    "Both sides taken: B began %.0f ms after A",
+                    (started["B"] - started["A"]) * 1000,
+                )
+            except Exception as exc:
+                try:
+                    self._put_away()  # the lasers go out whatever happened
+                except Exception:
+                    pass
+                status.set_exception(exc)
+            else:
+                status.set_finished()
+
+        import threading
+
+        threading.Thread(target=wait).start()
+        return status
+
+    def read(self):
+        data = OrderedDict()
+        for side, vs in (("A", self.a), ("B", self.b)):
+            if side in self._volumes:
+                data[vs.name] = {
+                    "value": self._volumes[side],
+                    "timestamp": self._started.get(side) or time.time(),
+                }
+        return data
+
+    def describe(self):
+        data = OrderedDict()
+        for side, vs in (("A", self.a), ("B", self.b)):
+            if side in self._volumes:
+                data[vs.name] = {
+                    "source": vs.name,
+                    "dtype": "array",
+                    "shape": list(self._volumes[side].shape),
+                    "units": "counts",
+                }
+        return data
+
+    def read_configuration(self):
+        return OrderedDict()
+
+    def describe_configuration(self):
         return OrderedDict()
 
 

@@ -655,6 +655,55 @@ class DiSPIMMicroscope(Microscope):
 
         return {"error": result.get("error", "Acquisition failed"), "success": False}
 
+    async def acquire_volume_two_sided(
+        self,
+        side_a: dict,
+        side_b: dict,
+        num_slices: int = 50,
+        exposure_ms: float = 10.0,
+        laser_config: str | None = None,
+        delay_before_side_ms: float = 50.0,
+        **laser_powers,
+    ) -> dict[str, dict]:
+        """Both views in one scan. ``side_a`` and ``side_b`` each give that
+        side's galvo_amplitude, galvo_center, piezo_amplitude, piezo_center.
+
+        Returns ``{"A": ..., "B": ...}``, each what ``acquire_volume`` returns
+        for one side. A scan that fails fails for both sides.
+        """
+        plan_kwargs: dict[str, Any] = {
+            "volume_scanner": "volume_scanner_ab",
+            "side_a": side_a,
+            "side_b": side_b,
+            "num_slices": num_slices,
+            "exposure_ms": exposure_ms,
+            "delay_before_side_ms": delay_before_side_ms,
+        }
+        if laser_config is not None:
+            plan_kwargs["laser_config"] = laser_config
+        plan_kwargs.update({k: v for k, v in laser_powers.items() if v is not None})
+        result = await self._submit_plan_and_wait(
+            "acquire_two_sided_volume_plan", kwargs=plan_kwargs, timeout=120.0
+        )
+        events = (result.get("documents") or {}).get("events", [])
+        out: dict[str, dict] = {}
+        for side, key in (("A", "volume_scanner"), ("B", "volume_scanner_b")):
+            extracted = self._extract_image(result, [key], multi_event=True)
+            if not extracted:
+                failed = {"error": result.get("error", "Acquisition failed"), "success": False}
+                return {"A": failed, "B": dict(failed)}
+            arr, fpath = extracted
+            ret: dict[str, Any] = {"volume": arr, "shape": arr.shape, "success": True}
+            if fpath:
+                ret["volume_path"] = str(fpath)
+            for ev in events:
+                began = (ev.get("timestamps") or {}).get(key)
+                if began:
+                    ret["acquired_at_epoch"] = float(began)
+                    break
+            out[side] = ret
+        return out
+
     async def acquire_burst(
         self,
         frames: int = 60,
