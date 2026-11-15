@@ -67,7 +67,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -331,6 +331,18 @@ def _last_jsonl_record(path: Path) -> dict | None:
 
 def _now() -> str:
     return datetime.now().isoformat()
+
+
+def _in_utc(local_iso: str | None = None) -> str:
+    """The same moment in UTC, with its Z. Every time on disk is the PC's
+    local time with no zone: the hour the clocks go back happens twice, and
+    two stacks in it cannot be put in order or timed against one another.
+    A stack's time is written both ways. ``None`` is now."""
+    try:
+        local = datetime.fromisoformat(local_iso) if local_iso else datetime.now()
+    except (TypeError, ValueError):
+        local = datetime.now()
+    return local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 # ---------------------------------------------------------------------------
@@ -1311,6 +1323,7 @@ class FileStore:
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
             "acquired_at": acquired_at or _now(),
+            "acquired_at_utc": _in_utc(acquired_at),
             "metadata": metadata,
         }
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
@@ -1380,6 +1393,7 @@ class FileStore:
             "shape": list(volume.shape),
             "dtype": str(volume.dtype),
             "acquired_at": acquired_at or _now(),
+            "acquired_at_utc": _in_utc(acquired_at),
             "metadata": metadata,
         }
         _write_yaml(vol_dir / self._volume_meta_filename(timepoint), meta)
@@ -1460,6 +1474,7 @@ class FileStore:
                     "shape": data.get("shape"),
                     "dtype": data.get("dtype"),
                     "acquired_at": data.get("acquired_at", ""),
+                    "acquired_at_utc": data.get("acquired_at_utc", ""),
                     "metadata": data.get("metadata"),
                 }
                 result.append(info)

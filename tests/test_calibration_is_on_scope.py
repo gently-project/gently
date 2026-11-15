@@ -183,6 +183,8 @@ def test_the_row_is_on_screen_with_any_camera() -> None:
     # The fit of the side chosen: each side has its own.
     assert "const c = sideFit(emb);" in row
     assert "renderFits(emb);" in row
+    # While several embryos are walked the line is the walk's.
+    assert "$('op-cal-all').dataset.busy) { renderFits(emb); return; }" in row
 
 
 def test_pressing_it_brings_up_what_it_looks_at() -> None:

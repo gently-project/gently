@@ -1,6 +1,7 @@
 """Data routes - calibration, snapshots, embryos, sequence, status, events."""
 
 import asyncio
+import inspect
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -3336,6 +3337,20 @@ def create_router(server) -> APIRouter:
         sides = payload.get("sides")
         if isinstance(sides, list) and sides and volumes:
             start_kwargs["sides"] = [str(x) for x in sides]
+        # A line this run turns on, at a power nobody chose for it: refused
+        # here, with the line named, before a volume is taken on it.
+        check = getattr(orchestrator, "left_high_by_hand", None)
+        if volumes and agent is not None and callable(check):
+            chosen = [
+                emb
+                for eid, emb in agent.experiment.embryos.items()
+                if not embryo_ids or eid in embryo_ids
+            ]
+            high = check(str(preset) if preset else None, chosen)
+            if inspect.isawaitable(high):
+                high = await high
+            if isinstance(high, str) and high:
+                raise HTTPException(status_code=409, detail=high)
         try:
             result = await orchestrator.start(**start_kwargs)
         except Exception as exc:
