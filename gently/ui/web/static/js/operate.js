@@ -1881,12 +1881,16 @@ const OperateManager = (function () {
         // While a run goes the line is the run's ("sweeping…"); it is put
         // back when the run ends and the button with it.
         if (b && b.disabled) return;
+        // Likewise while several embryos are being walked: the line is the
+        // walk's, and a selection change mid-walk wrote over it.
+        if (($('op-cal-all') || {}).dataset && $('op-cal-all').dataset.busy) { renderFits(emb); return; }
         const who = emb ? `embryo ${labelFor(emb)}${_calSide === 'B' ? ' · side B' : _calSide === 'AB' ? ' · both sides' : ''}` : '';
         renderFits(emb);
         // The fits themselves are the two lines above (renderFits). This line
         // is what a calibration says while it runs and how it ended; at rest
         // it says only what Calibrate would do.
-        const says = !emb ? '' : fitted ? '' : `${who} has no fit on this side yet`;
+        const where = _calSide === 'AB' ? 'on one side or both' : `on side ${_calSide}`;
+        const says = !emb || (fitted && _calSide !== 'AB') ? '' : (_calSide === 'AB' && fitOn(emb, 'A') && fitOn(emb, 'B')) ? '' : `no fit yet ${where}`;
         out.textContent = says;
         out.title = says;
     }
