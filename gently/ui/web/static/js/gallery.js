@@ -1524,6 +1524,11 @@ const GalleryTab = {
         const embryo = img.metadata?.embryo_id || '';
         const ts = img.timestamp ? img.timestamp.slice(0, 19).replace('T', ' ') : '';
         const typeLabel = img.data_type || 'image';
+        // Which side and which timepoint: a round that images both sides
+        // pushes two pictures of one embryo a third of a second apart, and
+        // they read as the same picture twice.
+        const side = img.metadata?.side, tp = img.metadata?.timepoint;
+        const where = `${side ? ` · side ${side}` : ''}${tp != null ? ` · t${tp}` : ''}`;
         const thumb = img.base64_png
             ? pushedThumb(img, 'gallery-tab-thumb')
             : `<div class="gallery-tab-thumb-placeholder">${typeLabel}</div>`;
@@ -1532,7 +1537,7 @@ const GalleryTab = {
                 ${thumb}
                 <div class="gallery-tab-item-info">
                     <div class="gallery-tab-item-type">${typeLabel}</div>
-                    ${embryo ? `<div class="gallery-tab-item-embryo">${embryo}</div>` : ''}
+                    ${embryo ? `<div class="gallery-tab-item-embryo">${embryo}${where}</div>` : ''}
                     ${ts ? `<div class="gallery-tab-item-ts">${ts}</div>` : ''}
                 </div>
             </div>

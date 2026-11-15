@@ -12074,3 +12074,16 @@ button.eval-dot:focus-visible { outline: 2px solid var(--accent); outline-offset
 .devices-manual-lock[hidden] { display: none; }
 .devices-manual-lock .view-btn { margin-left: auto; }
 #devices-view-manual > [inert] { opacity: 0.45; }
+
+/* The Gallery's tiles show the whole picture. A projection is three times
+   wider than tall and its embryo sits to one side; a square tile filled by
+   its middle showed the empty third, and the gallery looked black. */
+.gallery-tab-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.gallery-tab-thumb, .gallery-tab-thumb.u16 { aspect-ratio: 3 / 1; width: 100%; height: auto; object-fit: contain; background: #04070b; }
+.gallery-tab-thumb.u16 .u16-c { object-fit: contain; }
+
+/* A control wears the typeface of where it sits. Browsers give buttons,
+   inputs and selects their own (Arial here), so every page that did not say
+   otherwise mixed it in: four faces on Devices, three on Sessions' old cards.
+   Sizes are left as each page set them. */
+button, input, select, textarea { font-family: inherit; }
