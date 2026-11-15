@@ -3572,11 +3572,43 @@ class DeviceLayerServer(Service):
                 halted.append(key)
             except Exception as exc:
                 errors[key] = str(exc)
-        logger.warning("Motion HALT: stopped %s errors=%s", halted, errors)
+        dark = await asyncio.to_thread(self._light_out, errors)
+        logger.warning("HALT: stopped %s, light out %s, errors=%s", halted, dark, errors)
         return web.json_response(
-            {"success": not errors, "halted": halted, "errors": errors},
+            {"success": not errors, "halted": halted, "dark": dark, "errors": errors},
             status=200 if not errors else 502,
         )
+
+    def _light_out(self, errors: dict[str, str]) -> list[str]:
+        """Everything that lights the sample, off: the scan, the cameras'
+        sequence, the beams, the lasers, the LED. HALT stopped what moves and
+        left what shines: pressed during a stack, the lasers went on firing.
+        Each is tried whatever the one before did; what would not go out is
+        named in ``errors``."""
+        core = self.system.core
+        dark: list[str] = []
+
+        def attempt(what: str, fn) -> None:
+            try:
+                fn()
+                dark.append(what)
+            except Exception as exc:
+                errors[what] = str(exc)
+
+        for key in ("scanner", "scanner_b"):
+            dev = self.devices.get(key)
+            if dev is not None:
+                attempt(f"{key} scan", lambda d=dev: d.set_spim_state("Idle"))
+                attempt(f"{key} beam", lambda d=dev: d.enable_beam(False))
+        if hasattr(core, "isSequenceRunning"):
+            attempt("camera", lambda: core.isSequenceRunning() and core.stopSequenceAcquisition())
+        lasers = self.devices.get("laser_control")
+        if lasers is not None:
+            attempt("lasers", lambda: core.setConfig(lasers.group_name, "ALL OFF"))
+        led = self.devices.get("led")
+        if led is not None:
+            attempt("led", lambda: led.set("Closed"))
+        return dark
 
     async def handle_get_bottom_z(self, request):
         """GET /api/stage/bottom_z — bottom-camera focus Z position + limits."""

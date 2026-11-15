@@ -1218,6 +1218,23 @@ class FileStore:
     # Volumes
     # ==================================================================
 
+    @staticmethod
+    def _keep_what_is_there(vol_path: Path) -> None:
+        """A stack already saved under this timepoint is moved aside, never
+        written over: ``t0007.tif`` becomes ``t0007.was_<when>.tif``, with
+        its sidecar. A run resumed after dying between saving a stack and
+        noting the count takes that number again, and the stack that was
+        there was deleted for it."""
+        if not vol_path.exists():
+            return
+        when = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        kept = vol_path.with_name(f"{vol_path.stem}.was_{when}{vol_path.suffix}")
+        vol_path.rename(kept)
+        meta = vol_path.with_name(vol_path.stem + ".meta.yaml")
+        if meta.exists():
+            meta.rename(meta.with_name(f"{vol_path.stem}.was_{when}.meta.yaml"))
+        logger.warning("%s was already on disk; kept as %s", vol_path.name, kept.name)
+
     def put_volume(
         self,
         session_id: str,
@@ -1254,6 +1271,7 @@ class FileStore:
 
         vol_dir = self._volume_dir(session_id, embryo_id, side)
         vol_path = vol_dir / self._volume_filename(timepoint)
+        self._keep_what_is_there(vol_path)
 
         tifffile.imwrite(str(vol_path), volume, compression="zlib")
 
@@ -1311,8 +1329,7 @@ class FileStore:
         canonical = vol_dir / self._volume_filename(timepoint)
 
         # Move (rename if same drive, copy+delete otherwise)
-        if canonical.exists():
-            canonical.unlink()
+        self._keep_what_is_there(canonical)
         try:
             incoming_path.rename(canonical)
         except OSError:
