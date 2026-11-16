@@ -170,7 +170,8 @@ async (page) => {
     await wait(4200);
     await say('The two views do not sit on one another yet', 'That is what “Align A and B” fixes, once both sides are calibrated', 4600);
     mark('views');
-    await press(btn(/^Stop view$/), 1200).catch(() => {});
+    await say('Stop the view before calibrating', 'Stopping it disarms the beams');
+    await press(btn(/^Stop view$/), 2600);
 
     // ── 5. calibrate every embryo on both sides ─────────────────────────
     await say('Calibration: each embryo needs a fit on side A and on side B', '', 2600);
@@ -244,10 +245,15 @@ async (page) => {
     await type('#op-gv-a', '-0.03', 3200);
     await type('#op-gv-a', '0', 2000);
     mark('follow');
-    await press(btn(/^Stop view$/), 1200).catch(() => {});
+    await say('Stop the view when you are done looking', 'The beams are disarmed with it: nothing emits until the run takes a stack');
+    await press(btn(/^Stop view$/), 3200);
+    const emits = () => p.evaluate(() => [...document.querySelectorAll('[class*="lp-"]')].filter(e => /emit/i.test(e.innerText) && e.children.length < 3).map(e => e.innerText.trim())[0] || '');
+    await until(async () => !/^EMITTING/i.test(await emits()), 800, 10);
+    out.afterStop = (await beams()) + ' | ' + (await emits());
+    await wait(1800);
 
     // ── 9. plan the run ─────────────────────────────────────────────────
-    await say('Route the laser line for the run', 'Stopping a view or finishing a calibration leaves the lasers off');
+    await say('The laser line stays routed for the run', 'Routed with the beams off, nothing emits: a stack gates its own light');
     await soft('route', async () => {
       const chip = p.locator('.lp-chip', { hasText: /^488$/ });
       if (!(await chip.evaluate(e => e.classList.contains('is-on')))) await press(chip, 1800);
@@ -270,6 +276,8 @@ async (page) => {
     await choose('#op-tl-stop', 'timepoints', 500);
     await type('#op-tl-condval', '5', 1500);
     out.pre = await p.evaluate(() => document.querySelector('#op-preflight').innerText.replace(/\n+/g, ' | '));
+
+    out.beamsAtStart = await p.evaluate(() => fetch('/api/devices/beam').then(r => r.json()).then(b => JSON.stringify(b.beam || b)).catch(e => String(e)));
 
     // ── 10. run ─────────────────────────────────────────────────────────
     await say('Start timelapse');

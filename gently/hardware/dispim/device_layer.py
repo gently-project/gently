@@ -1495,6 +1495,10 @@ class DeviceLayerServer(Service):
             logger.exception("Lightsheet streamer crashed")
         finally:
             await asyncio.to_thread(self._stop_lightsheet_sequence_sync)
+            # A beam is armed for the view. With the view gone and a line
+            # still routed it went on lighting the sample with no camera
+            # looking, until a stack happened to switch that side off.
+            await asyncio.to_thread(self._beams_off, "the live view ended")
             logger.info("Lightsheet streamer exiting")
 
     async def _broadcast_lightsheet(self, payload: dict[str, Any]):
@@ -1629,6 +1633,23 @@ class DeviceLayerServer(Service):
         except Exception as exc:
             logger.exception("[lightsheet] range read failed")
             return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    def _beams_off(self, why: str) -> list[str]:
+        """Disarm every beam that is armed; returns the sides it disarmed.
+        Best effort, and reads first: a beam that is off is not written to."""
+        off: list[str] = []
+        try:
+            beam = self._read_beam()
+            for key, dev_name in self._BEAM_SIDES.items():
+                dev = self.devices.get(dev_name)
+                if dev is not None and beam.get(key):
+                    dev.enable_beam(False)
+                    off.append(key)
+            if off:
+                logger.info("[beam] disarmed %s: %s", ", ".join(off), why)
+        except Exception:
+            logger.warning("[beam] could not disarm (%s)", why, exc_info=True)
+        return off
 
     def _follow_beam_to_side(self, side: str) -> None:
         """An armed beam follows the live view to its side.

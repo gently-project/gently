@@ -9,6 +9,7 @@ Manages background timelapse acquisition with:
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -1343,6 +1344,7 @@ class TimelapseOrchestrator:
         acquisitions until burst completes.
         """
         try:
+            await self._beams_off_at_start()
             await self._note_powers_at_start()
             while not self._stop_requested:
                 # Handle pause (whole-session)
@@ -1786,6 +1788,20 @@ class TimelapseOrchestrator:
             if pct is not None:
                 out[f"laser_power_{wl}_pct"] = pct
         return out
+
+    async def _beams_off_at_start(self) -> None:
+        """Disarm both beams before the first round. A stack gates its own
+        light; a beam left armed from a live view lights the sample between
+        stacks, and on a side the run never images, for the whole run."""
+        set_beam = getattr(self.client, "set_beam", None)
+        if set_beam is None:
+            return
+        try:
+            result = set_beam(False, "both")
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            logger.warning("Could not disarm the beams at the run's start", exc_info=True)
 
     async def _note_powers_at_start(self) -> None:
         """Read each line's power once, as the run begins, and hold it.
