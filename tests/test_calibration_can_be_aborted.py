@@ -186,7 +186,7 @@ def _wire_body() -> str:
 def test_abort_is_on_the_pane_only_while_it_runs_and_is_wired():
     assert 'id="op-cal-abort"' in HTML and "hidden>Abort</button>" in HTML
     assert "$('op-cal-abort')" in _wire_body() and "abortCalibration" in _wire_body()
-    fn = OPERATE[OPERATE.index("async function calibrateSelected(") :][:4200]
+    fn = OPERATE[OPERATE.index("async function calibrateSelected(") :][:5200]
     assert "ab.hidden = false" in fn and "if (ab) ab.hidden = true" in fn
     assert "/aborted/i.test(detail)" in fn, "an abort reads as a failure or a refusal"
     assert fn.index("/aborted/i.test(detail)") < fn.index("showRefusal(e)"), (

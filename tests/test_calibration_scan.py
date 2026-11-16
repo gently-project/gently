@@ -123,6 +123,18 @@ async def test_scan_recovers_the_sheet_and_the_extent() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fitting_side_a_again_keeps_side_bs_fit() -> None:
+    e = EmbryoState(id="embryo_1")
+    e.stage_position = {"x": 1.0, "y": 2.0}
+    b_fit = {"method": "scan", "slope_um_per_deg": 94.7, "offset_um": -3.0}
+    e.calibration = {"method": "scan", "slope_um_per_deg": 80.0, "B": dict(b_fit)}
+    msg = await scan_calibrate("embryo_1", {"agent": _agent(e), "client": _client()})
+    assert msg.startswith("\u2713"), msg
+    assert abs(e.calibration["slope_um_per_deg"] - SLOPE) < 4
+    assert e.calibration["B"] == b_fit
+
+
+@pytest.mark.asyncio
 async def test_a_borrowed_slope_is_kept_and_the_offset_is_this_embryos_own() -> None:
     emb = EmbryoState(id="embryo_2")
     agent = _agent(emb)

@@ -34,7 +34,6 @@ TOGGLED_CLASSES = [
     "settings-radio",
     "rig-progress",
     "cp",
-    "cp-strip",
     "cal-adv",
     "al-history",
     "boot-banner",

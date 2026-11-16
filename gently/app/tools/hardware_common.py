@@ -23,6 +23,19 @@ def crop_to_embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> np.n
     Detect embryo in image and crop to ROI.
     Returns cropped image for more accurate focus scoring.
     """
+    roi = embryo_roi(image, padding_percent)
+    return image if roi is None else image[roi]
+
+
+# A box this much longer than it is wide is not an embryo: on a slice with
+# nothing in it, the largest thing above the threshold is a column of the
+# sensor's own pattern, and the crop came out a strip a few pixels wide.
+ROI_LONGEST_TO_SHORTEST = 6.0
+
+
+def embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> tuple[slice, slice] | None:
+    """The box around the largest bright thing in `image`, padded, as two
+    slices; None when there is nothing, or nothing embryo-shaped."""
     try:
         from scipy import ndimage
 
@@ -33,7 +46,7 @@ def crop_to_embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> np.n
         # Label connected components
         labeled, num_features = ndimage.label(mask)
         if num_features == 0:
-            return image  # No embryo found, return full image
+            return None
 
         # Find largest component
         sizes = ndimage.sum(mask, labeled, range(1, num_features + 1))
@@ -43,7 +56,7 @@ def crop_to_embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> np.n
         # Get bounding box
         coords = np.argwhere(embryo_mask)
         if len(coords) < 100:  # Too small, probably noise
-            return image
+            return None
 
         y_min, x_min = coords.min(axis=0)
         y_max, x_max = coords.max(axis=0)
@@ -58,11 +71,13 @@ def crop_to_embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> np.n
         y2 = min(h, y_max + y_pad + 1)
         x2 = min(w, x_max + x_pad + 1)
 
-        cropped = image[y1:y2, x1:x2]
-        return cropped
+        tall, wide = int(y2 - y1), int(x2 - x1)
+        if max(tall, wide) > ROI_LONGEST_TO_SHORTEST * max(1, min(tall, wide)):
+            return None
+        return slice(int(y1), int(y2)), slice(int(x1), int(x2))
 
     except Exception:
-        return image  # Fallback to full image
+        return None
 
 
 def select_view_and_crop_roi(image: np.ndarray) -> np.ndarray:

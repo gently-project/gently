@@ -609,7 +609,7 @@ const OperateManager = (function () {
             const stopped = (r.halted || []).join(', ');
             // success with nothing halted means no positioner was registered to
             // halt — not "everything is stopped". Say the difference.
-            if (stopped) toast(`Halted: ${stopped}${(r.dark || []).length ? ' · lasers, LED and scan off' : ''}`);
+            if (stopped) toast(`Halted: ${stopped}${(r.dark || []).length ? ' · lasers, LED and scan off' : ''}${(r.views_stopped || []).length ? ' · cameras stopped' : ''}`);
             else toastFail('HALT reached no positioners — none are registered');
         } catch (e) {
             // A refusal carries its body: which axes stopped, which did not and
@@ -625,8 +625,14 @@ const OperateManager = (function () {
                 toastFail(`HALT failed (${why(e)})`);
             }
         } finally {
+            viewsHalted();
             fd.refresh(); bz.refresh();
         }
+    }
+    // HALT ends the live views (the server stops them); the buttons say so.
+    function viewsHalted() {
+        if (_bottomOn) applyBottomCam(false);
+        if (_spimOn) applySpim(false);
     }
     // ══ VIEWPORT ════════════════════════════════════════════════════════════
     // ── what is arriving ────────────────────────────────────────────────────
@@ -791,70 +797,6 @@ const OperateManager = (function () {
         const x = (e.clientX - rect.left) / sx, y = (e.clientY - rect.top) / sy;
         view.readAt(Math.floor((x - r.x) / r.w * view.w), Math.floor((y - r.y) / r.h * view.h));
     }
-    // ══ REACTIVE PREVIEW ════════════════════════════════════════════════════
-    // A routine that takes seconds and produces images has to show them where it
-    // was started. Calibrate used to be one blocking POST: the montage it builds
-    // was pushed to the viz server with nobody listening, so the only way to see
-    // what the sweep did was to decide, unprompted, to go and open the
-    // Calibration tab. The operator is watching the microscope, not hunting tabs.
-    //
-    // Presence-driven: it seats itself when images arrive and retires when they
-    // stop. There is deliberately no open or close control — an observer should
-    // be able to stand and watch without touching anything.
-    //
-    // RIG-NOTE: 45s is a guess at how long someone wants a finished sweep to stay
-    // readable before the pane goes quiet again. Tune it against real use; too
-    // short and the result vanishes mid-read, too long and a stale montage sits
-    // next to a live view.
-    const PREVIEW_IDLE_MS = 45000;
-    let _previewTimer = null;
-
-    function showPreview(title, meta, src) {
-        const fig = $('op-preview'), img = $('op-preview-img');
-        if (!fig || !img) return;
-        if (src) img.src = src;
-        const t = $('op-preview-title'), m = $('op-preview-meta');
-        if (t) t.textContent = title || '';
-        if (m) m.textContent = meta || '';
-        fig.hidden = false;
-        // Next frame, so the transition runs from the hidden state.
-        requestAnimationFrame(() => fig.classList.add('is-live'));
-        clearTimeout(_previewTimer);
-        _previewTimer = setTimeout(retirePreview, PREVIEW_IDLE_MS);
-    }
-
-    function retirePreview() {
-        const fig = $('op-preview');
-        clearTimeout(_previewTimer);
-        _previewTimer = null;
-        if (!fig || fig.hidden) return;
-        fig.classList.remove('is-live');
-        // Hide only after the fade, or it disappears with a jump.
-        setTimeout(() => { if (!fig.classList.contains('is-live')) fig.hidden = true; }, 300);
-    }
-
-    // Every image the server pushes lands here; we take the ones this pane is
-    // responsible for. Filtering on data_type rather than uid keeps a new routine
-    // one string away from having a preview.
-    const PREVIEW_KINDS = {
-        focus_montage: 'Focus sweep',
-    };
-
-    function onPushedImage(d) {
-        if (!d || !d.base64_png) return;
-        const title = PREVIEW_KINDS[d.data_type];
-        if (!title) return;
-        const md = d.metadata || {};
-        const bits = [];
-        if (md.pick) bits.push(`pick ${md.pick}`);
-        if (md.method) bits.push(md.method === 'vision' ? 'chosen by vision' : 'chosen by FFT');
-        if (Array.isArray(md.offsets) && md.offsets.length) {
-            bits.push(`${md.offsets.length} offsets, ${md.offsets[0]} to ${md.offsets[md.offsets.length - 1]} µm`);
-        }
-        if (md.reasoning) bits.push(String(md.reasoning));
-        showPreview(title, bits.join(' · '), `data:image/png;base64,${d.base64_png}`);
-    }
-
     function clearImg(imgId, phId, text) {
         const img = $(imgId), ph = $(phId), fit = img && img.closest('.op-cam-fit');
         if (img) img.classList.remove('has-frame');
@@ -1460,6 +1402,7 @@ const OperateManager = (function () {
             const block = document.querySelector(`.op-sheet-side[data-side="${side}"]`);
             if (block) block.classList.toggle('is-on', _side === side || multi);
         });
+        renderFollow();
         const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
         const says = $('op-sheet-side'); if (says) says.textContent = SIDE_SAYS[_side] || '';
         renderSource();
@@ -1588,12 +1531,72 @@ const OperateManager = (function () {
         if (!Number.isFinite(v)) return;
         _pose[side][key] = v;
         _poseKnown[side] = true;
+        const f = lockFit(side);
+        if (f) {
+            const line = g => f.slope * g + f.offset;
+            if (key === 'galvo') {
+                // The piezo goes with the galvo along the fit's line, keeping
+                // whatever it was trimmed by, inside its own limits.
+                const ext = (_range[side] || RANGE_DEFAULT).piezo;
+                _pose[side].piezo = Math.min(ext[1], Math.max(ext[0], line(v) + _lock[side].trim));
+            } else {
+                // The piezo moved by hand is a trim on the line, and is kept.
+                _lock[side].trim = v - line(_pose[side].galvo);
+            }
+        }
         // The sheet moved is the sheet looked at: its side comes on screen,
         // and the device layer is told the side with the pose.
         if (_side !== side) setSpimSide(side);
         renderPose();
         postLsParams();
     }
+    // ── galvo and piezo together, by the fit ────────────────────────────────
+    // Once a side of the selected embryo has a fit, its galvo and piezo can
+    // be moved as one: the piezo follows the galvo along the fit's line, so
+    // the sheet stays in focus as it is walked through the embryo. Moving the
+    // piezo itself trims the line by a fixed amount, which is kept and shown.
+    const _lock = { A: { on: true, trim: 0, of: '' }, B: { on: true, trim: 0, of: '' } };
+    const sideFitOf = (emb, side) => {
+        const c = (emb && emb.calibration) || {};
+        const f = side === 'B' ? (c.B || {}) : c;
+        const slope = Number(f.slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0 ? { slope, offset: Number(f.offset_um) || 0 } : null;
+    };
+    // The fit a side's sheet is tied to now, or null when it is not tied.
+    function lockFit(side) {
+        if (!_lock[side] || !_lock[side].on) return null;
+        return sideFitOf(_embryos.find(e => e.id === _selected), side);
+    }
+    function renderFollow() {
+        const emb = _embryos.find(e => e.id === _selected);
+        ['A', 'B'].forEach(side => {
+            const k = side.toLowerCase(), wrap = $(`op-lock-${k}-wrap`);
+            if (!wrap) return;
+            const f = sideFitOf(emb, side), l = _lock[side];
+            // A trim belongs to one embryo's one fit: it does not carry over.
+            const of = f ? `${emb.id}|${f.slope}|${f.offset}` : '';
+            if (of !== l.of) { l.of = of; l.trim = 0; }
+            wrap.hidden = !f;
+            if (!f) return;
+            const box = $(`op-lock-${k}`); if (box) box.checked = l.on;
+            const says = $(`op-lock-${k}-says`);
+            // Short: it shares the side's heading line. Whose fit is in the title.
+            if (says) {
+                // The slope is in the Calibration panel just below; here only the trim.
+                says.textContent = l.on && Math.abs(l.trim) >= 0.05 ? `trim ${l.trim > 0 ? '+' : '−'}${Math.abs(l.trim).toFixed(1)} µm` : '';
+                wrap.title = `embryo ${labelFor(emb)}'s fit on side ${side}: ${f.slope.toFixed(1)} µm/°`;
+            }
+            const reset = $(`op-lock-${k}-reset`);
+            if (reset) reset.hidden = !(l.on && Math.abs(l.trim) >= 0.05);
+        });
+    }
+    // Back onto the fit's line at the galvo where the sheet is.
+    function clearTrim(side) {
+        _lock[side].trim = 0;
+        if (lockFit(side) && _poseKnown[side]) setAxis(side, 'galvo', _pose[side].galvo);
+        else renderFollow();
+    }
+
     // The LED has ONE control, in the Light panel. There used to be a second
     // button here with its own `_ledOn` belief, and the two did not talk: the
     // Light panel went on reporting the LED as it had last read it while this
@@ -1794,12 +1797,14 @@ const OperateManager = (function () {
             // EMBRYOS_UPDATE broadcast catches up.
             const mine = _embryos.find(e => e.id === _selected);
             if (mine && cal.slope_um_per_deg != null) mine.calibration = cal;
-            const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
-            if (out) {
-                out.textContent = (slope != null)
-                    ? `${Number(slope).toFixed(1)} µm/deg${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`
-                    : 'done';
-            }
+            // The fit of the side just measured: after a side B run this
+            // quoted side A's slope, which had not changed.
+            const words = c => (c && c.slope_um_per_deg != null
+                ? `${Number(c.slope_um_per_deg).toFixed(1)} µm/°${c.r_squared != null ? ` · R² ${Number(c.r_squared).toFixed(2)}` : ''}` : '');
+            const said = body.side === 'B' ? words(cal.B)
+                : body.side === 'both' ? [['A', cal], ['B', cal.B]].map(([k, c]) => (words(c) ? `${k} ${words(c)}` : '')).filter(Boolean).join(' · ')
+                    : words(cal);
+            if (out) out.textContent = said || 'done';
             if (typeof CalProgressPanel !== 'undefined') {
                 CalProgressPanel.finish(true, out ? out.textContent : '');
             }
@@ -1915,6 +1920,7 @@ const OperateManager = (function () {
     function renderFits(emb) {
         const who = $('op-calib-who');
         if (who) who.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
+        renderFollow();
         const host = $('op-cal-fits');
         if (!host) return;
         const cal = (emb && emb.calibration) || {};
@@ -1926,21 +1932,27 @@ const OperateManager = (function () {
 
     // ── what the calibration looked at ──────────────────────────────────────
     // The exposures and plots of each run are kept with the embryo. The latest
-    // run's plots are shown here; every image of it opens behind a click.
+    // run is shown as it was watched: the same cards (CalProgressPanel.show),
+    // drawn from the record. It was a second rendering of its own, graphs in
+    // tabs under the cards, beside a montage that seated and retired itself.
     let _calKept = null;     // {embryoId, run, images} as last shown
 
     async function renderCalKept(emb) {
         const host = $('op-cal-kept');
         if (!host) return;
+        const P = typeof CalProgressPanel !== 'undefined' ? CalProgressPanel : null;
         if (!emb) { host.hidden = true; return; }
         const id = emb.id;
+        // A run going on now, or one this page has just watched for this
+        // embryo, is on the cards already and is left there.
+        const free = () => P && !P.busy() && !P.watched(id);
         let runs = [];
         try {
             const d = await getJSON(`/api/calibration/records?embryo_id=${encodeURIComponent(id)}`);
             runs = (d && d.records) || [];
         } catch (_) { runs = []; }
         if (_selected !== id) return;            // the selection moved on while we asked
-        if (!runs.length) { host.hidden = true; _calKept = null; return; }
+        if (!runs.length) { host.hidden = true; _calKept = null; if (free()) P.show([]); return; }
         const last = runs[runs.length - 1];
         let images = [], record = last;
         try {
@@ -1958,48 +1970,18 @@ const OperateManager = (function () {
                 `${last.outcome || 'unknown'}: ${last.frames || 0} exposure${last.frames === 1 ? '' : 's'}, ` +
                 `${last.plots || 0} plot${last.plots === 1 ? '' : 's'}`;
         }
-        const strip = $('op-cal-kept-strip');
-        if (strip) {
-            // The run's graphs, drawn from its numbers as the Calibration tab
-            // draws them ("it shows the image based graphs and not the native
-            // graphs"). The saved pictures are for a page without the archive.
-            const arc = typeof CalibrationArchive !== 'undefined' ? CalibrationArchive : null;
-            const drawn = arc && arc.graphsHtml ? arc.graphsHtml(record, arc.steps(images), -1) : '';
-            strip.classList.toggle('is-graphs', !!drawn);
-            const plots = images.filter(i => (i.file || '').startsWith('plots/'));
-            const shown = plots.length ? plots : images.slice(-6);
-            strip.innerHTML = drawn || shown.map(i =>
-                `<button type="button" class="op-cal-kept-img" data-cal-img="${images.indexOf(i)}" title="${escapeHtml(calImageTitle(i))}">` +
-                `<img loading="lazy" src="${escapeHtml(i.url)}?max=720" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
-            if (drawn) tabGraphs(strip);
+        if (free()) {
+            const side = (record.requested || {}).side;
+            P.show(images.map((i, n) => ({
+                data_type: i.kind, src: `${i.url}?max=480`, thumb: `${i.url}?max=96`, n,
+                metadata: i.side || !side ? i : { ...i, side },
+            })), {
+                title: `Latest run · ${t} · ${last.outcome || 'unknown'}`,
+                tone: last.outcome === 'calibrated' ? 'ok' : last.outcome ? 'bad' : undefined,
+                onOpen: f => openCalImage(f.n),
+            });
         }
         host.hidden = false;
-    }
-
-    // One graph at a time, chosen by name ("the graphs can be shown in some
-    // subtabs instead of top to bottom"): six graphs down the pane was three
-    // screens of scrolling. It opens on the fit, the run's answer.
-    function tabGraphs(strip) {
-        const figs = [...strip.querySelectorAll('.cal-arc-graph')];
-        if (figs.length < 2) return;
-        const bar = document.createElement('div');
-        bar.className = 'cal-arc-steps op-cal-kept-tabs';
-        bar.setAttribute('role', 'tablist');
-        const show = k => {
-            figs.forEach((f, i) => { f.hidden = i !== k; });
-            [...bar.children].forEach((b, i) => { b.classList.toggle('is-on', i === k); b.setAttribute('aria-selected', String(i === k)); });
-        };
-        figs.forEach((f, k) => {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'cal-arc-step';
-            b.setAttribute('role', 'tab');
-            b.textContent = (f.querySelector('figcaption b') || {}).textContent || `Graph ${k + 1}`;
-            b.addEventListener('click', () => show(k));
-            bar.appendChild(b);
-        });
-        strip.prepend(bar);
-        show(figs.length - 1);
     }
 
     function calImageTitle(i) {
@@ -3311,7 +3293,9 @@ const OperateManager = (function () {
     function endingCell(emb) {
         if (!emb || emb.role === 'calibration') return '';
         const c = _endings[emb.id] || { kind: 'default', value: '' };
-        const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+        // The timepoints after hatching are the run's to set, not a row's.
+        const need = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+        const needs = need === 'after' ? null : need;
         // An embryo's own ending is the ending of its volumes.
         const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
         const who = `embryo ${labelFor(emb)}`;
@@ -3394,7 +3378,14 @@ const OperateManager = (function () {
         // the run can no longer have has just been taken off the select.
         plan = readPlan();
         const condval = $('op-tl-condval');
-        if (condval) condval.hidden = !(AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
+        const need = (AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
+        if (condval) { condval.hidden = !need; condval.min = need === 'after' ? 0 : 1; }
+        // What the number counts, said beside it.
+        const condSays = $('op-tl-condval-says');
+        if (condSays) {
+            condSays.textContent = need === 'after' ? 'more timepoints once hatched, then it ends' : '';
+            condSays.hidden = need !== 'after';
+        }
         const bfBody = $('op-plan-bf-body');
         if (bfBody) bfBody.hidden = !plan.bf.enabled;
         const ledField = $('op-plan-bf-led-field');
@@ -3471,6 +3462,10 @@ const OperateManager = (function () {
         if (_pane === 'acquire') renderPreflight();
     }
 
+    // Known offline, not merely unread: the header's own word for it.
+    const scopeOffline = () => typeof ConnectionStatus !== 'undefined'
+        && ConnectionStatus.get().gentlyConnected === true && ConnectionStatus.get().microscopeConnected === false;
+
     /** Everything the lines are derived from, gathered from what the page holds. */
     function preflightContext(plan) {
         const ids = new Set(subjectIds());
@@ -3491,6 +3486,13 @@ const OperateManager = (function () {
             problems.unshift(!_embryos.length ? 'No embryos yet: detect on the bottom camera, then register.'
                 : _targetScope === 'selected' ? 'No subject is selected.'
                     : 'Every embryo is marked as a reference: make at least one a subject.');
+        }
+        // With the microscope not connected nothing below can be acted on,
+        // and the embryo list may simply not have been read: it said "No
+        // embryos yet: detect on the bottom camera", which was not the matter.
+        if (scopeOffline()) {
+            problems = problems.filter(q => !/^No embryos yet/.test(q));
+            problems.unshift('The microscope is offline: nothing can be imaged until it is connected.');
         }
         return {
             plan,
@@ -4156,7 +4158,8 @@ const OperateManager = (function () {
     async function changeEmbryoEnding(id, kind) {
         // A kind that needs a number asks for it here; the row is too small
         // to hold a second field for something set once in a night.
-        const needs = (AcquisitionPlan.STOP_KINDS[kind] || {}).needs;
+        const need = (AcquisitionPlan.STOP_KINDS[kind] || {}).needs;
+        const needs = need === 'after' ? null : need;
         let value = null;
         if (needs) {
             const ask = window.prompt(needs === 'count' ? 'Stop after how many timepoints?' : 'Stop after how many hours?');
@@ -4831,6 +4834,10 @@ const OperateManager = (function () {
             bindAxis(side, 'galvo', $(`op-gv-${k}-in`), $(`op-gv-${k}`), 2);
             bindAxis(side, 'piezo', $(`op-pz-${k}-in`), $(`op-pz-${k}`), 1);
             fetchRange(side);   // each side's own extents, read once
+            const lock = $(`op-lock-${k}`);
+            if (lock) lock.addEventListener('change', () => { _lock[side].on = lock.checked; _lock[side].trim = 0; renderFollow(); });
+            const reset = $(`op-lock-${k}-reset`);
+            if (reset) reset.addEventListener('click', () => clearTrim(side));
         });
         // A side's name puts that side on screen.
         document.querySelectorAll('[data-sheet-view]').forEach(b =>
@@ -4858,13 +4865,9 @@ const OperateManager = (function () {
         adoptLsParams();
         document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b =>
             b.addEventListener('click', () => chooseSource(b.dataset.source)));
+        document.addEventListener('gently:halted', viewsHalted);
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
-        const keptStrip = $('op-cal-kept-strip');
-        if (keptStrip) keptStrip.addEventListener('click', e => {
-            const b = e.target.closest('[data-cal-img]');
-            if (b) openCalImage(Number(b.dataset.calImg));
-        });
         const abAlign = $('op-ab-align');
         if (abAlign) abAlign.addEventListener('click', alignAB);
         const keptOpen = $('op-cal-kept-open');
@@ -4924,6 +4927,14 @@ const OperateManager = (function () {
         // A run ends after 16 hours unless told otherwise (2026-10-09):
         // the night, with the morning to look at it.
         if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('duration', false);
+        // The number beside it is hours, or timepoints, or timepoints after
+        // hatching: chosen, hatching starts from three, not from the 16 of
+        // the hours it stood at. On the select itself, so it is set before
+        // the pane's own listener reads the plan.
+        if (stopSel) stopSel.addEventListener('input', () => {
+            const n = $('op-tl-condval');
+            if (n && stopSel.value === 'hatching') n.value = 3;
+        });
         const planPanel = $('op-panel-adaptive');
         if (planPanel) {
             planPanel.addEventListener('input', () => { planTouched(); renderPlan(); });
@@ -5031,13 +5042,12 @@ const OperateManager = (function () {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
             ClientEventBus.on('EMBRYOS_UPDATE', onEmbryosUpdate);
+            // The lines before a run say whether the microscope is there.
+            ClientEventBus.on('CONNECTION_STATUS', () => { if (_pane === 'acquire') renderPreflight(); });
             // The moments of a run, on top of the poll.
             ['ACQUISITION_STARTED', 'ACQUISITION_COMPLETED', 'ACQUISITION_STOPPED',
              'ACQUISITION_FAILED', 'TIMELAPSE_STATE', 'VOLUME_ACQUIRED', 'IMAGE_ACQUIRED',
              'EMBRYO_TERMINATED'].forEach(ev => ClientEventBus.on(ev, () => { if (_pane === 'acquire') scheduleRenderRun(); }));
-            // Server-pushed stills (focus montages today). websocket.js emits
-            // this for every image; onPushedImage takes the kinds this pane owns.
-            ClientEventBus.on('IMAGE_RECEIVED', onPushedImage);
             // The agent asking for marks. One surface, two invocations.
             ClientEventBus.on('MARKING_IMAGE', onMarkingImage);
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {

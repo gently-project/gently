@@ -227,6 +227,7 @@ async def extent(
                 data_type="edge_detection",
                 metadata={
                     "embryo_id": embryo_id,
+                    "side": side,
                     "galvo": float(galvos[i]),
                     "piezo": piezo,
                     "visible": bool(ext and ext[0] <= galvos[i] <= ext[1]),
@@ -344,6 +345,7 @@ async def focus_at(
                 metadata={
                     "embryo_id": embryo_id,
                     "sweep": "stack",
+                    "side": side,
                     "galvo_name": f"{galvo:.3f}°",
                     "galvo": galvo,
                     "piezo": float(piezos[i]),
@@ -369,6 +371,7 @@ async def focus_at(
                     "embryo_id": embryo_id,
                     "galvo_name": f"{galvo:.3f}°",
                     "galvo": galvo,
+                    "side": side,
                     "best_piezo": best,
                     "r_squared": r2,
                     "exposures": n,

@@ -332,11 +332,13 @@ def test_the_pane_shows_the_latest_runs_plots_and_opens_the_rest():
     fn = OPERATE[OPERATE.index("    async function renderCalKept(emb) {") :][:2600]
     assert "/api/calibration/records?embryo_id=" in fn
     assert "if (_selected !== id) return;" in fn, "a slow answer would land on another embryo"
-    assert "(i.file || '').startsWith('plots/')" in fn
+    # The latest run is drawn on the run's own cards, and a picture pressed
+    # there opens every image of it.
+    assert "P.show(images.map((i, n) => ({" in fn
+    assert "onOpen: f => openCalImage(f.n)," in fn
     assert "Lightbox.open(_calKept.images.map(" in OPERATE
     wire = OPERATE[OPERATE.index("if (_wired) return;") :]
     assert "keptOpen.addEventListener('click', openCalFolder)" in wire
-    assert "openCalImage(Number(b.dataset.calImg))" in wire
 
 
 # ── a deep data folder ───────────────────────────────────────────────────

@@ -1997,9 +1997,13 @@ class TimelapseOrchestrator:
                     # might miss: e.g. target={hatching} but perception now
                     # reports 'hatched'. Session has no is_complete() — we
                     # check terminal-stage membership directly.
+                    # A stage in the target set is the block above's, and
+                    # waits out its confirmation timepoints there: returning
+                    # here as well ended a "hatching, then 3 more" at once.
                     organism = get_organism()
                     if (
                         current_stage
+                        and current_stage not in target
                         and current_stage in organism.TERMINAL_STAGES
                         and target & organism.TERMINAL_STAGES
                     ):
@@ -2012,7 +2016,20 @@ class TimelapseOrchestrator:
                 if embryo:
                     hatched_via_status = embryo.hatching_status.get("hatched", False)
                     if hatched_via_status:
-                        return "terminal stage detected (manual)"
+                        # The detector sets this too, so it also waits out
+                        # the timepoints asked for after hatching.
+                        if embryo_state.detection_triggered_at is None:
+                            embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
+                            embryo_state.detection_type = "hatched"
+                        since = (
+                            embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
+                        )
+                        if since >= cond.confirm_timepoints:
+                            return "terminal stage detected (manual)" + (
+                                f" + {cond.confirm_timepoints} more timepoints"
+                                if cond.confirm_timepoints
+                                else ""
+                            )
 
         return None
 
