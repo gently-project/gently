@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gently: a guide to two-view imaging</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 16mm 15mm; }
+  * { box-sizing: border-box; }
+  body { font: 10.5pt/1.5 "Segoe UI", -apple-system, Inter, system-ui, sans-serif; color: #1c2128; margin: 0; }
+  h1 { font-size: 26pt; line-height: 1.15; margin: 0 0 4pt; letter-spacing: -0.01em; }
+  h2 { font-size: 15pt; margin: 0 0 6pt; padding-top: 2pt; border-top: 2px solid #1f6feb; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 12pt 0 3pt; page-break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ol, ul { margin: 0 0 7pt; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  section { page-break-before: always; }
+  .cover { page-break-before: avoid; padding-top: 30mm; }
+  .cover .sub { font-size: 13pt; color: #57606a; margin-bottom: 14pt; }
+  .cover .meta { color: #57606a; font-size: 9.5pt; margin-top: 10pt; }
+  figure { margin: 8pt 0 10pt; page-break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid #d0d7de; border-radius: 4px; display: block; }
+  figure.shot img { width: 88%; margin: 0 auto; }
+  figure.shot figcaption { text-align: center; }
+  figure.narrow img { width: 58%; }
+  figure.half img { width: 46%; }
+  figcaption { font-size: 9pt; color: #57606a; margin-top: 3pt; }
+  .key { background: #eef6ff; border-left: 3px solid #1f6feb; padding: 6pt 9pt; margin: 8pt 0; page-break-inside: avoid; }
+  .key b { color: #0a4fb3; }
+  .warn { background: #fff8e6; border-left: 3px solid #bf8700; padding: 6pt 9pt; margin: 8pt 0; page-break-inside: avoid; }
+  .ui { font-weight: 600; white-space: nowrap; }
+  code { font: 9pt Consolas, "JetBrains Mono", monospace; background: #f3f4f6; padding: 0 3pt; border-radius: 3px; }
+  pre { font: 8.5pt/1.45 Consolas, "JetBrains Mono", monospace; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 4px; padding: 7pt 9pt; margin: 6pt 0 9pt; page-break-inside: avoid; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.5pt; page-break-inside: avoid; }
+  th, td { text-align: left; vertical-align: top; padding: 4pt 6pt; border-bottom: 1px solid #d0d7de; }
+  th { font-weight: 600; background: #f6f8fa; }
+  .toc li { margin-bottom: 2pt; }
+  .two { display: flex; gap: 12pt; align-items: flex-start; }
+  .two > * { flex: 1 1 0; min-width: 0; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <h1>Gently</h1>
+  <div class="sub">A guide to setting up two-view (SPIM A and B) imaging</div>
+  <p>This guide takes you from an empty dish to a running two-view timelapse on the diSPIM: starting a session, finding embryos, calibrating both light sheets, planning the run, and watching it. It also points out the features worth knowing about along the way.</p>
+  <ol class="toc">
+    <li>The screen, and where things are</li>
+    <li>Start a session</li>
+    <li>Find the embryos</li>
+    <li>Light, and the two sheets</li>
+    <li>Calibrate both sides</li>
+    <li>Plan the run</li>
+    <li>Before it starts: the checks</li>
+    <li>Watch the run</li>
+    <li>Stopping things: HALT, and the rig menu</li>
+    <li>Where the data goes</li>
+    <li>Quick reference, and when something looks wrong</li>
+  </ol>
+  <div class="key"><b>The short version.</b> Devices &rsaquo; Scope: start the bottom camera, press Detect, register the embryos. In Calibration choose Side "A then B" and calibrate (one embryo, or several at once). Devices &rsaquo; Acquisition: set the cadence, Views "A and B", a laser line, how it ends; read the "Before it starts" list; press Start timelapse.</div>
+  <p class="meta">Written against Gently v1.0.0rc1, November 2026, on the diSPIM with session data under <code>D:\Gently3</code>. Screenshots are from a real session with four <i>C. elegans</i> embryos.</p>
+</section>
+
+<section>
+  <h2>1. The screen, and where things are</h2>
+  <p>Gently is one window. The bar on the left chooses the page; the strip at the top right is the instrument.</p>
+  <table>
+    <tr><th style="width:24%">Page</th><th>What it is for</th></tr>
+    <tr><td>Home</td><td>Recent sessions (with Resume), projects, recent images, and notes from the lab notebook.</td></tr>
+    <tr><td>Devices &rsaquo; Scope</td><td>The instrument: the cameras, embryo detection, light, the two sheets, calibration, the head and the stage. Most of setting up happens here.</td></tr>
+    <tr><td>Devices &rsaquo; Acquisition</td><td>The plan for a run, the checks before it starts, Start, and the run as it goes.</td></tr>
+    <tr><td>Embryos</td><td>Every timepoint of every embryo: projections for SPIM A and SPIM B, playback, and what perception said about each one.</td></tr>
+    <tr><td>Calibration</td><td>The archive: every calibration run this session kept, every exposure, and the graphs.</td></tr>
+    <tr><td>Sessions, Projects, Notebook, Gallery</td><td>The library: past sessions, the projects they belong to, shared notes (you can @mention a person or the agent), and images.</td></tr>
+  </table>
+  <p>At the top right: who is at the rig, the theme switch, and the <span class="ui">Connected</span> chip. The chip says whether Gently and the microscope are both up, shows the water temperature, and opens the rig menu (section 9). On the Devices page the red <span class="ui">HALT</span> button is always in the top right corner.</p>
+  <div class="key"><b>Nothing scrolls on Scope.</b> The panels on the right are laid out to fit the window. If you see a scroll bar there, the window is smaller than the layout expects; maximise it.</div>
+</section>
+
+<section>
+  <h2>2. Start a session</h2>
+  <figure class="shot"><img src="img/01-launch.png" alt="The launch screen"><figcaption>The launch screen. Left: who is here. Middle: what to bring up today. Right: a new session, or one to carry on from.</figcaption></figure>
+  <ol>
+    <li>Open Gently (the desktop shortcut, or <code>http://localhost:8080</code> if it is already running).</li>
+    <li>Under <span class="ui">Who's here</span>, pick your name. Notes, calibrations and settings changes are recorded under it.</li>
+    <li>Under <span class="ui">Today</span>, leave <span class="ui">Microscope</span> on to connect to the rig. <span class="ui">Assistant</span> brings up the Claude agent for chat; the run's own perception of embryos works either way.</li>
+    <li>Under <span class="ui">Session</span>, choose <span class="ui">A new session</span> for a fresh dish, or <span class="ui">Carry on from&hellip;</span> to resume one. Resuming brings back its embryos, their positions and their calibrations. An embryo you removed stays removed.</li>
+    <li>Press <span class="ui">Start</span>. The microscope takes about a minute to come up; the chip at the top right says "Warming up" and then "Connected".</li>
+  </ol>
+  <div class="key"><b>Worth knowing.</b> The launch screen remembers your last choices, and the version and build time are at the bottom (click the version to copy it into a bug report).</div>
+</section>
+
+<section>
+  <h2>3. Find the embryos</h2>
+  <p>Go to <span class="ui">Devices &rsaquo; Scope</span>. The strip above the picture chooses the camera: <span class="ui">Bottom cam</span> (the overview), <span class="ui">SPIM A</span>, <span class="ui">SPIM B</span> and <span class="ui">Multi</span> (both sides in one frame, A red and B green).</p>
+  <figure class="shot"><img src="img/03-scope-bottom.png" alt="Scope with the bottom camera and four detected embryos"><figcaption>Scope. Left: Detect and the embryo list. Centre: the camera. Right: Light, Sheets, Calibration, Head and Stage.</figcaption></figure>
+  <ol>
+    <li>With <span class="ui">Bottom cam</span> chosen, press <span class="ui">Start camera</span>. Adjust the exposure and the Display levels under the picture until the embryos are clear.</li>
+    <li>In <span class="ui">Detect</span>, "Lit by" says how the dish is lit. The default is <b>room light</b> (embryos bright on a dark field); switch it if you are using the LED.</li>
+    <li>Press <span class="ui">Detect</span>. Candidates are found as blobs, checked by Claude, and outlined. Each one you keep becomes a row in <span class="ui">Embryos</span> with its stage position.</li>
+    <li>To add one by hand, click it in the picture. Click a marker to remove it. The target button on a row drives the stage to that embryo.</li>
+  </ol>
+  <div class="key"><b>Worth knowing.</b> Each row shows <b>CAL</b> or <b>UNCAL</b>. A run will not start with an uncalibrated embryo in it, and the Acquisition page tells you so before you press Start, with a button to calibrate the ones that need it.</div>
+  <div class="warn">The head must be lowered to the sample before the light sheets see anything. The <span class="ui">Head</span> panel shows its height and how far it is from the floor; <span class="ui">Raise head</span> lifts it clear before you change the dish.</div>
+</section>
+
+<section>
+  <h2>4. Light, and the two sheets</h2>
+  <div class="two">
+    <div>
+      <h3>Light</h3>
+      <p>The <span class="ui">Light</span> panel is the one place the LED and the lasers are set.</p>
+      <ul>
+        <li><b>LED</b>: Closed or Open, with its brightness.</li>
+        <li><b>Laser</b>: a preset routes lines (Off, 405, 488, 561, 637, 488+561, All). Each line has its own power, and the range it may be set to is printed beside it (488 is held to 2&ndash;6 %).</li>
+        <li><b>Beam</b>: A and B. The beams follow the view while armed, so a routed line only emits when a view or a run asks for it. The line under the panel says in words what is emitting right now.</li>
+      </ul>
+      <div class="key"><b>For a run</b> you only need to route a line here (for example 488). The run turns the beams on for each stack and off again.</div>
+    </div>
+    <div>
+      <h3>Sheets</h3>
+      <figure style="margin-top:0"><img src="img/04b-sheets.png" alt="The Sheets panel"><figcaption>Both sides, each with its galvo and piezo.</figcaption></figure>
+      <p>The instrument has two light sheets. <b>A</b> is scanner AB, piezo P, camera 1. <b>B</b> is scanner CD, piezo Q, camera 2. Each side has a galvo (the sheet's angle) and a piezo (the detection plane). Drag the line or type the number. Moving a side's sheet puts that side on screen.</p>
+    </div>
+  </div>
+  <h3>Piezo follows galvo</h3>
+  <p>Once the selected embryo has a fit on a side, that side shows a tick box, <span class="ui">piezo follows galvo</span>. With it ticked, moving the galvo moves the piezo along the embryo's calibration line, so the picture stays in focus as you walk the sheet through the embryo. If you then nudge the piezo yourself, the difference is kept as a <b>trim</b> and shown beside the tick box; <span class="ui">clear</span> puts it back on the line. Untick it to move the two independently.</p>
+</section>
+
+<section>
+  <h2>5. Calibrate both sides</h2>
+  <p>A calibration measures, for one embryo and one side, where the embryo is along the galvo and which piezo position is in focus at each galvo angle. The result is a line: a slope in µm per degree and an offset. A two-view run needs that line for side A <b>and</b> side B of every embryo.</p>
+  <div class="two">
+    <div>
+      <h3>One embryo</h3>
+      <ol>
+        <li>Select the embryo in the list. The <span class="ui">Calibration</span> panel shows its fit on A and on B, or "no fit".</li>
+        <li>Choose <span class="ui">Side</span>: A, B, or <b>A then B</b> to do both in one go.</li>
+        <li>Route a laser line in Light, then press <span class="ui">Calibrate</span> (or <span class="ui">Recalibrate</span>). <span class="ui">Abort</span> stops it.</li>
+      </ol>
+      <h3>Several embryos at once</h3>
+      <ol>
+        <li>Open <span class="ui">Several embryos</span>. Tick the ones you want, or use <span class="ui">all</span>, <span class="ui">none</span>, <span class="ui">without a fit</span>.</li>
+        <li>Optionally tick <span class="ui">Then align the two views</span>. It sets Side to "A then B" and, after fitting both, moves the stage so the embryo sits at the same place in both views.</li>
+        <li>Press <span class="ui">Calibrate N embryos</span>. The stage walks from one to the next. At the end it says how many were calibrated and why any were not.</li>
+      </ol>
+    </div>
+    <div>
+      <figure style="margin-top:0"><img src="img/05b-several.png" alt="The Calibration panel with Several embryos open"><figcaption>The Calibration panel: both fits, Side, and Several embryos.</figcaption></figure>
+    </div>
+  </div>
+  <h3>Watching a calibration</h3>
+  <p>While it runs, the camera area becomes the run itself: a list of steps, one open at a time.</p>
+  <figure class="shot"><img src="img/05-calibrating-live.png" alt="A calibration in progress"><figcaption>A calibration going on. Finished steps fold to one line with what they found; the step being measured is open.</figcaption></figure>
+  <table>
+    <tr><th style="width:27%">Step</th><th>What it is doing, and what its line says when done</th></tr>
+    <tr><td>Where the embryo is</td><td>A sweep of the galvo to find the angles the embryo is lit at. "seen from +0.10° to +0.20°".</td></tr>
+    <tr><td>Finding the focus</td><td>A first look for the focal plane, chosen from a montage. "picked D by vision".</td></tr>
+    <tr><td>Focus at 0.150° wide / fine</td><td>A piezo sweep with the sheet held at one angle. A wide look first, then a fine one. "sharpest at +10.8 µm · R² 1.00".</td></tr>
+    <tr><td>The fit</td><td>The line through the sharpest piezo at each angle. "102.0 µm/° · offset −4.9 µm · R² 0.99".</td></tr>
+  </table>
+  <figure class="shot"><img src="img/06-calibrated-fit.png" alt="A kept calibration with one sweep open"><figcaption>A finished run, with one sweep opened. The graph is drawn from the run's own numbers. The row of exposures runs along the sweep, and the one the step picked is labelled "sharpest".</figcaption></figure>
+  <div class="key"><b>The graph is how you look through a step.</b> Hover a point to see that exposure; click to pin it; with the graph focused, the left and right arrow keys step along. Click the picture to open every image of the run full size. The <span class="ui">Graphs</span> button shows the selected embryo's latest run this way at any time, and pressing it again goes back to the camera. <span class="ui">All runs</span> opens the Calibration page's archive.</div>
+  <h3>Is it a good fit?</h3>
+  <ul>
+    <li>Slopes on this instrument are close to <b>95&ndash;100 µm/°</b> on both sides. A slope far from that is suspect.</li>
+    <li><b>R²</b> near 1 means the sweeps had a clear peak. The panel shows the weaker of the fit's two ends.</li>
+    <li>If a sweep's graph is flat or jagged and its exposures show no embryo, the embryo was not in that side's view. Try <span class="ui">Align A and B</span>, or re-centre on the embryo and calibrate that side again.</li>
+    <li>If a calibration refuses to start ("no object visible"), it shows you the frame it looked at and offers <span class="ui">Calibrate anyway</span>.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>6. Plan the run</h2>
+  <p>Go to <span class="ui">Devices &rsaquo; Acquisition</span>. Left: who is in the run. Middle: each embryo's latest volume. Right: the plan, what it adds up to, and the checks.</p>
+  <figure class="shot"><img src="img/07-plan-preflight.png" alt="The Acquisition plan with its checks"><figcaption>A two-view plan: every 5 minutes, views A and B, ending at hatching and then three more timepoints.</figcaption></figure>
+  <table>
+    <tr><th style="width:24%">Setting</th><th>What to choose</th></tr>
+    <tr><td>Embryos</td><td><span class="ui">All subjects</span> or <span class="ui">Selected</span>. Each row shows the embryo's fit and can have its own ending.</td></tr>
+    <tr><td>Cadence</td><td>How often a round starts, in seconds or minutes. Beside it is what the cadence will really be once the time a round takes is counted.</td></tr>
+    <tr><td>SPIM volume</td><td>Slices and exposure per stack.</td></tr>
+    <tr><td><b>Views</b></td><td><b>A and B</b> for two-view imaging. Every round, each embryo gets a stack from side A and then from side B, about three seconds apart.</td></tr>
+    <tr><td>Lasers</td><td>"current preset" uses the lines as they are routed on Scope. Powers can be set per line, or left "as it is".</td></tr>
+    <tr><td>Brightfield overview</td><td>Optional: one bottom-camera frame of the field each round.</td></tr>
+    <tr><td>Ends</td><td>Until stopped, after N timepoints, after N hours, at hatching, at comma stage, or when every test embryo has hatched.</td></tr>
+    <tr><td>Watching</td><td>The monitoring mode the agent applies during the run.</td></tr>
+  </table>
+  <h3>Ending at hatching</h3>
+  <p>Choose <span class="ui">at hatching</span> and a number appears beside it: <b>how many more timepoints to take once the embryo has hatched</b>. It starts at 3. Those extra frames show the empty shell and confirm the hatch; set it to 0 to stop at once. The plan's sentence reads it back: "at hatching, then 3 more timepoints".</p>
+  <div class="key"><b>This run, in a sentence.</b> The <span class="ui">This run</span> box at the top right always says the whole plan in words. If the sentence is not what you mean, the plan is not what you mean. <span class="ui">Save&hellip;</span> keeps a plan to <span class="ui">Load&hellip;</span> another night; <span class="ui">Hand to the agent</span> gives it to the assistant.</div>
+</section>
+
+<section>
+  <h2>7. Before it starts: the checks</h2>
+  <p>Between the plan and the Start button is a list titled <span class="ui">Before it starts</span>. It is worked out from what the page already knows, and it updates as you change the plan. A tick is fine, an exclamation mark is worth knowing, and a cross is in the way: Start will not run past a cross.</p>
+  <table>
+    <tr><th style="width:36%">A line like</th><th>Tells you</th></tr>
+    <tr><td>"4 embryos in the run."</td><td>Who will be imaged. If nobody: whether there are no embryos, none selected, or all marked as references.</td></tr>
+    <tr><td>"Every embryo in the run has a fit."</td><td>Calibration. If some have none, it names them and offers a button to calibrate them.</td></tr>
+    <tr><td>"488 at 3.1 %, as the rig has them now."</td><td>The light the stacks will be taken under. With no line routed it warns that the volumes would be dark. A run is refused if a line was left above 10 % by hand and the plan does not set it.</td></tr>
+    <tr><td>"A round takes about 16 s of the 5 min between rounds."</td><td>Whether the cadence can be kept with this many embryos, slices and views.</td></tr>
+    <tr><td>"About 5.0 GB an hour &hellip; 4.4 TB free: room for about 893 h."</td><td>How much disk the run will use and whether it fits.</td></tr>
+    <tr><td>"The head is at 91.6 µm."</td><td>That the head is down at the sample.</td></tr>
+    <tr><td>"The microscope is offline &hellip;"</td><td>Nothing can be imaged until it is connected.</td></tr>
+  </table>
+  <div class="key"><b>Why this matters.</b> Every one of these used to be found out after pressing Start, or the next morning. Read the list top to bottom once; if it is all ticks, press <span class="ui">Start timelapse</span>.</div>
+</section>
+
+<section>
+  <h2>8. Watch the run</h2>
+  <figure class="shot"><img src="img/08-run-going.png" alt="A run in progress"><figcaption>A run going on. Each tile is an embryo's latest volume as three projections. The strip at the top says the run's state and when the next round starts.</figcaption></figure>
+  <ul>
+    <li>The <span class="ui">Run</span> box counts down to the next round and has <span class="ui">Pause</span> and <span class="ui">Stop</span>. <span class="ui">As started</span> keeps the sentence the run was started with.</li>
+    <li>Each embryo's row shows its timepoint, when it is next, and its ending. An embryo can be stopped on its own, or have its ending changed, while the others carry on.</li>
+    <li>You can leave this page. The run is the server's, not the page's: closing the browser does not stop it.</li>
+    <li>If side B fails for an embryo in a round, side A's stack is still kept.</li>
+  </ul>
+  <figure class="shot"><img src="img/10-embryos.png" alt="The Embryos page"><figcaption>The Embryos page. Choose SPIM A or SPIM B at the top; step or play through the timepoints; read what perception made of each one and ask a follow-up.</figcaption></figure>
+  <p>On <span class="ui">Embryos</span>, select an embryo to see every timepoint: play them as a movie, compare with the first, switch between <span class="ui">SPIM A</span> and <span class="ui">SPIM B</span>, open the folder, or open a stack in Fiji. The coloured bar is the embryo's developmental stage over time, as judged from each volume. That judgement is what "at hatching" waits for.</p>
+</section>
+
+<section>
+  <h2>9. Stopping things: HALT, and the rig menu</h2>
+  <div class="two">
+    <div>
+      <p><span class="ui">HALT</span> is the emergency stop. It is on the Devices page's top right corner and at the top of the rig menu, and it never asks whether you have control.</p>
+      <p>One press:</p>
+      <ul>
+        <li>puts the <b>lasers and the LED out</b> first (in about 50 ms),</li>
+        <li><b>stops every stage</b>: XY, the head, the bottom focus and the piezos,</li>
+        <li>idles the scan and the beams,</li>
+        <li><b>stops the cameras</b> and ends any live view,</li>
+        <li>and, if a stack was being taken, ends it as cut short rather than saving half of it.</li>
+      </ul>
+      <p>It works during a stack or a stage move: it has its own line to the microscope that does not wait for whatever is running. The message afterwards names what stopped, and names anything that did <b>not</b>.</p>
+    </div>
+    <div>
+      <figure style="margin-top:0"><img src="img/11-rig-menu.png" alt="The rig menu"><figcaption>The rig menu, opened from the Connected chip.</figcaption></figure>
+    </div>
+  </div>
+  <h3>The rig menu</h3>
+  <ul>
+    <li><b>Device layer</b>: the process that talks to the hardware. Start, Stop (red, press twice) and its log.</li>
+    <li><b>Water</b>: the temperature now and a set point.</li>
+    <li><b>Room light</b> and <b>XY limits</b> switches.</li>
+    <li>Whether <b>Gently</b> and the <b>Microscope</b> are each online.</li>
+  </ul>
+  <div class="warn">HALT stops what is happening now. It does not end a timelapse plan by itself: use <span class="ui">Stop</span> in the Run box for that, or the run will try its next round.</div>
+</section>
+
+<section>
+  <h2>10. Where the data goes</h2>
+  <p>Everything is ordinary files under <code>D:\Gently3</code>. There is no database. One session is one folder:</p>
+<pre>D:\Gently3\sessions\20261115_1833_unnamed_bf67dc62\
+  session.yaml                     who, when, which project
+  acquisition.yaml                 the plan the run was started with
+  embryos\embryo_2\
+    embryo.yaml                    position, and the calibration for A and for B
+    calibration\20261115_233058\   one calibration run: every exposure, its scores, its plots
+    volumes\t0001.tif              side A's stack, timepoint 1
+    volumes\t0001.meta.yaml        shape, when it was taken (local and UTC), settings
+    volumes\B\t0001.tif            side B's stack of the same timepoint
+    projections\t0001.jpg          what the pages show
+    traces\t0001.json              what perception said about it
+    removed\...                    an embryo taken off the list, kept whole and restorable</pre>
+  <ul>
+    <li>Side A's stacks are in <code>volumes\</code> and side B's are beside them in <code>volumes\B\</code>, under the same timepoint numbers.</li>
+    <li>Every stack's <code>.meta.yaml</code> says when it was acquired. In a two-view round, B's time is a few seconds after A's.</li>
+    <li>A stack is never silently overwritten: if a timepoint is written twice, the earlier file is kept under a <code>.was_&hellip;</code> name.</li>
+    <li>Logs are in <code>D:\Gently3\logs</code>: <code>gently_*.log</code> for the app and <code>device_layer_*.log</code> for the hardware.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>11. Quick reference</h2>
+  <h3>A two-view night, start to finish</h3>
+  <ol>
+    <li>Launch: your name, Microscope on, new session or resume, Start.</li>
+    <li>Scope: Bottom cam, Start camera, Detect. Check the embryo list.</li>
+    <li>Head down to the sample. Route a laser line in Light.</li>
+    <li>Calibration: Several embryos, "without a fit", Side "A then B" (tick "Then align the two views" if you want them registered), Calibrate.</li>
+    <li>Check both fits on each embryo: slopes near 95&ndash;100 µm/°, R² near 1.</li>
+    <li>Acquisition: cadence, Views "A and B", lasers, Ends (for example at hatching, then 3 more).</li>
+    <li>Read "Before it starts". All ticks: Start timelapse.</li>
+    <li>Watch on Acquisition or Embryos. Stop from the Run box when done; Raise head before changing the dish.</li>
+  </ol>
+  <h3>When something looks wrong</h3>
+  <table>
+    <tr><th style="width:38%">You see</th><th>Do this</th></tr>
+    <tr><td>The chip says "Scope offline"</td><td>Open the rig menu and Start the device layer, then wait for "Connected". The checks before a run will say the microscope is offline until then.</td></tr>
+    <tr><td>A SPIM view says "not embryo N"</td><td>The stage is not at that embryo. Press the target button on its row to go there. The view still works where it is.</td></tr>
+    <tr><td>Multi shows nothing</td><td>Start the view; Multi needs a line routed and both sides' sheets where their embryos are.</td></tr>
+    <tr><td>One side's fit is far from the other's</td><td>Open Graphs for that embryo and look at that side's sweeps. No embryo in the exposures means it was out of that side's view: Align A and B, or re-centre and calibrate that side again.</td></tr>
+    <tr><td>Start is refused for laser power</td><td>A line is above 10 % and the plan does not set it. Lower it in Light, or set that line's power in the plan.</td></tr>
+    <tr><td>Something is moving or lit that should not be</td><td>HALT. Then read what it says stopped.</td></tr>
+  </table>
+  <p style="color:#57606a;font-size:9pt;margin-top:14pt">Gently is developed at <code>github.com/gently-project/gently</code>. This guide lives in the repository at <code>docs/guide/</code>; regenerate the PDF from the HTML when the screens change.</p>
+</section>
+
+</body>
+</html>
