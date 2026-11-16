@@ -2217,10 +2217,11 @@ const OperateManager = (function () {
         }).join('') : '<span class="op-cap">No embryos in the list yet.</span>';
         // Aligning needs a fit on both sides, so it needs both asked for.
         const align = $('op-cal-then-align');
-        if (align) {
-            align.disabled = _calSide !== 'AB';
-            if (align.disabled) align.checked = false;
-        }
+        // It can always be ticked: ticking it sets the side to A then B (the
+        // change handler), since that is what it needs. It was greyed out
+        // under side A or B with nothing on screen saying why. Choosing one
+        // side again afterwards unticks it.
+        if (align && _calSide !== 'AB') align.checked = false;
         const n = _calPick.size, sides = _calSide === 'AB' ? 'both sides' : `side ${_calSide}`;
         const says = $('op-cal-several-says');
         if (says) says.textContent = n ? `${n} chosen · ${sides}` : 'one after another';
@@ -4845,7 +4846,15 @@ const OperateManager = (function () {
             renderCalibrateAll();
         });
         const thenAlign = $('op-cal-then-align');
-        if (thenAlign) thenAlign.addEventListener('change', renderCalibrateAll);
+        if (thenAlign) thenAlign.addEventListener('change', () => {
+            const side = $('cal-side');
+            if (thenAlign.checked && side && side.value !== 'AB') {
+                side.value = 'AB';
+                readCalForm();          // the side, the method it needs, the fits shown
+                thenAlign.checked = true;
+            }
+            renderCalibrateAll();
+        });
         adoptLsParams();
         document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b =>
             b.addEventListener('click', () => chooseSource(b.dataset.source)));

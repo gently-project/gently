@@ -91,7 +91,20 @@ class DiSPIMFDrive:
         def wait():
             try:
                 self.core.setPosition(self.name, position)
-                self.core.waitForDevice(self.name)
+                # The core gives up waiting after five seconds, and the head
+                # takes longer than that to go a few hundred micrometres. That
+                # was taken as the move failing: it was reported done, at
+                # wherever the head had got to, while the head went on moving.
+                # A wait that timed out is waited again, until the head has
+                # stopped or the move's own time is up.
+                deadline = time.monotonic() + self._move_timeout_s
+                while True:
+                    try:
+                        self.core.waitForDevice(self.name)
+                        break
+                    except RuntimeError as exc:
+                        if "timed out" not in str(exc).lower() or time.monotonic() > deadline:
+                            raise
             except (RuntimeError, StageMovementError) as exc:
                 status.set_exception(exc)
             else:
@@ -109,6 +122,9 @@ class DiSPIMFDrive:
             value = self.core.getPosition(self.name)
         except (RuntimeError, HardwareError) as e:
             logger.error("Failed to read position from %s: %s", self.name, e)
+            # Said as what it is. Falling through used a name never set, and
+            # the head's height failing to read arrived as an UnboundLocalError.
+            raise HardwareError(f"could not read {self.name}: {e}") from e
 
         data = OrderedDict()
         data[self.name] = {
