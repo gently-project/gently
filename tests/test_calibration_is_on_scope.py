@@ -168,7 +168,11 @@ def test_several_embryos_can_be_chosen_and_calibrated_in_one_go() -> None:
     assert "Object.assign({ embryo_ids: ids, align }, calibrationSettings())" in walk
     assert "(d.why || {})[id]" in walk  # each failure with its reason
     # Aligning needs both sides asked for.
-    assert "align.disabled = _calSide !== 'AB';" in OPERATE
+    assert "if (align && _calSide !== 'AB') align.checked = false;" in OPERATE
+    # It is never greyed out: ticking it sets the side it needs.
+    assert "align.disabled" not in OPERATE
+    assert "if (thenAlign.checked && side && side.value !== 'AB') {" in OPERATE
+    assert "sets Side to A then B" in several
     # Until somebody chooses, the ones with no fit on the side asked for.
     assert "all.filter(lacksAFit).forEach(e => _calPick.add(e.id));" in OPERATE
 
