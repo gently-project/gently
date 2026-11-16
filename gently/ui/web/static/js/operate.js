@@ -3462,6 +3462,14 @@ const OperateManager = (function () {
         if (_pane === 'acquire') renderPreflight();
     }
 
+    // One side's fit of an embryo, or null when that side has none.
+    const planSideFit = (e, side) => {
+        const c = (e && e.calibration) || {};
+        const f = side === 'B' ? (c.B || {}) : c;
+        const slope = Number(f.slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0 ? f : null;
+    };
+
     // Known offline, not merely unread: the header's own word for it.
     const scopeOffline = () => typeof ConnectionStatus !== 'undefined'
         && ConnectionStatus.get().gentlyConnected === true && ConnectionStatus.get().microscopeConnected === false;
@@ -3498,8 +3506,14 @@ const OperateManager = (function () {
             plan,
             est: RunPreflight.estimate(plan, targets.length,
                 { slices: held('num_slices'), exposureMs: held('exposure_ms') }),
-            subjects: targets.map(e => ({
-                id: e.id, label: labelFor(e), calibrated: hasFit(e), r2: hasFit(e) ? fitScore(e) : null })),
+            // A fit on every side the plan images: a two-view run with a poor
+            // or missing side B fit passed as "has a fit" on side A's alone.
+            subjects: targets.map(e => {
+                const fits = (plan.spim.sides || ['A']).map(side => planSideFit(e, side));
+                const all = fits.every(Boolean);
+                return { id: e.id, label: labelFor(e), calibrated: all,
+                    r2: all ? Math.min(...fits.map(f => fitScore({ calibration: f }))) : null };
+            }),
             references: _embryos.filter(e => e.role === 'calibration').length,
             notSelected: _targetScope === 'selected' ? Math.max(0, allSubjectIds().length - ids.size) : 0,
             problems,
