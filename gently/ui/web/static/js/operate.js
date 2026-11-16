@@ -733,7 +733,16 @@ const OperateManager = (function () {
     }
     async function showFrame(pane, p, pixels = true) {
         const { img: imgId, ph: phId, url, box } = FRAME_SRC[pane];
-        if (!pixels || typeof U16View === 'undefined') { setImg(imgId, phId, p); return; }
+        if (!pixels || typeof U16View === 'undefined') {
+            // A picture, not counts (Multi's two cameras in colour). The box
+            // may still be showing one camera's counts from the side looked at
+            // before, and while it is the picture is hidden behind them: Multi
+            // showed the last frame of side A or B and nothing of its own.
+            const fit = fitOf(pane);
+            if (fit) fit.classList.remove('has-pixels');
+            setImg(imgId, phId, p);
+            return;
+        }
         // One fetch in flight per pane; a frame that lands meanwhile waits its turn,
         // and only the newest does, so a slow link shows the frames it can.
         if (_pull[pane]) { _pull[pane].next = p; return; }
