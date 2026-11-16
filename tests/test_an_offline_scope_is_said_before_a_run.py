@@ -34,3 +34,9 @@ def test_a_two_view_plan_is_judged_on_both_sides_fits() -> None:
     fix = fix[: fix.index("action === 'head'")]
     assert "const fitted = e => !M.sidesWithoutFit(e, sides).length;" in fix
     assert "hasFit" not in fix
+
+
+def test_a_walk_of_several_embryos_shows_its_steps() -> None:
+    walk = OPERATE[OPERATE.index("    async function calibrateAll(") :]
+    walk = walk[: walk.index("CalProgressPanel.begin(null);")]
+    assert "if (_pane !== 'cal') showPane('cal');" in walk
