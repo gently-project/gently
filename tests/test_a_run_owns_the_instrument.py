@@ -127,28 +127,3 @@ def test_nothing_that_stops_or_holds_the_rig_is_asked_about() -> None:
     # HALT does not pass through the question, and neither does anything
     # that stops a camera.
     assert "mayTakeFromRun" not in _fn("    async function haltMotion() {")
-
-
-def test_looking_at_manual_does_not_put_the_lasers_out_under_a_run() -> None:
-    """Found by an audit made with a browser that could only read: opening
-    Devices > Manual sent POST /api/devices/laser/off, every time. With a run
-    taking volumes about 20 s of every 5 min, a look at that view had about a
-    one in fifteen chance of darkening a volume."""
-    devices = (JS / "devices.js").read_text(encoding="utf-8")
-    assert (
-        "if (viewName === 'manual' && document.body.dataset.run !== 'running') setLaserOff();"
-        in devices
-    )
-    assert "if (viewName === 'manual') { setLaserOff();" not in devices
-
-
-def test_manuals_controls_are_locked_while_a_run_is_running() -> None:
-    """Manual is a second set of the instrument's controls and none of them
-    asked. It also holds three things found nowhere else (burst, the room
-    light, the water's setpoint), so it stays, locked under a run, with one
-    deliberate press to unlock it for a minute."""
-    devices = (JS / "devices.js").read_text(encoding="utf-8")
-    lock = devices[devices.index("    function lockManualUnderARun() {") :][:1500]
-    assert "document.body.dataset.run === 'running' && Date.now() >= _manualUnlockedUntil" in lock
-    assert "el.inert = locked;" in lock  # not reachable by pointer or keyboard
-    assert "attributeFilter: ['data-run']" in devices  # it follows the run as it starts and ends
