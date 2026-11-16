@@ -86,3 +86,51 @@ test('an unknown image type is never narrated as a calibration', () => {
     // a snapshot or a volume projection must not be mistaken for a frame.
     assert.equal(P.phaseOf({ data_type: 'snapshot', metadata: {} }), 'Calibrating');
 });
+
+// ── cards that append, one a step ──────────────────────────────────────
+// The run was one picture and one row of forty thumbnails, where a step
+// could not be told from the one before it.
+
+const frame = (data_type, metadata = {}) => ({ data_type, metadata, base64_png: 'x' });
+
+test('a step is a card, and a new step is a new card on the end', () => {
+    const cards = [];
+    const fresh = [
+        frame('presence_check', { galvo: 0 }),
+        frame('edge_detection', { galvo: -0.2 }),
+        frame('edge_detection', { galvo: -0.1 }),
+        frame('focus_sweep', { galvo_name: 'top', sweep: 'sparse' }),
+        frame('focus_sweep', { galvo_name: 'top', sweep: 'sparse' }),
+        frame('focus_sweep', { galvo_name: 'top', sweep: 'dense' }),
+        frame('focus_plot', { galvo_name: 'top' }),
+        frame('calibration_summary', { slope: 97 }),
+    ].map(f => P.intoCards(cards, f));
+    assert.deepEqual(fresh, [true, true, false, true, false, true, true, true]);
+    assert.deepEqual(cards.map(c => c.title), [
+        'Checking there is something there', 'Finding the embryo edges',
+        'Focus sweep · top coarse', 'Focus sweep · top dense',
+        'Fitting the top focus curve', 'Calibrated',
+    ]);
+    assert.deepEqual(cards.map(c => c.frames.length), [1, 2, 2, 1, 1, 1]);
+});
+
+test('in a walk, the next embryo starts its own cards', () => {
+    const cards = [];
+    P.intoCards(cards, frame('edge_detection', { embryo_id: 'embryo_1' }));
+    P.intoCards(cards, frame('edge_detection', { embryo_id: 'embryo_1' }));
+    assert.equal(P.intoCards(cards, frame('edge_detection', { embryo_id: 'embryo_2' })), true);
+    assert.deepEqual(cards.map(c => c.who), ['embryo_1', 'embryo_2']);
+});
+
+test('a long step keeps its newest frames and never drops a conclusion', () => {
+    const cards = [];
+    P.intoCards(cards, frame('focus_montage', { pick: 'A' }));
+    P.intoCards(cards, frame('focus_plot', { galvo_name: 'top', best_piezo: 1 }));
+    for (let i = 0; i < P.MAX_FRAMES + 20; i++) P.intoCards(cards, frame('focus_plot', { galvo_name: 'top', best_piezo: i }));
+    const fit = cards[cards.length - 1];
+    assert.equal(fit.frames.length, P.MAX_FRAMES);
+    for (let i = 0; i < 60; i++) P.intoCards(cards, frame('focus_sweep', { galvo_name: 'top', sweep: 'dense', piezo: i }));
+    const sweep = cards[cards.length - 1];
+    assert.equal(sweep.frames.length, P.MAX_FRAMES);
+    assert.equal(sweep.frames[sweep.frames.length - 1].metadata.piezo, 59);
+});

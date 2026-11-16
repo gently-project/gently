@@ -33,10 +33,16 @@
 const CalProgressPanel = (() => {
     'use strict';
 
-    // Frames kept in the strip. The whole run is 60-80 exposures; holding
-    // every base64 PNG in the DOM is real memory, and the tail is what tells
-    // you where the run is now.
-    const MAX_FRAMES = 40;
+    // A run is shown as cards that append, one a step: checking something is
+    // there, finding the edges, each focus sweep, each fit, the summary. A card
+    // holds its step's frames; the newest is the one shown, the rest are a
+    // row under it. It was one picture and one row of forty thumbnails for
+    // the whole run, where a step could not be told from the one before.
+    //
+    // Frames kept in a card, and cards kept in a run. Every base64 PNG in the
+    // DOM is real memory; the newest of a step is what tells you where it is.
+    const MAX_FRAMES = 16;
+    const MAX_CARDS = 60;
     // A run is over when the frames stop. The agent's calibration has no
     // "finished" signal on this path, so quiet for this long ends it.
     const IDLE_MS = 20000;
@@ -47,12 +53,12 @@ const CalProgressPanel = (() => {
     ]);
 
     let _host = null;
-    let _frames = [];
-    let _shown = -1;      // index being displayed; -1 = follow the newest
+    let _cards = [];      // {key, title, who, frames, shown, el}; the last is the step going on
+    let _count = 0;       // frames seen this run, kept or not
     let _running = false;
     let _embryo = null;
-    // A batch walks the slide, so its frames come from several embryos and the
-    // phase line has to say which one is under the objective right now.
+    // A batch walks the slide, so its frames come from several embryos and
+    // each card has to say which one it is of.
     let _walk = false;
     let _idle = null;
     let _bound = false;
@@ -143,53 +149,127 @@ const CalProgressPanel = (() => {
         img.data_type === 'focus_plot' || img.data_type === 'calibration_summary' ||
         img.data_type === 'focus_montage';
 
-    function render() {
-        if (!_host) return;
-        const wrap = _host.querySelector('.cp');
-        if (!wrap) return;
-        if (!_frames.length) { wrap.hidden = true; return; }
-        wrap.hidden = false;
+    // Which card a frame belongs on: its step, and in a walk its embryo.
+    function cardKey(img) {
+        const who = (img.metadata || {}).embryo_id || '';
+        return `${who}|${phaseOf(img)}`;
+    }
 
-        const idx = _shown >= 0 && _shown < _frames.length ? _shown : _frames.length - 1;
-        const cur = _frames[idx];
-
-        // The phase is the RUN's phase (the newest frame), even while you are
-        // looking back at an earlier one — otherwise scrubbing the strip makes
-        // it look as though the run went backwards.
-        const latest = _frames[_frames.length - 1];
-        const who = _walk ? (latest.metadata || {}).embryo_id : null;
-        wrap.querySelector('.cp-phase').textContent =
-            phaseOf(latest) + (who ? ` · ${who}` : '');
-        wrap.querySelector('.cp-count').textContent =
-            `${_frames.length} frame${_frames.length === 1 ? '' : 's'}`;
-        wrap.querySelector('.cp-dot').hidden = !_running;
-
-        const img = wrap.querySelector('.cp-img');
-        if (cur.base64_png) {
-            img.src = `data:image/png;base64,${cur.base64_png}`;
-            img.hidden = false;
-        } else {
-            img.hidden = true;
+    // Put a frame on the run's cards; true when it began a new card. Pure, so
+    // the grouping can be tested without a page.
+    function intoCards(cards, img) {
+        const key = cardKey(img);
+        let card = cards[cards.length - 1];
+        const fresh = !card || card.key !== key;
+        if (fresh) {
+            card = { key, title: phaseOf(img), who: (img.metadata || {}).embryo_id || null, frames: [], shown: -1, el: null };
+            cards.push(card);
         }
-        wrap.querySelector('.cp-cap').textContent = captionOf(cur);
+        card.frames.push(img);
+        if (card.frames.length > MAX_FRAMES) {
+            // Drop the oldest EXPOSURE, never a conclusion: the findings are
+            // the part of the step you still want when it ends.
+            const drop = card.frames.findIndex(f => !isConclusion(f));
+            card.frames.splice(drop < 0 ? 0 : drop, 1);
+            if (card.shown > 0) card.shown -= 1;
+        }
+        return fresh;
+    }
 
-        const strip = wrap.querySelector('.cp-strip');
-        strip.innerHTML = _frames.map((f, i) => {
+    const wrapOf = () => (_host ? _host.querySelector('.cp') : null);
+
+    function renderHead(phase) {
+        const wrap = wrapOf();
+        if (!wrap) return;
+        const last = _cards[_cards.length - 1];
+        wrap.querySelector('.cp-phase').textContent = phase || (last ? last.title : '');
+        wrap.querySelector('.cp-count').textContent = _count
+            ? `${_count} frame${_count === 1 ? '' : 's'} · ${_cards.length} step${_cards.length === 1 ? '' : 's'}`
+            : 'no frames yet';
+        wrap.querySelector('.cp-dot').hidden = !_running;
+    }
+
+    function renderCard(card) {
+        const el = card.el;
+        if (!el) return;
+        const n = card.frames.length;
+        const idx = card.shown >= 0 && card.shown < n ? card.shown : n - 1;
+        const cur = card.frames[idx];
+        el.querySelector('.cp-card-n').textContent = n > 1 ? `${n} frames` : '';
+        const img = el.querySelector('.cp-img');
+        if (cur && cur.base64_png) { img.src = `data:image/png;base64,${cur.base64_png}`; img.hidden = false; }
+        else img.hidden = true;
+        el.querySelector('.cp-cap').textContent = cur ? captionOf(cur) : '';
+        const strip = el.querySelector('.cp-strip');
+        strip.hidden = n < 2;
+        if (n < 2) { strip.innerHTML = ''; return; }
+        strip.innerHTML = card.frames.map((f, i) => {
             const label = esc(captionOf(f) || phaseOf(f));
             const cls = `cp-thumb${i === idx ? ' is-on' : ''}${isConclusion(f) ? ' is-key' : ''}`;
-            const pic = f.base64_png
-                ? `<img src="data:image/png;base64,${f.base64_png}" alt="">` : '';
-            return `<button class="${cls}" type="button" data-i="${i}"
-                     title="${label}" aria-label="${label}">${pic}</button>`;
+            const pic = f.base64_png ? `<img src="data:image/png;base64,${f.base64_png}" alt="">` : '';
+            return `<button class="${cls}" type="button" data-i="${i}" title="${label}" aria-label="${label}">${pic}</button>`;
         }).join('');
-        const on = strip.querySelector('.cp-thumb.is-on');
-        if (_shown < 0) strip.scrollLeft = strip.scrollWidth;
-        else if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        if (card.shown < 0) strip.scrollLeft = strip.scrollWidth;
+    }
+
+    // A new card goes on the end. The one before it is finished: it stops
+    // being the live one, and is left as it stood.
+    function appendCard(card) {
+        const wrap = wrapOf();
+        if (!wrap) return;
+        const list = wrap.querySelector('.cp-cards');
+        list.querySelectorAll('.cp-card.is-live').forEach(c => c.classList.remove('is-live'));
+        const el = document.createElement('article');
+        el.className = 'cp-card is-live';
+        el.setAttribute('role', 'listitem');
+        el.innerHTML = `
+            <header class="cp-card-head">
+              <b class="cp-card-title">${esc(card.title)}</b>
+              ${_walk && card.who ? `<span class="cp-card-who">${esc(String(card.who).replace(/^embryo_/, 'embryo '))}</span>` : ''}
+              <span class="cp-card-n"></span>
+            </header>
+            <div class="cp-stage"><img class="cp-img" alt="${esc(card.title)}" hidden></div>
+            <div class="cp-cap"></div>
+            <div class="cp-strip" hidden></div>`;
+        el.querySelector('.cp-strip').addEventListener('click', e => {
+            const b = e.target.closest('.cp-thumb');
+            if (!b) return;
+            const i = parseInt(b.dataset.i, 10);
+            // The newest frame of a card goes back to following its step.
+            card.shown = (i === card.frames.length - 1) ? -1 : i;
+            renderCard(card);
+        });
+        card.el = el;
+        // Following the run means the newest card is in view; somebody who
+        // has scrolled back to look at an earlier step is left where they are.
+        const scroller = list.closest('.op-calfit-body') || list;
+        const following = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160;
+        list.appendChild(el);
+        while (_cards.length > MAX_CARDS) {
+            const gone = _cards.shift();
+            if (gone.el) gone.el.remove();
+        }
+        if (following && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function render() {
+        const wrap = wrapOf();
+        if (!wrap) return;
+        if (!_cards.length && !_running) { wrap.hidden = true; return; }
+        wrap.hidden = false;
+        renderHead();
     }
 
     function armIdle() {
         if (_idle) clearTimeout(_idle);
         _idle = setTimeout(() => { _running = false; render(); }, IDLE_MS);
+    }
+
+    function clearCards() {
+        _cards = [];
+        _count = 0;
+        const wrap = wrapOf();
+        if (wrap) wrap.querySelector('.cp-cards').innerHTML = '';
     }
 
     function onImage(data) {
@@ -202,66 +282,57 @@ const CalProgressPanel = (() => {
             // and do not pin it to one embryo: the agent may be walking the
             // slide too, and dropping the other embryos' frames would make a
             // batch look like it stalled after the first one.
-            _frames = [];
-            _shown = -1;
+            clearCards();
             _running = true;
             _embryo = null;
             _walk = true;
         }
-        _frames.push(data);
-        if (_frames.length > MAX_FRAMES) {
-            // Drop the oldest EXPOSURE, never a conclusion: the findings are
-            // the part of the run you still want when it ends.
-            const drop = _frames.findIndex(f => !isConclusion(f));
-            _frames.splice(drop < 0 ? 0 : drop, 1);
-            if (_shown > 0) _shown -= 1;
-        }
+        _count += 1;
+        const fresh = intoCards(_cards, data);
+        const card = _cards[_cards.length - 1];
+        if (fresh) appendCard(card);
+        renderCard(card);
         armIdle();
         render();
     }
 
     function begin(embryoId) {
-        _frames = [];
-        _shown = -1;
+        clearCards();
         _running = true;
         _embryo = embryoId || null;
         // No id means "whatever the run visits" — a batch, not one embryo.
         _walk = !embryoId;
         armIdle();
-        if (!_host) return;
-        const wrap = _host.querySelector('.cp');
+        const wrap = wrapOf();
         if (!wrap) return;
         // Nothing has arrived yet, but the run HAS started: say so rather than
         // leaving the pane blank until the first exposure comes back.
         wrap.hidden = false;
-        wrap.querySelector('.cp-phase').textContent = 'Starting the calibration';
-        wrap.querySelector('.cp-count').textContent = 'no frames yet';
-        wrap.querySelector('.cp-dot').hidden = false;
-        wrap.querySelector('.cp-img').hidden = true;
-        wrap.querySelector('.cp-cap').textContent = '';
-        wrap.querySelector('.cp-strip').innerHTML = '';
+        renderHead('Starting the calibration');
     }
 
     function finish(ok, text) {
         _running = false;
         if (_idle) { clearTimeout(_idle); _idle = null; }
-        if (!_host) return;
-        const wrap = _host.querySelector('.cp');
+        const wrap = wrapOf();
         if (!wrap) return;
-        if (!_frames.length) {
+        if (!_cards.length) {
             // A run that produced no frames has nothing to show; the pane's
             // own result line already says what happened.
             wrap.hidden = true;
             return;
         }
-        render();
-        wrap.querySelector('.cp-dot').hidden = true;
-        wrap.querySelector('.cp-phase').textContent = ok ? 'Calibrated' : 'Calibration failed';
-        // The result replaces the caption only while the panel is still
-        // following the run. If the operator has scrubbed back to a frame,
-        // that frame's own caption is what belongs under it — the phase line
-        // above already says how the run ended.
-        if (text && _shown < 0) wrap.querySelector('.cp-cap').textContent = text;
+        // How it ended is the last card: one line, and no picture.
+        const list = wrap.querySelector('.cp-cards');
+        list.querySelectorAll('.cp-card.is-live').forEach(c => c.classList.remove('is-live'));
+        const el = document.createElement('article');
+        el.className = `cp-card cp-card-end ${ok ? 'is-ok' : 'is-bad'}`;
+        el.setAttribute('role', 'listitem');
+        el.innerHTML = `<header class="cp-card-head"><b class="cp-card-title">${ok ? 'Calibrated' : 'Calibration failed'}</b></header>`
+            + (text ? `<div class="cp-cap">${esc(text)}</div>` : '');
+        list.appendChild(el);
+        if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        renderHead(ok ? 'Calibrated' : 'Calibration failed');
     }
 
     function mount(hostId) {
@@ -274,18 +345,8 @@ const CalProgressPanel = (() => {
               <span class="cp-phase"></span>
               <span class="cp-count"></span>
             </div>
-            <div class="cp-stage"><img class="cp-img" alt="Calibration frame" hidden></div>
-            <div class="cp-cap"></div>
-            <div class="cp-strip"></div>
+            <div class="cp-cards" role="list" aria-label="The steps of this calibration, as they happen"></div>
           </div>`;
-        _host.querySelector('.cp-strip').addEventListener('click', e => {
-            const b = e.target.closest('.cp-thumb');
-            if (!b) return;
-            const i = parseInt(b.dataset.i, 10);
-            // Clicking the newest frame goes back to following the run.
-            _shown = (i === _frames.length - 1) ? -1 : i;
-            render();
-        });
         if (!_bound && typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('IMAGE_RECEIVED', onImage);
             _bound = true;
@@ -293,7 +354,7 @@ const CalProgressPanel = (() => {
         render();
     }
 
-    return { mount, begin, finish, phaseOf, captionOf, _onImage: onImage };
+    return { mount, begin, finish, phaseOf, captionOf, cardKey, intoCards, MAX_FRAMES, _onImage: onImage };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = CalProgressPanel;
