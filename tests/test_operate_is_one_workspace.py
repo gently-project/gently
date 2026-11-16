@@ -330,3 +330,16 @@ def test_the_caption_says_what_is_arriving() -> None:
     # The sensor's size is the one the pixel fetch states, not the preview's
     # size times its downsample (2050 for a 2048 sensor).
     assert "_frameDims[pane] = `${meta.sourceWidth}×${meta.sourceHeight}`" in OPERATE
+
+
+def test_a_picture_is_not_hidden_behind_the_counts_of_the_view_before() -> None:
+    """Multi is two cameras composed in colour and is drawn as a picture.
+    After side A or B, whose frames are drawn from their counts, the box was
+    still in its counts state and the stylesheet hides the picture in it:
+    Multi showed the last single-camera frame and nothing of its own."""
+    show = _fn(OPERATE, "    async function showFrame(pane, p, pixels = true) {")
+    plain = show[: show.index("if (_pull[pane])")]
+    assert "fit.classList.remove('has-pixels');" in plain and "setImg(imgId, phId, p);" in plain
+    assert plain.index("remove('has-pixels')") < plain.index("setImg(imgId, phId, p);")
+    css = (WEB / "static" / "css" / "operate.css").read_text(encoding="utf-8")
+    assert ".op-cam-fit.has-pixels .op-cam-img { display: none; }" in css
