@@ -246,7 +246,7 @@ def test_the_surfaces_and_the_views_are_one_strip() -> None:
     assert re.findall(r'data-view="(\w+)"', surfaces) == ["scope", "acquire"]
     views = TOOLBAR[TOOLBAR.index('id="devices-view-switcher"') :]
     views = views[: views.index("</div>")]
-    assert re.findall(r'data-view="(\w+)"', views) == ["map", "details", "optical3d", "manual"]
+    assert re.findall(r'data-view="(\w+)"', views) == ["map", "details", "optical3d"]
 
 
 def test_a_surface_pressed_from_another_view_comes_back_to_operate_first() -> None:
