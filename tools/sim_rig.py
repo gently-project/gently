@@ -58,6 +58,7 @@ SPIM_UM_PER_PX = 0.1625  # 6.5 µm pixels behind 40x
 # scan routine's ±0.5° sweep was ±8 µm, narrower than the embryo, and it
 # refused every one as overrunning the sweep.
 FOCUS = {"A": (97.0, 2.0), "B": (104.0, -3.0)}
+DEFOCUS_PX_PER_UM = 1.2
 LINE_OF_OUTPUT = {"5": 405, "6": 488, "7": 561, "8": 637}
 # GENTLY_SIM_XY_UM_S slows the XY stage, to watch a move long enough to stop it.
 SPEED_UM_S = {
@@ -700,7 +701,10 @@ class SimCore:
             else (self.axes[piezo].now() if piezo in self.axes else sheet_z + offset)
         )
         defocus = abs(at - (sheet_z + offset))
-        sigma = math.hypot(6.0, 4.0 * defocus)
+        # The rig's focus curve is about 10 µm wide at half height. At 4 px of
+        # blur a micron the simulated one was 2 µm wide: a wide first look,
+        # a micron a slice, stepped over it and calibrations failed at random.
+        sigma = math.hypot(6.0, DEFOCUS_PX_PER_UM * defocus)
         gain = power * self.exposure.get(label, 20.0) * 55.0 * (6.0 / sigma) ** 2
         sx, sy = self._stage()
         r = int(min(3 * sigma, 160))

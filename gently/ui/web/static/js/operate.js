@@ -2228,6 +2228,9 @@ const OperateManager = (function () {
         if (out) out.textContent = `walking ${ids.length} embryo${ids.length === 1 ? '' : 's'}…`;
         // No embryo id: the walk moves along the slide, so the progress panel
         // takes frames from whichever embryo is under the objective.
+        // The walk is shown where one calibration is: the steps, in place of
+        // the camera. It ran with the bottom camera still up and its steps unseen.
+        if (_pane !== 'cal') showPane('cal');
         if (typeof CalProgressPanel !== 'undefined') CalProgressPanel.begin(null);
         try {
             const d = await postJSON('/api/devices/calibrate/all',
