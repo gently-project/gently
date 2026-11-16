@@ -38,7 +38,9 @@ const AcquisitionPlan = (() => {
         manual: { label: 'until stopped', needs: null },
         timepoints: { label: 'after N timepoints', needs: 'count' },
         duration: { label: 'after N hours', needs: 'hours' },
-        hatching: { label: 'at hatching', needs: null },
+        // Its number is how many more timepoints are taken once it has hatched:
+        // the empty frames after, that show it is gone.
+        hatching: { label: 'at hatching', needs: 'after' },
         comma: { label: 'at comma stage', needs: null },
         all_test_hatched: { label: 'when every test embryo has hatched', needs: null },
     };
@@ -91,6 +93,10 @@ const AcquisitionPlan = (() => {
         const k = STOP_KINDS[kind] ? kind : 'manual';
         if (k === 'timepoints') return `timepoints:${Math.max(1, Math.round(num(value, 1)))}`;
         if (k === 'duration') return `duration:${Math.max(0.1, num(value, 1))}h`;
+        if (k === 'hatching') {
+            const more = Math.max(0, Math.round(num(value, 0)));
+            return more ? `hatching+${more}` : 'hatching';
+        }
         return k;
     }
 
@@ -105,6 +111,11 @@ const AcquisitionPlan = (() => {
         if (k === 'duration') {
             const h = Math.max(0.1, num(value, 1));
             return `after ${h} h`;
+        }
+        if (k === 'hatching') {
+            const more = Math.max(0, Math.round(num(value, 0)));
+            const what = unit || 'timepoint';
+            return more ? `at hatching, then ${more} more ${what}${more === 1 ? '' : 's'}` : 'at hatching';
         }
         return STOP_KINDS[k].label;
     }
@@ -366,7 +377,10 @@ const AcquisitionPlan = (() => {
 
     /** "timepoints:12" → {kind, value}; "duration:6h" → {kind, value}; "hatching+3" → {kind}. */
     function parseStopSpec(spec) {
-        const s = String(spec || 'manual').trim().toLowerCase().replace(/\+\d+$/, '');
+        const raw = String(spec || 'manual').trim().toLowerCase();
+        const s = raw.replace(/\+\d+$/, '');
+        // "hatching+3": three more timepoints once it has hatched.
+        const more = Number((raw.match(/\+(\d+)$/) || [])[1]) || null;
         if (s.startsWith('timepoints:')) return { kind: 'timepoints', value: Number(s.split(':')[1]) || 1 };
         if (s.startsWith('duration:')) return { kind: 'duration', value: Number(s.split(':')[1].replace(/h$/, '')) || 1 };
         // The agent's stage-based spec, "stages(hatched,hatching)": the pane
@@ -375,11 +389,11 @@ const AcquisitionPlan = (() => {
         const m = s.match(/^stages?\(([^)]*)\)$/);
         if (m) {
             const stages = m[1].split(',').map(x => x.trim());
-            if (stages.some(x => x === 'hatching' || x === 'hatched')) return { kind: 'hatching', value: null };
+            if (stages.some(x => x === 'hatching' || x === 'hatched')) return { kind: 'hatching', value: more };
             if (stages.includes('comma')) return { kind: 'comma', value: null };
             return { kind: 'manual', value: null };
         }
-        return { kind: STOP_KINDS[s] ? s : 'manual', value: null };
+        return { kind: STOP_KINDS[s] ? s : 'manual', value: s === 'hatching' ? more : null };
     }
 
     /**

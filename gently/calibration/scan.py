@@ -252,7 +252,10 @@ async def scan_calibrate(
         base["B"] = fit
         embryo.calibration = base
     else:
-        embryo.calibration = fit
+        # Side B's fit is its own optics and its own measurement: fitting A
+        # again replaced the whole calibration and B's went with it.
+        kept_b = (embryo.calibration or {}).get("B")
+        embryo.calibration = {**fit, "B": kept_b} if isinstance(kept_b, dict) else fit
     try:
         agent.experiment.notify_embryos_changed()
     except Exception:

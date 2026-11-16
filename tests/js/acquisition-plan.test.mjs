@@ -151,7 +151,8 @@ test('a structure the start route seeded, before any of this, still reads as a p
 test('the stop spec parses back to what the pane offers', () => {
     assert.deepEqual(P.parseStopSpec('timepoints:12'), { kind: 'timepoints', value: 12 });
     assert.deepEqual(P.parseStopSpec('duration:6h'), { kind: 'duration', value: 6 });
-    assert.deepEqual(P.parseStopSpec('hatching+3'), { kind: 'hatching', value: null });
+    assert.deepEqual(P.parseStopSpec('hatching+3'), { kind: 'hatching', value: 3 });
+    assert.deepEqual(P.parseStopSpec('hatching'), { kind: 'hatching', value: null });
     assert.deepEqual(P.parseStopSpec('something_else'), { kind: 'manual', value: null });
     assert.deepEqual(P.parseStopSpec(undefined), { kind: 'manual', value: null });
 });
@@ -230,4 +231,15 @@ test('a kept plan whose ending came as a kind and a number apart keeps its numbe
     assert.deepEqual(plan.stop, { kind: 'duration', value: 16 });
     assert.match(P.describe(plan, [{ id: 'embryo_2', label: '2' }]), /after 16 h/);
     assert.equal(P.fromStructure({ interval: 300, stop_condition: 'duration:8', condition_value: 16 }).stop.value, 8);
+});
+
+test('hatching can be followed by a number of timepoints, and says so', () => {
+    assert.equal(P.stopSpec('hatching', 3), 'hatching+3');
+    assert.equal(P.stopSpec('hatching', 0), 'hatching');
+    assert.equal(P.stopSpec('hatching'), 'hatching');
+    assert.equal(P.stopWords('hatching', 3), 'at hatching, then 3 more timepoints');
+    assert.equal(P.stopWords('hatching', 1), 'at hatching, then 1 more timepoint');
+    assert.equal(P.stopWords('hatching', null), 'at hatching');
+    // And it comes back from a saved plan as it went.
+    assert.deepEqual(P.parseStopSpec(P.stopSpec('hatching', 5)), { kind: 'hatching', value: 5 });
 });

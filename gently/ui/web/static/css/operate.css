@@ -2720,6 +2720,8 @@ details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
 #op-calib .cal-align { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--op-rule2); align-items: center; gap: 8px; }
 
 /* ── A calibration, a line a step, one open: the run going on, or kept ──── */
+/* Units are in the heading ("µm/deg"), and capitals make µ an M. */
+.cp-head { text-transform: none; }
 .cp-head.is-ok .cp-phase { color: var(--accent-green, #3fb950); }
 .cp-head.is-bad .cp-phase { color: var(--op-warn); }
 .cp-owner { font: 11px var(--op-mono); color: var(--accent, #3b82f6); }

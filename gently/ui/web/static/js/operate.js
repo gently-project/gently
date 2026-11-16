@@ -3291,7 +3291,9 @@ const OperateManager = (function () {
     function endingCell(emb) {
         if (!emb || emb.role === 'calibration') return '';
         const c = _endings[emb.id] || { kind: 'default', value: '' };
-        const needs = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+        // The timepoints after hatching are the run's to set, not a row's.
+        const need = (AcquisitionPlan.STOP_KINDS[c.kind] || {}).needs;
+        const needs = need === 'after' ? null : need;
         // An embryo's own ending is the ending of its volumes.
         const volumes = !($('op-plan-spim') && !$('op-plan-spim').checked);
         const who = `embryo ${labelFor(emb)}`;
@@ -3374,7 +3376,14 @@ const OperateManager = (function () {
         // the run can no longer have has just been taken off the select.
         plan = readPlan();
         const condval = $('op-tl-condval');
-        if (condval) condval.hidden = !(AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
+        const need = (AcquisitionPlan.STOP_KINDS[plan.stop.kind] || {}).needs;
+        if (condval) { condval.hidden = !need; condval.min = need === 'after' ? 0 : 1; }
+        // What the number counts, said beside it.
+        const condSays = $('op-tl-condval-says');
+        if (condSays) {
+            condSays.textContent = need === 'after' ? 'more timepoints once hatched, then it ends' : '';
+            condSays.hidden = need !== 'after';
+        }
         const bfBody = $('op-plan-bf-body');
         if (bfBody) bfBody.hidden = !plan.bf.enabled;
         const ledField = $('op-plan-bf-led-field');
@@ -4136,7 +4145,8 @@ const OperateManager = (function () {
     async function changeEmbryoEnding(id, kind) {
         // A kind that needs a number asks for it here; the row is too small
         // to hold a second field for something set once in a night.
-        const needs = (AcquisitionPlan.STOP_KINDS[kind] || {}).needs;
+        const need = (AcquisitionPlan.STOP_KINDS[kind] || {}).needs;
+        const needs = need === 'after' ? null : need;
         let value = null;
         if (needs) {
             const ask = window.prompt(needs === 'count' ? 'Stop after how many timepoints?' : 'Stop after how many hours?');
@@ -4904,6 +4914,14 @@ const OperateManager = (function () {
         // A run ends after 16 hours unless told otherwise (2026-10-09):
         // the night, with the morning to look at it.
         if (stopSel && !stopSel.options.length) stopSel.innerHTML = stopOptions('duration', false);
+        // The number beside it is hours, or timepoints, or timepoints after
+        // hatching: chosen, hatching starts from three, not from the 16 of
+        // the hours it stood at. On the select itself, so it is set before
+        // the pane's own listener reads the plan.
+        if (stopSel) stopSel.addEventListener('input', () => {
+            const n = $('op-tl-condval');
+            if (n && stopSel.value === 'hatching') n.value = 3;
+        });
         const planPanel = $('op-panel-adaptive');
         if (planPanel) {
             planPanel.addEventListener('input', () => { planTouched(); renderPlan(); });

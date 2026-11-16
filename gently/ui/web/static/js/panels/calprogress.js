@@ -64,7 +64,7 @@ const CalProgressPanel = (() => {
     let _tone = '';
     let _detail = null;      // the one open body
     let _endedAt = 0;        // when the run begun here was answered
-    const TAIL_MS = 30000;   // how long after that its last frames may still arrive
+    const TAIL_MS = 90000;   // how long after that its last frames may still arrive: 20 s, on the rig
     let _running = false;
     let _begun = false;   // begun by this page's Calibrate, not seen arriving
     let _embryo = null;
