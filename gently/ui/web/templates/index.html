@@ -795,9 +795,20 @@
                         <datalist id="op-gv-ticks"><option value="0"></option></datalist>
                         <datalist id="op-pz-ticks"><option value="0"></option></datalist>
                         <div class="op-sheet-side" data-side="A">
+                          <div class="op-sheet-top">
                           <button class="op-sheet-who" type="button" data-sheet-view="A"
                                   title="Put side A on screen">
                             <b>A</b><span>scanner AB · piezo P · camera 1</span><i class="op-sheet-on">on screen</i></button>
+                          <!-- Shown once the selected embryo has a fit on this side:
+                               the piezo then follows the galvo along the fit's line. -->
+                          <div class="op-sheet-lock" id="op-lock-a-wrap" hidden>
+                            <label title="With this ticked, moving the galvo moves the piezo along the selected embryo's fit. Moving the piezo itself is kept as a trim."><input type="checkbox" id="op-lock-a" checked>
+                              piezo follows galvo</label>
+                            <span class="op-sheet-lock-says" id="op-lock-a-says"></span>
+                            <button class="op-nbtn" type="button" id="op-lock-a-reset" hidden
+                                    title="Put the piezo back on the fit's line">clear</button>
+                          </div>
+                          </div>
                           <div class="op-row op-axis"><span class="op-label">Galvo</span>
                             <span class="op-ext" id="op-gv-a-min">−5</span>
                             <input class="op-range" id="op-gv-a-in" type="range" min="-5" max="5" step="0.01" value="0"
@@ -812,20 +823,22 @@
                             <span class="op-ext" id="op-pz-a-max">+100</span>
                             <input class="op-numbox" id="op-pz-a" type="text" inputmode="decimal" value="0.0" autocomplete="off"
                                    data-decimals="1" aria-label="Side A piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
-                          <!-- Shown once the selected embryo has a fit on this side:
-                               the piezo then follows the galvo along the fit's line. -->
-                          <div class="op-sheet-lock" id="op-lock-a-wrap" hidden>
-                            <label><input type="checkbox" id="op-lock-a" checked>
-                              Piezo follows galvo by the fit</label>
-                            <span class="op-sheet-lock-says" id="op-lock-a-says"></span>
-                            <button class="op-nbtn" type="button" id="op-lock-a-reset" hidden
-                                    title="Put the piezo back on the fit's line">Clear trim</button>
-                          </div>
                         </div>
                         <div class="op-sheet-side" data-side="B">
+                          <div class="op-sheet-top">
                           <button class="op-sheet-who" type="button" data-sheet-view="B"
                                   title="Put side B on screen">
                             <b>B</b><span>scanner CD · piezo Q · camera 2</span><i class="op-sheet-on">on screen</i></button>
+                          <!-- Shown once the selected embryo has a fit on this side:
+                               the piezo then follows the galvo along the fit's line. -->
+                          <div class="op-sheet-lock" id="op-lock-b-wrap" hidden>
+                            <label title="With this ticked, moving the galvo moves the piezo along the selected embryo's fit. Moving the piezo itself is kept as a trim."><input type="checkbox" id="op-lock-b" checked>
+                              piezo follows galvo</label>
+                            <span class="op-sheet-lock-says" id="op-lock-b-says"></span>
+                            <button class="op-nbtn" type="button" id="op-lock-b-reset" hidden
+                                    title="Put the piezo back on the fit's line">clear</button>
+                          </div>
+                          </div>
                           <div class="op-row op-axis"><span class="op-label">Galvo</span>
                             <span class="op-ext" id="op-gv-b-min">−5</span>
                             <input class="op-range" id="op-gv-b-in" type="range" min="-5" max="5" step="0.01" value="0"
@@ -840,15 +853,6 @@
                             <span class="op-ext" id="op-pz-b-max">+100</span>
                             <input class="op-numbox" id="op-pz-b" type="text" inputmode="decimal" value="0.0" autocomplete="off"
                                    data-decimals="1" aria-label="Side B piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
-                          <!-- Shown once the selected embryo has a fit on this side:
-                               the piezo then follows the galvo along the fit's line. -->
-                          <div class="op-sheet-lock" id="op-lock-b-wrap" hidden>
-                            <label><input type="checkbox" id="op-lock-b" checked>
-                              Piezo follows galvo by the fit</label>
-                            <span class="op-sheet-lock-says" id="op-lock-b-says"></span>
-                            <button class="op-nbtn" type="button" id="op-lock-b-reset" hidden
-                                    title="Put the piezo back on the fit's line">Clear trim</button>
-                          </div>
                         </div>
                         <div class="op-cap" id="op-spim-multi-note" hidden>Multi shows both sides in one frame. Move a sheet and its side comes on screen.</div>
                       </div>

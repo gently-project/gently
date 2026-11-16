@@ -171,3 +171,24 @@ test('a graph is drawn from the numbers, and its picture is kept only when it ca
     P.intoCards(bare, frame('calibration_summary', { slope: 97 }));
     assert.deepEqual(bare.map(c => c.frames.length), [1, 1]);
 });
+
+test('an angle swept twice in one fit is the wide look and then the fine one', () => {
+    const cards = [];
+    const sweep = name => P.intoCards(cards, frame('focus_sweep', { galvo_name: name, sweep: 'stack', piezo: 1, score: 1 }));
+    P.intoCards(cards, frame('focus_montage', { pick: 'D' }));
+    sweep('0.100°'); sweep('0.034°'); sweep('0.100°'); sweep('0.166°');
+    // The other side's fit starts at its own edges, and is named afresh.
+    P.intoCards(cards, frame('edge_detection', { galvo: 0 }));
+    sweep('0.100°');
+    assert.deepEqual(cards.map(c => c.title), [
+        'Finding the focus', 'Focus at 0.100° wide', 'Focus at 0.034°', 'Focus at 0.100° fine', 'Focus at 0.166°',
+        'Where the embryo is', 'Focus at 0.100°',
+    ]);
+});
+
+test('the fit is drawn from the points its summary carries', () => {
+    const cards = [];
+    P.intoCards(cards, frame('calibration_summary', { slope: 97, offset: -6, points: [{ galvo: 0.03, piezo: -3 }, { galvo: 0.1, piezo: 4 }, { galvo: 0.17, piezo: 10.5 }] }));
+    assert.equal(cards[0].fit.points.length, 3);
+    assert.equal(cards[0].frames.length, 0);
+});

@@ -56,6 +56,7 @@ const CalProgressPanel = (() => {
     let _cards = [];      // {key, title, who, frames, shown, el}; the last is the step going on
     let _count = 0;       // frames seen this run, kept or not
     let _running = false;
+    let _begun = false;   // begun by this page's Calibrate, not seen arriving
     let _embryo = null;
     // A batch walks the slide, so its frames come from several embryos and
     // each card has to say which one it is of.
@@ -163,14 +164,14 @@ const CalProgressPanel = (() => {
             case 'focus_sweep': {
                 const name = String(m.galvo_name || '');
                 const word = SWEEP_WORD[m.sweep] || '';
-                return { key: `focus|${name}|${m.sweep || ''}`, focus: name, title: `Focus at ${name || 'the sheet'}${word ? ` ${word}` : ''}` };
+                return { key: `focus|${name}|${m.sweep || ''}`, focus: name, title: name ? `Focus at ${name}${word ? ` ${word}` : ''}` : 'Finding the focus' };
             }
             // A sweep's plot and its montage are that sweep's conclusions:
             // they go on its card, not on one of their own.
             case 'focus_plot':
             case 'focus_montage': {
                 const name = String(m.galvo_name || '');
-                return { key: `focus|${name}|`, focus: name, joins: true, title: `Focus at ${name || 'the sheet'}` };
+                return { key: `focus|${name}|`, focus: name, joins: true, title: name ? `Focus at ${name}` : 'Finding the focus' };
             }
             case 'calibration_summary': return { key: 'fit', title: 'The fit' };
             default: return { key: String(img.data_type), title: phaseOf(img) };
@@ -229,6 +230,16 @@ const CalProgressPanel = (() => {
         const fresh = !fits;
         if (fresh) {
             card = { key, title: step.title, who: who || null, frames: [], pts: [], says: '', best: null, shown: -1, el: null };
+            // The same angle swept again in the one fit: the first was the
+            // wide look and this is the fine one, as the Calibration tab
+            // names them. A fit ends at its edges card, the next one's start.
+            if (step.focus && !SWEEP_WORD[(img.metadata || {}).sweep]) {
+                for (let i = cards.length - 1; i >= 0; i--) {
+                    const c = cards[i];
+                    if (c.who !== card.who || c.key.endsWith('|edges')) break;
+                    if (c.title === step.title) { c.title += ' wide'; c.dirty = true; card.title += ' fine'; break; }
+                }
+            }
             cards.push(card);
         }
         const m = img.metadata || {};
@@ -247,6 +258,10 @@ const CalProgressPanel = (() => {
             // came to: the newest sweep at an angle is the one that counts.
             const at = new Map();
             cards.forEach(c => { if (c.who === card.who && ok(c.galvo) && ok(c.best)) at.set(c.galvo, c.best); });
+            // The summary's own points are the fit's; the cards' are the
+            // next best, for a summary that came without them.
+            const own = (Array.isArray(m.points) ? m.points : []).filter(q => q && ok(q.galvo) && ok(q.piezo));
+            if (own.length >= 2) { at.clear(); own.forEach(q => at.set(q.galvo, q.piezo)); }
             card.fit = { slope: m.slope, offset: ok(m.offset) ? m.offset : 0, points: [...at].map(([x, y]) => ({ x, y })) };
         }
         // The picture of a graph is not kept where the graph itself is drawn
@@ -313,6 +328,7 @@ const CalProgressPanel = (() => {
         const idx = card.shown >= 0 && card.shown < n ? card.shown : n - 1;
         const cur = card.frames[idx];
         el.querySelector('.cp-card-n').textContent = n > 1 ? `${n} frames` : '';
+        el.querySelector('.cp-card-title').textContent = card.title;
         el.querySelector('.cp-stage').hidden = !n;
         el.querySelector('.cp-card-says').textContent = card.says || '';
         const graph = el.querySelector('.cp-card-graph');
@@ -387,6 +403,10 @@ const CalProgressPanel = (() => {
 
     function armIdle() {
         if (_idle) clearTimeout(_idle);
+        // A run begun here ends when its request does (finish), however long
+        // a step is quiet: timed out, its next frame started the cards afresh
+        // and the steps already shown were gone.
+        if (_begun) return;
         _idle = setTimeout(() => { _running = false; render(); }, IDLE_MS);
     }
 
@@ -425,6 +445,7 @@ const CalProgressPanel = (() => {
         clearCards();
         _running = true;
         _embryo = embryoId || null;
+        _begun = true;
         // No id means "whatever the run visits" — a batch, not one embryo.
         _walk = !embryoId;
         armIdle();
@@ -438,6 +459,7 @@ const CalProgressPanel = (() => {
 
     function finish(ok, text) {
         _running = false;
+        _begun = false;
         if (_idle) { clearTimeout(_idle); _idle = null; }
         const wrap = wrapOf();
         if (!wrap) return;

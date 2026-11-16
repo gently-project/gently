@@ -1644,8 +1644,12 @@ const OperateManager = (function () {
             if (!f) return;
             const box = $(`op-lock-${k}`); if (box) box.checked = l.on;
             const says = $(`op-lock-${k}-says`);
-            if (says) says.textContent = `embryo ${labelFor(emb)} · ${f.slope.toFixed(1)} µm/°`
-                + (l.on && Math.abs(l.trim) >= 0.05 ? ` · piezo trimmed ${l.trim > 0 ? '+' : '−'}${Math.abs(l.trim).toFixed(1)} µm` : '');
+            // Short: it shares the side's heading line. Whose fit is in the title.
+            if (says) {
+                // The slope is in the Calibration panel just below; here only the trim.
+                says.textContent = l.on && Math.abs(l.trim) >= 0.05 ? `trim ${l.trim > 0 ? '+' : '−'}${Math.abs(l.trim).toFixed(1)} µm` : '';
+                wrap.title = `embryo ${labelFor(emb)}'s fit on side ${side}: ${f.slope.toFixed(1)} µm/°`;
+            }
             const reset = $(`op-lock-${k}-reset`);
             if (reset) reset.hidden = !(l.on && Math.abs(l.trim) >= 0.05);
         });

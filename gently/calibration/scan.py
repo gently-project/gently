@@ -298,6 +298,10 @@ async def scan_calibrate(
                 "method": "scan",
                 "side": side,
                 "said": said,
+                "points": [
+                    {"galvo": float(g), "piezo": float(p)}
+                    for g, p in zip(g_arr, p_arr, strict=False)
+                ],
             },
         )
     except Exception as exc:
