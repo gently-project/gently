@@ -1797,12 +1797,14 @@ const OperateManager = (function () {
             // EMBRYOS_UPDATE broadcast catches up.
             const mine = _embryos.find(e => e.id === _selected);
             if (mine && cal.slope_um_per_deg != null) mine.calibration = cal;
-            const slope = cal.slope_um_per_deg, r2 = cal.r_squared;
-            if (out) {
-                out.textContent = (slope != null)
-                    ? `${Number(slope).toFixed(1)} µm/deg${r2 != null ? ` · R² ${Number(r2).toFixed(2)}` : ''}`
-                    : 'done';
-            }
+            // The fit of the side just measured: after a side B run this
+            // quoted side A's slope, which had not changed.
+            const words = c => (c && c.slope_um_per_deg != null
+                ? `${Number(c.slope_um_per_deg).toFixed(1)} µm/°${c.r_squared != null ? ` · R² ${Number(c.r_squared).toFixed(2)}` : ''}` : '');
+            const said = body.side === 'B' ? words(cal.B)
+                : body.side === 'both' ? [['A', cal], ['B', cal.B]].map(([k, c]) => (words(c) ? `${k} ${words(c)}` : '')).filter(Boolean).join(' · ')
+                    : words(cal);
+            if (out) out.textContent = said || 'done';
             if (typeof CalProgressPanel !== 'undefined') {
                 CalProgressPanel.finish(true, out ? out.textContent : '');
             }
@@ -3460,6 +3462,10 @@ const OperateManager = (function () {
         if (_pane === 'acquire') renderPreflight();
     }
 
+    // Known offline, not merely unread: the header's own word for it.
+    const scopeOffline = () => typeof ConnectionStatus !== 'undefined'
+        && ConnectionStatus.get().gentlyConnected === true && ConnectionStatus.get().microscopeConnected === false;
+
     /** Everything the lines are derived from, gathered from what the page holds. */
     function preflightContext(plan) {
         const ids = new Set(subjectIds());
@@ -3480,6 +3486,13 @@ const OperateManager = (function () {
             problems.unshift(!_embryos.length ? 'No embryos yet: detect on the bottom camera, then register.'
                 : _targetScope === 'selected' ? 'No subject is selected.'
                     : 'Every embryo is marked as a reference: make at least one a subject.');
+        }
+        // With the microscope not connected nothing below can be acted on,
+        // and the embryo list may simply not have been read: it said "No
+        // embryos yet: detect on the bottom camera", which was not the matter.
+        if (scopeOffline()) {
+            problems = problems.filter(q => !/^No embryos yet/.test(q));
+            problems.unshift('The microscope is offline: nothing can be imaged until it is connected.');
         }
         return {
             plan,
@@ -5029,6 +5042,8 @@ const OperateManager = (function () {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onSpimFrame);
             ClientEventBus.on('EMBRYOS_UPDATE', onEmbryosUpdate);
+            // The lines before a run say whether the microscope is there.
+            ClientEventBus.on('CONNECTION_STATUS', () => { if (_pane === 'acquire') renderPreflight(); });
             // The moments of a run, on top of the poll.
             ['ACQUISITION_STARTED', 'ACQUISITION_COMPLETED', 'ACQUISITION_STOPPED',
              'ACQUISITION_FAILED', 'TIMELAPSE_STATE', 'VOLUME_ACQUIRED', 'IMAGE_ACQUIRED',
