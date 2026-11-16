@@ -117,7 +117,8 @@ const RunPreflight = (() => {
      * @param ctx
      *   plan        AcquisitionPlan.fromForm()
      *   est         estimate(plan, subjects.length, …)
-     *   subjects    [{id, label, calibrated, r2}] — the embryos the run images
+     *   subjects    [{id, label, calibrated, missing?, r2}] — the embryos the run
+     *               images; `missing` is the sides with no fit, e.g. ['B']
      *   references  how many embryos are marked as references
      *   notSelected how many subjects the "Selected" scope leaves out
      *   problems    AcquisitionPlan.validate()'s sentences
@@ -156,9 +157,11 @@ const RunPreflight = (() => {
             const without = subjects.filter(s => !s.calibrated);
             if (without.length) {
                 const k = without.length;
+                // Only side B missing is said: the embryo shows a fit elsewhere.
+                const who = s => ((s.missing || []).join('') === 'B' ? `${s.label} (side B)` : s.label);
                 const fixes = [{ action: 'calibrate', label: `Calibrate ${k === 1 ? 'it' : `the ${k}`}` }];
                 if (k < n) fixes.push({ action: 'without', label: `Run without ${plural(k, 'it', 'them')}` });
-                add('no', `${k} of ${n} ${plural(k, 'is', 'are')} not calibrated: ${without.map(s => s.label).join(', ')}. `
+                add('no', `${k} of ${n} ${plural(k, 'is', 'are')} not calibrated: ${without.map(who).join(', ')}. `
                     + `A run refuses ${plural(k, 'it', 'them')}.`, fixes);
             } else {
                 add('ok', n === 1 ? 'The embryo has a fit.' : 'Every embryo in the run has a fit.');

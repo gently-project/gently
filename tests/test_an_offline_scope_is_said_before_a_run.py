@@ -26,9 +26,14 @@ def test_a_two_view_plan_is_judged_on_both_sides_fits() -> None:
     ctx = ctx[: ctx.index("    function patchLines(")]
     # Every side the plan images has to have a fit, and the fit that is
     # reported is the weakest of them.
-    assert "(plan.spim.sides || ['A']).map(side => planSideFit(e, side))" in ctx
-    assert "const all = fits.every(Boolean);" in ctx
-    assert "Math.min(...fits.map(f => fitScore({ calibration: f })))" in ctx
+    # The rule itself is tested in tests/js/operate-math.test.mjs.
+    assert "const missing = M.sidesWithoutFit(e, sides);" in ctx
+    assert "Math.min(...sides.map(side => fitScore({ calibration: M.sideFit(e, side) })))" in ctx
+    # And the ways past the line are judged the same way, not on side A alone.
+    fix = OPERATE[OPERATE.index("    function preflightFix(action) {") :]
+    fix = fix[: fix.index("action === 'head'")]
+    assert "const fitted = e => !M.sidesWithoutFit(e, sides).length;" in fix
+    assert "hasFit" not in fix
 
 
 def test_a_walk_of_several_embryos_shows_its_steps() -> None:

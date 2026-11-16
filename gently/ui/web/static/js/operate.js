@@ -1856,10 +1856,7 @@ const OperateManager = (function () {
     // The calibration pane names its subject and reports the fit it has, if any
     // — the same field the server-side gate checks, so the pane shows what a run
     // would refuse rather than leaving it to be discovered at Start.
-    const hasFit = emb => {
-        const slope = Number(((emb && emb.calibration) || {}).slope_um_per_deg);
-        return Number.isFinite(slope) && slope !== 0;
-    };
+    const hasFit = emb => !!M.sideFit(emb, 'A');
 
     let _refusedFor = null;
 
@@ -2166,10 +2163,7 @@ const OperateManager = (function () {
     const _calPick = new Set();
     let _calPickTouched = false;
     const sidesChosen = () => (_calSide === 'AB' ? ['A', 'B'] : [_calSide]);
-    const fitOn = (e, side) => {
-        const c = (e && e.calibration) || {};
-        return (side === 'B' ? (c.B || {}) : c).slope_um_per_deg != null;
-    };
+    const fitOn = (e, side) => !!M.sideFit(e, side);
     const lacksAFit = e => sidesChosen().some(side => !fitOn(e, side));
     const pickable = () => _embryos.filter(e => !e.should_skip);
 
@@ -3465,14 +3459,6 @@ const OperateManager = (function () {
         if (_pane === 'acquire') renderPreflight();
     }
 
-    // One side's fit of an embryo, or null when that side has none.
-    const planSideFit = (e, side) => {
-        const c = (e && e.calibration) || {};
-        const f = side === 'B' ? (c.B || {}) : c;
-        const slope = Number(f.slope_um_per_deg);
-        return Number.isFinite(slope) && slope !== 0 ? f : null;
-    };
-
     // Known offline, not merely unread: the header's own word for it.
     const scopeOffline = () => typeof ConnectionStatus !== 'undefined'
         && ConnectionStatus.get().gentlyConnected === true && ConnectionStatus.get().microscopeConnected === false;
@@ -3512,10 +3498,11 @@ const OperateManager = (function () {
             // A fit on every side the plan images: a two-view run with a poor
             // or missing side B fit passed as "has a fit" on side A's alone.
             subjects: targets.map(e => {
-                const fits = (plan.spim.sides || ['A']).map(side => planSideFit(e, side));
-                const all = fits.every(Boolean);
-                return { id: e.id, label: labelFor(e), calibrated: all,
-                    r2: all ? Math.min(...fits.map(f => fitScore({ calibration: f }))) : null };
+                const sides = plan.spim.sides || ['A'];
+                const missing = M.sidesWithoutFit(e, sides);
+                return { id: e.id, label: labelFor(e), calibrated: !missing.length, missing,
+                    r2: missing.length ? null
+                        : Math.min(...sides.map(side => fitScore({ calibration: M.sideFit(e, side) }))) };
             }),
             references: _embryos.filter(e => e.role === 'calibration').length,
             notSelected: _targetScope === 'selected' ? Math.max(0, allSubjectIds().length - ids.size) : 0,
@@ -3604,10 +3591,19 @@ const OperateManager = (function () {
     function preflightFix(action) {
         const ids = new Set(subjectIds());
         const subs = _embryos.filter(e => ids.has(e.id));
+        // A fit on every side the plan images, as the line above was judged.
+        const sides = readPlan().spim.sides || ['A'];
+        const fitted = e => !M.sidesWithoutFit(e, sides).length;
         if (action === 'calibrate') {
             // The instrument is pointed at the first embryo with no fit. The
             // set a run images is left as it is: this is not a narrowing.
-            const first = subs.find(e => !hasFit(e));
+            const first = subs.find(e => !fitted(e));
+            // The Calibrate pane opens on the side that is missing.
+            const lacks = first ? M.sidesWithoutFit(first, sides) : [];
+            if (lacks.length && $('cal-side')) {
+                $('cal-side').value = lacks.length > 1 ? 'AB' : lacks[0];
+                readCalForm();
+            }
             if (first && _targets.includes(first.id)) {
                 _selected = first.id;
                 SharedState.set('selectedEmbryoId', _selected);
@@ -3617,7 +3613,7 @@ const OperateManager = (function () {
             }
             showPane('cal');
         } else if (action === 'without') {
-            const keep = subs.filter(hasFit).map(e => e.id);
+            const keep = subs.filter(fitted).map(e => e.id);
             if (!keep.length) return;
             _targets = keep.slice();
             if (!keep.includes(_selected)) _selected = keep[0];

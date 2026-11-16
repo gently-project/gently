@@ -168,10 +168,27 @@ const OperateMath = (function () {
         return Math.hypot(target.x - xy.x, target.y - xy.y) <= t;
     }
 
+    /**
+     * One side's fit of an embryo, or null when that side has none. Side A is
+     * the embryo's calibration; side B is its `calibration.B`. A fit is a
+     * finite slope that is not zero — the server's rule (calibration_gate.py).
+     */
+    function sideFit(embryo, side) {
+        const c = (embryo && embryo.calibration) || {};
+        const f = side === 'B' ? (c.B || {}) : c;
+        const slope = f.slope_um_per_deg == null ? NaN : Number(f.slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0 ? f : null;
+    }
+
+    /** The sides of `sides` this embryo has no fit on. */
+    function sidesWithoutFit(embryo, sides) {
+        return (sides && sides.length ? sides : ['A']).filter(side => !sideFit(embryo, side));
+    }
+
     return {
         BASE_UM_PER_PX, AT_TOL_UM, FD_BANDS,
         umPerPx, frameToStage, stageToFrame, fdBand, stepAllowed, gaugeFraction,
-        atPosition, centreTarget,
+        atPosition, centreTarget, sideFit, sidesWithoutFit,
     };
 })();
 

@@ -217,3 +217,28 @@ test('atPosition: the tolerance is overridable and a bad one fails closed', () =
     assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 0, y: 0 }, -1), false);
     assert.equal(M.atPosition({ x: 0, y: 0 }, { x: 0, y: 0 }, NaN), false);
 });
+
+// ── a fit, by side ──────────────────────────────────────────────────────────
+const FIT = { slope_um_per_deg: 42, r_squared: 0.9 };
+
+test('sideFit: side A is the calibration, side B is calibration.B', () => {
+    const e = { calibration: { ...FIT, B: { slope_um_per_deg: 40 } } };
+    assert.equal(M.sideFit(e, 'A').slope_um_per_deg, 42);
+    assert.equal(M.sideFit(e, 'B').slope_um_per_deg, 40);
+});
+
+test('sideFit: no slope, a zero slope and a slope that is not a number are no fit', () => {
+    for (const slope of [undefined, null, 0, 'x', NaN, Infinity]) {
+        assert.equal(M.sideFit({ calibration: { slope_um_per_deg: slope } }, 'A'), null, String(slope));
+        assert.equal(M.sideFit({ calibration: { ...FIT, B: { slope_um_per_deg: slope } } }, 'B'), null, String(slope));
+    }
+    assert.equal(M.sideFit(null, 'A'), null);
+});
+
+test('sidesWithoutFit: a two-view run with a fit on A alone lacks side B', () => {
+    const onlyA = { calibration: { ...FIT } };
+    assert.deepEqual(M.sidesWithoutFit(onlyA, ['A', 'B']), ['B']);
+    assert.deepEqual(M.sidesWithoutFit(onlyA, ['A']), []);
+    assert.deepEqual(M.sidesWithoutFit(onlyA, undefined), []);
+    assert.deepEqual(M.sidesWithoutFit({}, ['A', 'B']), ['A', 'B']);
+});

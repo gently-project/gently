@@ -126,7 +126,7 @@ def test_start_is_in_a_foot_that_does_not_scroll():
 def test_the_lines_are_derived_from_what_the_page_has_read():
     ctx = _fn(OPERATE, "    function preflightContext(plan) {")
     for needed in (
-        "planSideFit(e, side)",  # the field the server's gate checks, on each side imaged
+        "M.sidesWithoutFit(e, sides)",  # the field the server's gate checks, on each side imaged
         "AcquisitionPlan.validate(plan,",  # what Start used to toast
         "LightPanel.wavelengthsOf(light.config)",  # the lines the rig routes now
         "fd.pos()",  # where the head is
