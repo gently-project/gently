@@ -2818,3 +2818,30 @@ details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
 .op-cal-then-align { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .op-cal-then-align input:disabled + .op-label { opacity: 0.5; }
 #op-calib .cal-align { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--op-rule2); align-items: center; gap: 8px; }
+
+/* ── Calibration, as it happens: a card a step, appended ─────────────────── */
+.cp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; align-items: start; }
+.cp-card {
+    display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 7px 8px;
+    border: 1px solid var(--op-rule2); border-radius: 6px; background: var(--op-field);
+}
+/* The step going on now. */
+.cp-card.is-live { border-color: var(--accent, #3b82f6); }
+.cp-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.cp-card-title { font: 600 12px var(--op-ui); color: var(--op-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-card-who { font: 11px var(--op-mono); color: var(--accent, #3b82f6); white-space: nowrap; }
+.cp-card-n { margin-left: auto; font: 11px var(--op-mono); color: var(--op-ink-dim); white-space: nowrap; }
+.cp-card .cp-stage { min-height: 0; }
+.cp-card .cp-img { max-height: 190px; }
+.cp-card .cp-thumb { width: 30px; height: 30px; }
+/* How the run ended: the last card, the full width, one line. */
+.cp-card-end { grid-column: 1 / -1; }
+.cp-card-end.is-ok { border-color: var(--accent-green, #3fb950); }
+.cp-card-end.is-bad { border-color: var(--op-warn); }
+.cp-card-end .cp-cap { color: var(--op-ink); }
+@media (prefers-reduced-motion: reduce) { .cp-cards { scroll-behavior: auto; } }
+.cp-card-says { font: 11px var(--op-mono); color: var(--op-ink-dim); min-height: 0; }
+.cp-card-says:empty { display: none; }
+.cp-card-graph[hidden] { display: none; }
+.cp-card-graph svg { display: block; width: 100%; height: auto; }
+.cp-card .cp-stage[hidden] { display: none; }

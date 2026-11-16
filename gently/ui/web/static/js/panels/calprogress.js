@@ -33,10 +33,16 @@
 const CalProgressPanel = (() => {
     'use strict';
 
-    // Frames kept in the strip. The whole run is 60-80 exposures; holding
-    // every base64 PNG in the DOM is real memory, and the tail is what tells
-    // you where the run is now.
-    const MAX_FRAMES = 40;
+    // A run is shown as cards that append, one a step: checking something is
+    // there, finding the edges, each focus sweep, each fit, the summary. A card
+    // holds its step's frames; the newest is the one shown, the rest are a
+    // row under it. It was one picture and one row of forty thumbnails for
+    // the whole run, where a step could not be told from the one before.
+    //
+    // Frames kept in a card, and cards kept in a run. Every base64 PNG in the
+    // DOM is real memory; the newest of a step is what tells you where it is.
+    const MAX_FRAMES = 16;
+    const MAX_CARDS = 60;
     // A run is over when the frames stop. The agent's calibration has no
     // "finished" signal on this path, so quiet for this long ends it.
     const IDLE_MS = 20000;
@@ -47,12 +53,12 @@ const CalProgressPanel = (() => {
     ]);
 
     let _host = null;
-    let _frames = [];
-    let _shown = -1;      // index being displayed; -1 = follow the newest
+    let _cards = [];      // {key, title, who, frames, shown, el}; the last is the step going on
+    let _count = 0;       // frames seen this run, kept or not
     let _running = false;
     let _embryo = null;
-    // A batch walks the slide, so its frames come from several embryos and the
-    // phase line has to say which one is under the objective right now.
+    // A batch walks the slide, so its frames come from several embryos and
+    // each card has to say which one it is of.
     let _walk = false;
     let _idle = null;
     let _bound = false;
@@ -143,53 +149,252 @@ const CalProgressPanel = (() => {
         img.data_type === 'focus_plot' || img.data_type === 'calibration_summary' ||
         img.data_type === 'focus_montage';
 
-    function render() {
-        if (!_host) return;
-        const wrap = _host.querySelector('.cp');
-        if (!wrap) return;
-        if (!_frames.length) { wrap.hidden = true; return; }
-        wrap.hidden = false;
-
-        const idx = _shown >= 0 && _shown < _frames.length ? _shown : _frames.length - 1;
-        const cur = _frames[idx];
-
-        // The phase is the RUN's phase (the newest frame), even while you are
-        // looking back at an earlier one — otherwise scrubbing the strip makes
-        // it look as though the run went backwards.
-        const latest = _frames[_frames.length - 1];
-        const who = _walk ? (latest.metadata || {}).embryo_id : null;
-        wrap.querySelector('.cp-phase').textContent =
-            phaseOf(latest) + (who ? ` · ${who}` : '');
-        wrap.querySelector('.cp-count').textContent =
-            `${_frames.length} frame${_frames.length === 1 ? '' : 's'}`;
-        wrap.querySelector('.cp-dot').hidden = !_running;
-
-        const img = wrap.querySelector('.cp-img');
-        if (cur.base64_png) {
-            img.src = `data:image/png;base64,${cur.base64_png}`;
-            img.hidden = false;
-        } else {
-            img.hidden = true;
+    // ── the steps, named as the Calibration tab names them ─────────────────
+    // "Where the embryo is", "Focus at 0.160° wide", "The fit": the same
+    // headings a kept run is browsed by afterwards, so what is watched and
+    // what is looked back at are organised the one way.
+    const MIN_POINTS = 3;   // fewer is not a curve
+    const SWEEP_WORD = { sparse: 'coarse', dense: 'dense', fine: 'fine', wide: 'wide' };
+    function stepOf(img) {
+        const m = img.metadata || {};
+        switch (img.data_type) {
+            case 'presence_check': return { key: 'presence', title: 'Checking there is something there' };
+            case 'edge_detection': return { key: 'edges', title: 'Where the embryo is' };
+            case 'focus_sweep': {
+                const name = String(m.galvo_name || '');
+                const word = SWEEP_WORD[m.sweep] || '';
+                return { key: `focus|${name}|${m.sweep || ''}`, focus: name, title: `Focus at ${name || 'the sheet'}${word ? ` ${word}` : ''}` };
+            }
+            // A sweep's plot and its montage are that sweep's conclusions:
+            // they go on its card, not on one of their own.
+            case 'focus_plot':
+            case 'focus_montage': {
+                const name = String(m.galvo_name || '');
+                return { key: `focus|${name}|`, focus: name, joins: true, title: `Focus at ${name || 'the sheet'}` };
+            }
+            case 'calibration_summary': return { key: 'fit', title: 'The fit' };
+            default: return { key: String(img.data_type), title: phaseOf(img) };
         }
-        wrap.querySelector('.cp-cap').textContent = captionOf(cur);
+    }
 
-        const strip = wrap.querySelector('.cp-strip');
-        strip.innerHTML = _frames.map((f, i) => {
+    function cardKey(img) {
+        const who = (img.metadata || {}).embryo_id || '';
+        return `${who}|${stepOf(img).key}`;
+    }
+
+    // What a step found, in the words the Calibration tab's graphs use.
+    function saysOf(img) {
+        const m = img.metadata || {};
+        if (img.data_type === 'focus_plot') {
+            const b = num(m.best_piezo, 1), r = num(m.r_squared, 2);
+            return [b !== null ? `sharpest at ${Number(m.best_piezo) > 0 ? '+' : ''}${b} µm` : '', r !== null ? `R² ${r}` : '']
+                .filter(Boolean).join(' · ');
+        }
+        if (img.data_type === 'calibration_summary') {
+            const sl = num(m.slope, 1), off = num(m.offset, 1), r = num(m.r_squared, 2);
+            return [sl !== null ? `${sl} µm/°` : '', off !== null ? `offset ${Number(m.offset) > 0 ? '+' : ''}${off} µm` : '', r !== null ? `R² ${r}` : '']
+                .filter(Boolean).join(' · ') || captionOf(img);
+        }
+        return '';
+    }
+
+    // A frame's point on its step's graph: sharpness against piezo for a
+    // sweep, signal against galvo for the edges. None when it has no numbers.
+    function pointOf(img) {
+        const m = img.metadata || {};
+        const ok = v => typeof v === 'number' && isFinite(v);
+        if (img.data_type === 'focus_sweep' && ok(m.piezo) && ok(m.score)) return { x: m.piezo, y: m.score };
+        if (img.data_type === 'edge_detection' && ok(m.galvo)) {
+            const y = ok(m.signal) ? m.signal : ok(m.feature_score) ? m.feature_score : null;
+            if (y !== null) return { x: m.galvo, y, seen: m.visible === true };
+        }
+        return null;
+    }
+
+    // Put a frame on the run's cards; true when it began a new card. Pure, so
+    // the grouping can be tested without a page.
+    function intoCards(cards, img) {
+        const who = (img.metadata || {}).embryo_id || '';
+        const step = stepOf(img);
+        const key = `${who}|${step.key}`;
+        let card = cards[cards.length - 1];
+        if (step.joins) {
+            // The newest card of this embryo's sweep at this angle, if any.
+            const prefix = `${who}|focus|${step.focus}|`;
+            for (let i = cards.length - 1; i >= 0; i--) {
+                if (cards[i].key.startsWith(prefix)) { card = cards[i]; break; }
+            }
+        }
+        const fits = card && (card.key === key || (step.joins && card.key.startsWith(`${who}|focus|${step.focus}|`)));
+        const fresh = !fits;
+        if (fresh) {
+            card = { key, title: step.title, who: who || null, frames: [], pts: [], says: '', best: null, shown: -1, el: null };
+            cards.push(card);
+        }
+        const m = img.metadata || {};
+        const ok = v => typeof v === 'number' && isFinite(v);
+        card.dirty = true;
+        const pt = pointOf(img);
+        if (pt) card.pts.push(pt);
+        const says = saysOf(img);
+        if (says) card.says = says;
+        if (img.data_type === 'focus_plot' && ok(m.best_piezo)) {
+            card.best = m.best_piezo;
+            if (ok(m.galvo)) card.galvo = m.galvo;
+        }
+        if (img.data_type === 'calibration_summary' && ok(m.slope)) {
+            // The line, and the sharpest piezo each of this embryo's sweeps
+            // came to: the newest sweep at an angle is the one that counts.
+            const at = new Map();
+            cards.forEach(c => { if (c.who === card.who && ok(c.galvo) && ok(c.best)) at.set(c.galvo, c.best); });
+            card.fit = { slope: m.slope, offset: ok(m.offset) ? m.offset : 0, points: [...at].map(([x, y]) => ({ x, y })) };
+        }
+        // The picture of a graph is not kept where the graph itself is drawn
+        // from the numbers (graphOf): the sweep's curve, the fit's line.
+        const drawn = (img.data_type === 'focus_plot' && card.pts.length >= MIN_POINTS)
+            || (img.data_type === 'calibration_summary' && card.fit && card.fit.points.length >= 2);
+        if (drawn) return fresh;
+        card.frames.push(img);
+        if (card.frames.length > MAX_FRAMES) {
+            // Drop the oldest EXPOSURE, never a conclusion: the findings are
+            // the part of the step you still want when it ends. Its point
+            // stays on the graph.
+            const drop = card.frames.findIndex(f => !isConclusion(f));
+            card.frames.splice(drop < 0 ? 0 : drop, 1);
+            if (card.shown > 0) card.shown -= 1;
+        }
+        return fresh;
+    }
+
+    // The step's graph so far, drawn as the Calibration tab draws a kept
+    // run's (CalibrationArchive.chart): a point a frame, as the frames come.
+    function graphOf(card) {
+        const arc = typeof CalibrationArchive !== 'undefined' ? CalibrationArchive : null;
+        if (!arc || !arc.chart) return '';
+        if (card.fit && card.fit.points.length >= 2) {
+            const f = card.fit, gs = f.points.map(p => p.x);
+            const pad = (Math.max(...gs) - Math.min(...gs)) * 0.15 || 0.05;
+            const y = g => f.slope * g + f.offset;
+            try {
+                return arc.chart({ title: 'Sharpest piezo against galvo, and the line through it', xLabel: 'galvo °', h: 132,
+                    line: [[Math.min(...gs) - pad, y(Math.min(...gs) - pad)], [Math.max(...gs) + pad, y(Math.max(...gs) + pad)]],
+                    pts: f.points.map(q => ({ x: q.x, y: q.y, tip: `galvo ${q.x.toFixed(3)}° · sharpest at piezo ${q.y.toFixed(1)} µm` })) });
+            } catch (_) { return ''; }
+        }
+        if (card.pts.length < MIN_POINTS) return '';
+        const focus = card.key.includes('|focus|');
+        const top = Math.max(...card.pts.map(p => p.y), 1e-9);
+        const pts = card.pts.map(p => ({ x: p.x, y: focus ? p.y / top : p.y, tip: focus ? `piezo ${p.x.toFixed(1)} µm · sharpness ${(100 * p.y / top).toFixed(0)}%` : `galvo ${p.x.toFixed(3)}° · ${p.seen ? 'embryo seen' : 'nothing seen'}` }));
+        const seen = card.pts.filter(p => p.seen).map(p => p.x);
+        try {
+            return arc.chart(focus
+                ? { title: `Sharpness against piezo, ${card.title}`, xLabel: 'piezo µm', zero: true, yTop: 'best', vline: card.best, pts, line: pts.slice().sort((a, b) => a.x - b.x).map(p => [p.x, p.y]) }
+                : { title: 'Signal at each galvo angle', xLabel: 'galvo °', zero: true, band: seen.length ? [Math.min(...seen), Math.max(...seen)] : null, pts });
+        } catch (_) { return ''; }
+    }
+
+    const wrapOf = () => (_host ? _host.querySelector('.cp') : null);
+
+    function renderHead(phase) {
+        const wrap = wrapOf();
+        if (!wrap) return;
+        const last = _cards[_cards.length - 1];
+        wrap.querySelector('.cp-phase').textContent = phase || (last ? last.title : '');
+        wrap.querySelector('.cp-count').textContent = _count
+            ? `${_count} frame${_count === 1 ? '' : 's'} · ${_cards.length} step${_cards.length === 1 ? '' : 's'}`
+            : 'no frames yet';
+        wrap.querySelector('.cp-dot').hidden = !_running;
+    }
+
+    function renderCard(card) {
+        const el = card.el;
+        if (!el) return;
+        const n = card.frames.length;
+        const idx = card.shown >= 0 && card.shown < n ? card.shown : n - 1;
+        const cur = card.frames[idx];
+        el.querySelector('.cp-card-n').textContent = n > 1 ? `${n} frames` : '';
+        el.querySelector('.cp-stage').hidden = !n;
+        el.querySelector('.cp-card-says').textContent = card.says || '';
+        const graph = el.querySelector('.cp-card-graph');
+        const svg = graphOf(card);
+        graph.hidden = !svg;
+        if (svg) graph.innerHTML = svg;
+        const img = el.querySelector('.cp-img');
+        if (cur && cur.base64_png) { img.src = `data:image/png;base64,${cur.base64_png}`; img.hidden = false; }
+        else img.hidden = true;
+        el.querySelector('.cp-cap').textContent = cur ? captionOf(cur) : '';
+        const strip = el.querySelector('.cp-strip');
+        strip.hidden = n < 2;
+        if (n < 2) { strip.innerHTML = ''; return; }
+        strip.innerHTML = card.frames.map((f, i) => {
             const label = esc(captionOf(f) || phaseOf(f));
             const cls = `cp-thumb${i === idx ? ' is-on' : ''}${isConclusion(f) ? ' is-key' : ''}`;
-            const pic = f.base64_png
-                ? `<img src="data:image/png;base64,${f.base64_png}" alt="">` : '';
-            return `<button class="${cls}" type="button" data-i="${i}"
-                     title="${label}" aria-label="${label}">${pic}</button>`;
+            const pic = f.base64_png ? `<img src="data:image/png;base64,${f.base64_png}" alt="">` : '';
+            return `<button class="${cls}" type="button" data-i="${i}" title="${label}" aria-label="${label}">${pic}</button>`;
         }).join('');
-        const on = strip.querySelector('.cp-thumb.is-on');
-        if (_shown < 0) strip.scrollLeft = strip.scrollWidth;
-        else if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        if (card.shown < 0) strip.scrollLeft = strip.scrollWidth;
+    }
+
+    // A new card goes on the end. The one before it is finished: it stops
+    // being the live one, and is left as it stood.
+    function appendCard(card) {
+        const wrap = wrapOf();
+        if (!wrap) return;
+        const list = wrap.querySelector('.cp-cards');
+        list.querySelectorAll('.cp-card.is-live').forEach(c => c.classList.remove('is-live'));
+        const el = document.createElement('article');
+        el.className = 'cp-card is-live';
+        el.setAttribute('role', 'listitem');
+        el.innerHTML = `
+            <header class="cp-card-head">
+              <b class="cp-card-title">${esc(card.title)}</b>
+              ${_walk && card.who ? `<span class="cp-card-who">${esc(String(card.who).replace(/^embryo_/, 'embryo '))}</span>` : ''}
+              <span class="cp-card-n"></span>
+            </header>
+            <div class="cp-card-says"></div>
+            <div class="cp-card-graph cal-arc-chart" hidden></div>
+            <div class="cp-stage"><img class="cp-img" alt="${esc(card.title)}" hidden></div>
+            <div class="cp-cap"></div>
+            <div class="cp-strip" hidden></div>`;
+        el.querySelector('.cp-strip').addEventListener('click', e => {
+            const b = e.target.closest('.cp-thumb');
+            if (!b) return;
+            const i = parseInt(b.dataset.i, 10);
+            // The newest frame of a card goes back to following its step.
+            card.shown = (i === card.frames.length - 1) ? -1 : i;
+            renderCard(card);
+        });
+        card.el = el;
+        // Following the run means the newest card is in view; somebody who
+        // has scrolled back to look at an earlier step is left where they are.
+        const scroller = list.closest('.op-calfit-body') || list;
+        const following = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 160;
+        list.appendChild(el);
+        while (_cards.length > MAX_CARDS) {
+            const gone = _cards.shift();
+            if (gone.el) gone.el.remove();
+        }
+        if (following && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function render() {
+        const wrap = wrapOf();
+        if (!wrap) return;
+        if (!_cards.length && !_running) { wrap.hidden = true; return; }
+        wrap.hidden = false;
+        renderHead();
     }
 
     function armIdle() {
         if (_idle) clearTimeout(_idle);
         _idle = setTimeout(() => { _running = false; render(); }, IDLE_MS);
+    }
+
+    function clearCards() {
+        _cards = [];
+        _count = 0;
+        const wrap = wrapOf();
+        if (wrap) wrap.querySelector('.cp-cards').innerHTML = '';
     }
 
     function onImage(data) {
@@ -202,66 +407,57 @@ const CalProgressPanel = (() => {
             // and do not pin it to one embryo: the agent may be walking the
             // slide too, and dropping the other embryos' frames would make a
             // batch look like it stalled after the first one.
-            _frames = [];
-            _shown = -1;
+            clearCards();
             _running = true;
             _embryo = null;
             _walk = true;
         }
-        _frames.push(data);
-        if (_frames.length > MAX_FRAMES) {
-            // Drop the oldest EXPOSURE, never a conclusion: the findings are
-            // the part of the run you still want when it ends.
-            const drop = _frames.findIndex(f => !isConclusion(f));
-            _frames.splice(drop < 0 ? 0 : drop, 1);
-            if (_shown > 0) _shown -= 1;
-        }
+        _count += 1;
+        const fresh = intoCards(_cards, data);
+        if (fresh) appendCard(_cards[_cards.length - 1]);
+        // A sweep's conclusion lands on its own card, which need not be the last.
+        _cards.forEach(c => { if (c.dirty) { c.dirty = false; renderCard(c); } });
         armIdle();
         render();
     }
 
     function begin(embryoId) {
-        _frames = [];
-        _shown = -1;
+        clearCards();
         _running = true;
         _embryo = embryoId || null;
         // No id means "whatever the run visits" — a batch, not one embryo.
         _walk = !embryoId;
         armIdle();
-        if (!_host) return;
-        const wrap = _host.querySelector('.cp');
+        const wrap = wrapOf();
         if (!wrap) return;
         // Nothing has arrived yet, but the run HAS started: say so rather than
         // leaving the pane blank until the first exposure comes back.
         wrap.hidden = false;
-        wrap.querySelector('.cp-phase').textContent = 'Starting the calibration';
-        wrap.querySelector('.cp-count').textContent = 'no frames yet';
-        wrap.querySelector('.cp-dot').hidden = false;
-        wrap.querySelector('.cp-img').hidden = true;
-        wrap.querySelector('.cp-cap').textContent = '';
-        wrap.querySelector('.cp-strip').innerHTML = '';
+        renderHead('Starting the calibration');
     }
 
     function finish(ok, text) {
         _running = false;
         if (_idle) { clearTimeout(_idle); _idle = null; }
-        if (!_host) return;
-        const wrap = _host.querySelector('.cp');
+        const wrap = wrapOf();
         if (!wrap) return;
-        if (!_frames.length) {
+        if (!_cards.length) {
             // A run that produced no frames has nothing to show; the pane's
             // own result line already says what happened.
             wrap.hidden = true;
             return;
         }
-        render();
-        wrap.querySelector('.cp-dot').hidden = true;
-        wrap.querySelector('.cp-phase').textContent = ok ? 'Calibrated' : 'Calibration failed';
-        // The result replaces the caption only while the panel is still
-        // following the run. If the operator has scrubbed back to a frame,
-        // that frame's own caption is what belongs under it — the phase line
-        // above already says how the run ended.
-        if (text && _shown < 0) wrap.querySelector('.cp-cap').textContent = text;
+        // How it ended is the last card: one line, and no picture.
+        const list = wrap.querySelector('.cp-cards');
+        list.querySelectorAll('.cp-card.is-live').forEach(c => c.classList.remove('is-live'));
+        const el = document.createElement('article');
+        el.className = `cp-card cp-card-end ${ok ? 'is-ok' : 'is-bad'}`;
+        el.setAttribute('role', 'listitem');
+        el.innerHTML = `<header class="cp-card-head"><b class="cp-card-title">${ok ? 'Calibrated' : 'Calibration failed'}</b></header>`
+            + (text ? `<div class="cp-cap">${esc(text)}</div>` : '');
+        list.appendChild(el);
+        if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        renderHead(ok ? 'Calibrated' : 'Calibration failed');
     }
 
     function mount(hostId) {
@@ -274,18 +470,8 @@ const CalProgressPanel = (() => {
               <span class="cp-phase"></span>
               <span class="cp-count"></span>
             </div>
-            <div class="cp-stage"><img class="cp-img" alt="Calibration frame" hidden></div>
-            <div class="cp-cap"></div>
-            <div class="cp-strip"></div>
+            <div class="cp-cards" role="list" aria-label="The steps of this calibration, as they happen"></div>
           </div>`;
-        _host.querySelector('.cp-strip').addEventListener('click', e => {
-            const b = e.target.closest('.cp-thumb');
-            if (!b) return;
-            const i = parseInt(b.dataset.i, 10);
-            // Clicking the newest frame goes back to following the run.
-            _shown = (i === _frames.length - 1) ? -1 : i;
-            render();
-        });
         if (!_bound && typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('IMAGE_RECEIVED', onImage);
             _bound = true;
@@ -293,7 +479,7 @@ const CalProgressPanel = (() => {
         render();
     }
 
-    return { mount, begin, finish, phaseOf, captionOf, _onImage: onImage };
+    return { mount, begin, finish, phaseOf, captionOf, stepOf, cardKey, intoCards, MAX_FRAMES, _onImage: onImage };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = CalProgressPanel;

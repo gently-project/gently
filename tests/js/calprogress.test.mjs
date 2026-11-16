@@ -86,3 +86,88 @@ test('an unknown image type is never narrated as a calibration', () => {
     // a snapshot or a volume projection must not be mistaken for a frame.
     assert.equal(P.phaseOf({ data_type: 'snapshot', metadata: {} }), 'Calibrating');
 });
+
+// ── cards that append, one a step ──────────────────────────────────────
+// The run was one picture and one row of forty thumbnails, where a step
+// could not be told from the one before it.
+
+const frame = (data_type, metadata = {}) => ({ data_type, metadata, base64_png: 'x' });
+
+test('the cards are the categories a kept run is browsed by', () => {
+    const cards = [];
+    const fresh = [
+        frame('presence_check', { galvo: 0 }),
+        frame('edge_detection', { galvo: -0.2, signal: 3 }),
+        frame('edge_detection', { galvo: -0.1, signal: 40, visible: true }),
+        frame('focus_sweep', { galvo_name: '0.160°', sweep: 'wide', piezo: -31, score: 0.2 }),
+        frame('focus_sweep', { galvo_name: '0.160°', sweep: 'wide', piezo: 10, score: 0.9 }),
+        frame('focus_plot', { galvo_name: '0.160°', best_piezo: 10.0, r_squared: 0.67 }),
+        frame('focus_sweep', { galvo_name: '0.100°', piezo: 4, score: 0.5 }),
+        frame('focus_sweep', { galvo_name: '0.160°', sweep: 'fine', piezo: 9, score: 0.8 }),
+        frame('calibration_summary', { slope: 97 }),
+    ].map(f => P.intoCards(cards, f));
+    // The sweep's plot joins the sweep; everything else that changes step is a new card.
+    assert.deepEqual(fresh, [true, true, false, true, false, false, true, true, true]);
+    assert.deepEqual(cards.map(c => c.title), [
+        'Checking there is something there', 'Where the embryo is',
+        'Focus at 0.160° wide', 'Focus at 0.100°', 'Focus at 0.160° fine', 'The fit',
+    ]);
+    // What the sweep found is on its card, in the graphs' own words.
+    assert.equal(cards[2].says, 'sharpest at +10.0 µm · R² 0.67');
+    assert.equal(cards[2].best, 10.0);
+    // A point a frame, for the graph: sharpness against piezo, signal against galvo.
+    assert.deepEqual(cards[2].pts, [{ x: -31, y: 0.2 }, { x: 10, y: 0.9 }]);
+    assert.deepEqual(cards[1].pts.map(p => [p.x, p.y, p.seen]), [[-0.2, 3, false], [-0.1, 40, true]]);
+});
+
+test('in a walk, the next embryo starts its own cards', () => {
+    const cards = [];
+    P.intoCards(cards, frame('edge_detection', { embryo_id: 'embryo_1' }));
+    P.intoCards(cards, frame('edge_detection', { embryo_id: 'embryo_1' }));
+    assert.equal(P.intoCards(cards, frame('edge_detection', { embryo_id: 'embryo_2' })), true);
+    assert.deepEqual(cards.map(c => c.who), ['embryo_1', 'embryo_2']);
+    // And a plot joins its own embryo's sweep, not the other's.
+    P.intoCards(cards, frame('focus_sweep', { embryo_id: 'embryo_1', galvo_name: 'top', sweep: 'dense' }));
+    P.intoCards(cards, frame('focus_sweep', { embryo_id: 'embryo_2', galvo_name: 'top', sweep: 'dense' }));
+    assert.equal(P.intoCards(cards, frame('focus_plot', { embryo_id: 'embryo_1', galvo_name: 'top', best_piezo: 2 })), false);
+    assert.equal(cards.find(c => c.who === 'embryo_1' && c.title === 'Focus at top dense').best, 2);
+    assert.equal(cards.find(c => c.who === 'embryo_2' && c.title === 'Focus at top dense').best, null);
+});
+
+test('a long step keeps its newest frames, every point, and never drops a conclusion', () => {
+    const cards = [];
+    for (let i = 0; i < 60; i++) P.intoCards(cards, frame('focus_sweep', { galvo_name: 'top', sweep: 'dense', piezo: i, score: 0.5 }));
+    P.intoCards(cards, frame('focus_plot', { galvo_name: 'top', best_piezo: 30 }));
+    for (let i = 60; i < 80; i++) P.intoCards(cards, frame('focus_sweep', { galvo_name: 'top', sweep: 'dense', piezo: i, score: 0.5 }));
+    assert.equal(cards.length, 1);
+    const sweep = cards[0];
+    assert.equal(sweep.frames.length, P.MAX_FRAMES);
+    // The plot's picture is not kept: the curve is drawn from the points.
+    assert.ok(!sweep.frames.some(f => f.data_type === 'focus_plot'));
+    assert.equal(sweep.best, 30);
+    assert.equal(sweep.frames[sweep.frames.length - 1].metadata.piezo, 79);
+    assert.equal(sweep.pts.length, 80);
+});
+
+test('a graph is drawn from the numbers, and its picture is kept only when it cannot be', () => {
+    const cards = [];
+    const sweep = (name, galvo, best) => {
+        for (let i = 0; i < 5; i++) P.intoCards(cards, frame('focus_sweep', { galvo_name: name, piezo: i, score: 0.1 * i }));
+        P.intoCards(cards, frame('focus_plot', { galvo_name: name, galvo, best_piezo: best, r_squared: 0.9 }));
+    };
+    sweep('0.100°', 0.1, 4.0);
+    sweep('0.220°', 0.22, 16.0);
+    P.intoCards(cards, frame('calibration_summary', { slope: 100, offset: -6, r_squared: 0.99 }));
+    const fit = cards[cards.length - 1];
+    assert.equal(fit.title, 'The fit');
+    assert.equal(fit.says, '100.0 µm/° · offset -6.0 µm · R² 0.99');
+    assert.deepEqual(fit.fit.points, [{ x: 0.1, y: 4.0 }, { x: 0.22, y: 16.0 }]);
+    assert.equal(fit.frames.length, 0);
+    assert.ok(cards.every(c => !c.frames.some(f => f.data_type === 'focus_plot')));
+
+    // No numbers to draw from: the picture is what there is, so it stays.
+    const bare = [];
+    P.intoCards(bare, frame('focus_plot', { galvo_name: 'top', best_piezo: 3 }));
+    P.intoCards(bare, frame('calibration_summary', { slope: 97 }));
+    assert.deepEqual(bare.map(c => c.frames.length), [1, 1]);
+});
