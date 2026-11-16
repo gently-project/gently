@@ -29,3 +29,9 @@ def test_a_two_view_plan_is_judged_on_both_sides_fits() -> None:
     assert "(plan.spim.sides || ['A']).map(side => planSideFit(e, side))" in ctx
     assert "const all = fits.every(Boolean);" in ctx
     assert "Math.min(...fits.map(f => fitScore({ calibration: f })))" in ctx
+
+
+def test_a_walk_of_several_embryos_shows_its_steps() -> None:
+    walk = OPERATE[OPERATE.index("    async function calibrateAll(") :]
+    walk = walk[: walk.index("CalProgressPanel.begin(null);")]
+    assert "if (_pane !== 'cal') showPane('cal');" in walk
