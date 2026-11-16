@@ -34,6 +34,8 @@ def main(src: str, dst: str, marks: dict[str, float]) -> None:
         fast.append((marks["walk-start"] + 16, marks["walk-end"] - 2, 10.0))
     if "run-start" in marks and "run-end" in marks:
         fast.append((marks["run-start"] + 12, marks["run-end"] - 1, 5.0))
+    if "align-start" in marks and "align-end" in marks:
+        fast.append((marks["align-start"] + 5, marks["align-end"] - 1, 4.0))
     fast = [(a, b, k) for a, b, k in fast if b - a > 6]
     cuts, at = [], 0.0
     for a, b, k in sorted(fast):

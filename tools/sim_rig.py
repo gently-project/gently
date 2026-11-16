@@ -59,6 +59,15 @@ SPIM_UM_PER_PX = 0.1625  # 6.5 µm pixels behind 40x
 # refused every one as overrunning the sweep.
 FOCUS = {"A": (97.0, 2.0), "B": (104.0, -3.0)}
 DEFOCUS_PX_PER_UM = 1.2
+# The head height at which the light-sheet cameras are in focus on the sample
+# under the LED. The head starts 14.6 µm above it, as it does after "to the
+# sample" on the rig: the last few steps are made by eye, on the picture.
+HEAD_FOCUS_UM = 100.0
+# Where the light-sheet cameras' centre is, from the stage's (µm, in X). The
+# two views look at the sample from opposite sides, so side B sees X mirrored:
+# an embryo this far off centre is that far right in A and that far left in B,
+# which is the gap "Align A and B" closes with the stage.
+SPIM_CENTRE_X_UM = 12.0
 LINE_OF_OUTPUT = {"5": 405, "6": 488, "7": 561, "8": 637}
 # GENTLY_SIM_XY_UM_S slows the XY stage, to watch a move long enough to stop it.
 SPEED_UM_S = {
@@ -687,6 +696,10 @@ class SimCore:
         side = "B" if label.endswith("2") else "A"
         scanner = "Scanner:CD:33" if side == "B" else "Scanner:AB:33"
         piezo = "PiezoStage:Q:35" if side == "B" else "PiezoStage:P:34"
+        if sheet is None:
+            lit = self._brightfield(label, side)
+            if lit is not None:
+                frame = (frame.astype(np.float32) - 100.0 + lit).clip(0, 65535).astype(np.uint16)
         if sheet is None and self.props.get(scanner, {}).get("BeamEnabled") != "Yes":
             return frame
         power = self._routed_power()
@@ -718,11 +731,54 @@ class SimCore:
                 weight = math.exp(-((dz - sheet_z) ** 2) / (2 * 2.5**2))
                 if weight < 0.02:
                     continue
-                cx = int(size / 2 + (ex + dx - sx) / SPIM_UM_PER_PX)
+                cx = int(size / 2 + self._view_x(side, ex + dx - sx) / SPIM_UM_PER_PX)
                 cy = int(size / 2 - (ey + dy - sy) / SPIM_UM_PER_PX)
                 if r <= cx < size - r and r <= cy < size - r:
                     acc[cy - r : cy + r + 1, cx - r : cx + r + 1] += stamp * (gain * weight)
         return (frame + acc).clip(0, 65535).astype(np.uint16)
+
+    @staticmethod
+    def _view_x(side: str, um: float) -> float:
+        """A sample X, in µm from the stage, as a light-sheet camera sees it."""
+        return (um - SPIM_CENTRE_X_UM) * (-1.0 if side == "B" else 1.0)
+
+    def _brightfield(self, label: str, side: str) -> np.ndarray | None:
+        """What a light-sheet camera sees under the LED: the embryo dark on
+        a lit field, sharp only with the head at its focus height. None with
+        the LED closed.
+
+        Drawn at a quarter of the sensor and scaled up: it is blurred every
+        frame of a live view, and at full size that is a second a frame."""
+        led = self.props.get("LED:X:31", {})
+        if led.get("State") != "Open":
+            return None
+        from scipy import ndimage
+
+        k, small = 4, 2304 // 4
+        px = SPIM_UM_PER_PX * k
+        level = min(
+            float(led.get("LED Intensity(%)", "12")) * self.exposure.get(label, 20.0) * 9.0, 50000.0
+        )
+        field = np.full((small, small), level, np.float32)
+        sx, sy = self._stage()
+        yy, xx = np.ogrid[:small, :small]
+        for (ex, ey), nuclei in zip(EMBRYOS, self._nuclei, strict=True):
+            if abs(ex - sx) > 260 or abs(ey - sy) > 260:
+                continue
+            fx = small / 2 + self._view_x(side, ex - sx) / px
+            fy = small / 2 - (ey - sy) / px
+            shell = ((xx - fx) / (26.0 / px)) ** 2 + ((yy - fy) / (16.0 / px)) ** 2
+            field[shell <= 1.0] *= 0.62
+            field[(shell > 0.86) & (shell <= 1.0)] *= 0.7  # the eggshell
+            for dx, dy, _ in nuclei:
+                cx = small / 2 + self._view_x(side, ex + dx - sx) / px
+                cy = small / 2 - (ey + dy - sy) / px
+                cell = (xx - cx) ** 2 + (yy - cy) ** 2 <= (2.2 / px) ** 2
+                field[cell & (shell <= 0.86)] *= 0.8
+        head = next((a.now() for name, a in self.axes.items() if name.startswith("ZStage:V")), 0.0)
+        defocus = abs(head - HEAD_FOCUS_UM)
+        field = ndimage.gaussian_filter(field, sigma=math.hypot(0.5, 0.8 * defocus))
+        return np.repeat(np.repeat(field, k, axis=0), k, axis=1)
 
     def __getattr__(self, name: str) -> Any:
         raise AttributeError(f"SimCore has no {name}() — add it to tools/sim_rig.py")
