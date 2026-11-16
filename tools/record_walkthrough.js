@@ -89,7 +89,16 @@ async (page) => {
   const type = async (sel, text, after = 700) => { await press(sel, 200); await p.locator(sel).first().fill(''); await p.keyboard.type(String(text), { delay: 110 }); await p.keyboard.press('Tab'); await wait(after); };
   const until = async (fn, every = 1500, max = 240) => { for (let i = 0; i < max; i++) { if (await fn()) return true; await wait(every); } return false; };
 
-  const out = { errs, marks };
+  const out = { errs, marks, skipped: [] };
+  const btn = re => p.locator('button:visible').filter({ hasText: re }).first();
+  // A step that is nice to have: if its control is not there, the take goes on.
+  const soft = async (name, fn) => { try { await fn(); } catch (e) { out.skipped.push(name + ': ' + String(e).slice(0, 90)); } };
+  const beams = () => p.evaluate(() => [...document.querySelectorAll('button')].filter(b => b.offsetParent && /^[AB] (on|off)$/i.test(b.innerText.trim())).map(b => b.innerText).join(','));
+  const bothBeams = async () => {
+    if (/A off/.test(await beams())) await press(btn(/^A off$/), 1500);
+    if (/B off/.test(await beams())) await press(btn(/^B off$/), 1500);
+  };
+  const auto = async (after = 1800) => soft('auto levels', () => press(btn(/^Auto$/), after));
   try {
     // ── 1. launch ───────────────────────────────────────────────────────
     await p.goto('http://localhost:8080/', { waitUntil: 'domcontentloaded' });
@@ -105,8 +114,6 @@ async (page) => {
       await p.waitForURL(u => !String(u).includes('/launch'), { timeout: 180000 }).catch(() => {});
     }
     await wait(5000);
-    // The names beside the icons, for someone who has not learnt the icons.
-    if ((await p.locator('#v2-rail-collapse').getAttribute('aria-expanded')) === 'false') await press('#v2-rail-collapse', 900);
     mark('home');
 
     // ── 2. Scope: find the embryos ──────────────────────────────────────
@@ -114,26 +121,58 @@ async (page) => {
     await press(p.locator('[title="Devices"]:visible, :text-is("Devices"):visible').first(), 3200);
     mark('scope');
     await say('Start the bottom camera to see the dish');
-    await press(p.locator('button', { hasText: /^Start camera$/ }).first(), 4500);
+    await press(btn(/^Start camera$/), 4500);
     await say('Say how the dish is lit, then press Detect', 'Here: the LED, so embryos are dark');
     await choose('select:has(option[value="dark"])', 'dark');
     for (const name of ['Claude filter', 'SAM outline']) {
       const chip = p.locator('.mk-stage', { hasText: name });
       if ((await chip.getAttribute('aria-pressed')) === 'true') await press(chip, 350);
     }
-    await press(p.locator('button', { hasText: /^Detect$/ }).first(), 800);
+    await press(btn(/^Detect$/), 800);
     await until(async () => !(await p.evaluate(() => /Detecting/i.test((document.querySelector('.mk-detect') || {}).innerText || ''))), 1000, 60);
     await wait(1200);
     await say('Three candidates, outlined on the picture', 'Register them and they join the embryo list with their stage positions');
     await press(p.locator('button:visible', { hasText: /register/i }).first(), 3000);
     mark('registered');
-    await press(p.locator('button', { hasText: /^Stop camera$/ }).first(), 1200).catch(() => {});
+    await press(btn(/^Stop camera$/), 1200).catch(() => {});
 
-    // ── 3. light ────────────────────────────────────────────────────────
-    await say('Route a laser line in Light', 'The beams only emit when a view or a run asks for them');
-    await press(p.locator('.lp-chip', { hasText: /^488$/ }), 2200);
+    // ── 3. the light-sheet cameras, under the LED ───────────────────────
+    await say('Go to an embryo', 'The target button on its row drives the stage there');
+    await press(p.locator('.rp-row').first().locator('.rp-centre'), 2800);
+    await say('SPIM A is the first light-sheet camera');
+    await press('[data-source="A"]', 900);
+    await press(btn(/^Start view$/), 2500);
+    await say('Open the LED to see the embryo in transmitted light');
+    await press(btn(/^Open$/), 2800);
+    await auto(2600);
+    await say('It is out of focus: the head is still above the sample', 'Step the head down and watch the picture', 2200);
+    await press(btn(/▼\s*[−-]10\s*$/), 3200);
+    await press(btn(/▼\s*[−-]5\s*$/), 3400);
+    await auto(1500);
+    await say('In focus: the eggshell and the cells are sharp', 'The head is now at the height the light sheets work at', 3800);
+    mark('focused');
 
-    // ── 4. calibrate every embryo on both sides ─────────────────────────
+    // ── 4. the same embryo, by laser, from both sides ───────────────────
+    await say('Close the LED and route a laser line');
+    await press(btn(/^Closed$/), 1200);
+    await press(p.locator('.lp-chip', { hasText: /^488$/ }), 1500);
+    await say('Arm beam A', 'The Light panel says in words what is emitting');
+    await press(btn(/^A off$/), 3200);
+    await auto(2600);
+    await say('SPIM A: nuclei, lit by the sheet from side A', '', 3200);
+    await say('SPIM B is the other side', 'The beam follows the view');
+    await press('[data-source="B"]', 4200);
+    await auto(2600);
+    await say('Side B sees the embryo mirrored, and here a little to one side', '', 3200);
+    await say('Multi shows both at once: A in red, B in green');
+    await press('[data-source="Multi"]', 2500);
+    await bothBeams();
+    await wait(4200);
+    await say('The two views do not sit on one another yet', 'That is what “Align A and B” fixes, once both sides are calibrated', 4600);
+    mark('views');
+    await press(btn(/^Stop view$/), 1200).catch(() => {});
+
+    // ── 5. calibrate every embryo on both sides ─────────────────────────
     await say('Calibration: each embryo needs a fit on side A and on side B', '', 2600);
     await say('Choose Side “A then B”');
     await choose('#cal-side', 'AB');
@@ -150,12 +189,12 @@ async (page) => {
     await until(async () => !(await p.evaluate(() => !!document.querySelector('#op-cal-all').dataset.busy)), 2000, 400);
     mark('walk-end');
     await wait(9000);
-    out.walk = await p.evaluate(() => ({ head: (document.querySelector('.cp-head') || {}).innerText.replace(/\s+/g, ' '), secs: [...document.querySelectorAll('.cp-sec')].map(e => e.innerText), result: document.querySelector('#op-cal-result').innerText }));
+    out.walk = await p.evaluate(() => ({ head: (document.querySelector('.cp-head') || {}).innerText.replace(/\s+/g, ' '), secs: [...document.querySelectorAll('.cp-sec')].map(e => e.innerText) }));
     await say('Done: every embryo is CAL on both sides', 'The names along the top choose whose steps are shown', 3000);
     const owners = p.locator('.cp-sec');
-    if (await owners.count() > 1) { await press(owners.nth(0), 1600); await press(owners.nth(1), 1600); }
+    if (await owners.count() > 1) { await press(owners.nth(0), 1600); }
 
-    // ── 5. look through a step ──────────────────────────────────────────
+    // ── 6. look through a step ──────────────────────────────────────────
     const sweeps = p.locator('.cp-step-head', { hasText: /Focus at/ });
     if (await sweeps.count()) {
       await say('Open any step to look through it');
@@ -175,22 +214,44 @@ async (page) => {
     }
     mark('looked');
     await press('#op-cal-several > summary', 600).catch(() => {});
-    await say('Graphs goes back to the camera, and shows the latest run again any time');
-    await press('#op-fit-show', 1800).catch(() => {});
 
-    // ── 6. piezo follows galvo ──────────────────────────────────────────
-    await say('Sheets: with a fit, the piezo follows the galvo', 'Move the galvo and the piezo goes along the calibration line');
-    await press(p.locator('.rp-row .rp-label').first(), 1200);
-    await type('#op-gv-a', '0.10', 1600);
-    await type('#op-gv-a', '0.05', 1600);
-    await type('#op-gv-a', '0', 1200);
+    // ── 7. align the two views ──────────────────────────────────────────
+    await say('Align A and B: bring the two views onto one another', 'It needs a fit on both sides, the stage at the embryo, and a laser line');
+    await press(p.locator('.rp-row').first().locator('.rp-centre'), 2600);
+    await press(p.locator('.lp-chip', { hasText: /^488$/ }), 1500);
+    mark('align-start');
+    await press('#op-ab-align', 2500);
+    await say('It measures the gap in both cameras, probes the stage, then moves it', 'If a move does not help, the stage goes back');
+    await until(async () => !(await p.evaluate(() => document.querySelector('#op-ab-align').disabled)), 1500, 80);
+    mark('align-end');
+    out.align = await p.evaluate(() => [...document.querySelectorAll('[class*="toast"]')].map(t => t.innerText).join(' / ').slice(0, 260));
+    await say('Aligned: the gap is closed, and the embryo’s position is updated', '“Then align the two views” in Several embryos does this for each embryo of a walk', 5200);
+    await say('Multi again: red and green now overlap');
+    await press(p.locator('.lp-chip', { hasText: /^488$/ }), 1200).catch(() => {});
+    await press('#op-fit-show', 900).catch(() => {});
+    await press('[data-source="Multi"]', 1500);
+    await soft('start multi', () => press(btn(/^Start view$/), 2500));
+    await bothBeams();
+    await wait(5200);
+    mark('aligned');
+
+    // ── 8. piezo follows galvo, on the live picture ─────────────────────
+    await say('Sheets: with a fit, the piezo follows the galvo', 'Walk the sheet through the embryo and it stays in focus');
+    await press('[data-source="A"]', 3500);
+    await auto(2000);
+    await type('#op-gv-a', '0.04', 3200);
+    await type('#op-gv-a', '0.08', 3200);
+    await type('#op-gv-a', '-0.03', 3200);
+    await type('#op-gv-a', '0', 2000);
     mark('follow');
+    await press(btn(/^Stop view$/), 1200).catch(() => {});
 
-    // A calibration puts the lasers out when it ends; the run needs a line.
-    await say('Route the laser line again', 'A calibration leaves the lasers off when it ends');
-    await press(p.locator('.lp-chip', { hasText: /^488$/ }), 2000);
-
-    // ── 7. plan the run ─────────────────────────────────────────────────
+    // ── 9. plan the run ─────────────────────────────────────────────────
+    await say('Route the laser line for the run', 'Stopping a view or finishing a calibration leaves the lasers off');
+    await soft('route', async () => {
+      const chip = p.locator('.lp-chip', { hasText: /^488$/ });
+      if (!(await chip.evaluate(e => e.classList.contains('is-on')))) await press(chip, 1800);
+    });
     await say('Devices › Acquisition: plan the run');
     await press(p.locator(':text-is("Acquisition"):visible').first(), 2600);
     mark('plan');
@@ -203,33 +264,47 @@ async (page) => {
     await choose('#op-tl-stop', 'hatching', 2200);
     await say('Before it starts', 'Who is in the run, the fits, the light, the cadence, the disk, the head: read it once before pressing Start');
     await point('#op-preflight'); await wait(5200);
-    await say('For this walkthrough: a short run', 'Every 30 seconds, three timepoints');
+    await say('For this walkthrough: a short run', 'Every 20 seconds, five timepoints');
     await choose('#op-plan-unit', 's', 400);
-    await type('#op-tl-interval', '30', 600);
+    await type('#op-tl-interval', '20', 600);
     await choose('#op-tl-stop', 'timepoints', 500);
-    await type('#op-tl-condval', '3', 1500);
+    await type('#op-tl-condval', '5', 1500);
     out.pre = await p.evaluate(() => document.querySelector('#op-preflight').innerText.replace(/\n+/g, ' | '));
 
-    // ── 8. run ──────────────────────────────────────────────────────────
+    // ── 10. run ─────────────────────────────────────────────────────────
     await say('Start timelapse');
     mark('run-start');
     await press('#op-run-start', 3000);
     await say('Each tile is an embryo’s latest volume', 'The Run box counts down to the next round');
-    await until(async () => (await p.evaluate(() => fetch('/api/devices/timelapse/status').then(r => r.json()).then(s => s.status))) !== 'running', 3000, 80);
+    await until(async () => (await p.evaluate(() => fetch('/api/devices/timelapse/status').then(r => r.json()).then(s => s.status))) !== 'running', 3000, 120);
     mark('run-end');
     await wait(3000);
-    await say('The run has ended after three timepoints', '', 2600);
+    await say('The run has ended after five timepoints', '', 2600);
 
-    // ── 9. Embryos ──────────────────────────────────────────────────────
+    // ── 11. Embryos: the viewer ─────────────────────────────────────────
     await say('Embryos: every timepoint of every embryo');
     await press(p.locator('[title="Embryos"]:visible, :text-is("Embryos"):visible').first(), 3000);
-    const card = p.getByText('E1', { exact: true }).first();
-    if (await card.count()) await press(card, 3200);
-    const b = p.locator('button:visible', { hasText: /^SPIM B$/ }).first();
-    if (await b.count()) { await say('Switch between SPIM A and SPIM B'); await press(b, 2600); }
+    mark('embryos-start');
+    await soft('pick E1', () => press(p.getByText('E1', { exact: true }).first(), 3000));
+    await say('Three projections of the volume', 'From above, from the side, and from the front');
+    await wait(3000);
+    await soft('play', async () => { await say('Play the timepoints as a movie'); await press(btn(/Play$/), 5200); await press(btn(/(Pause|Stop|Play)$/), 900); });
+    await soft('previous', async () => { await say('Step with Previous and Next, or the arrow keys'); await press(btn(/Previous/), 1300); await press(btn(/Previous/), 1300); await press(btn(/Next/), 1300); });
+    await soft('compare', async () => { await say('Compare with first: this timepoint beside the first one'); await press(btn(/^Compare with first$/), 3600); await press(btn(/^Compare with first$/), 900); });
+    await soft('z', async () => {
+      await say('The Z slider leaves the projection and walks through the slices');
+      const z = p.locator('input[type="range"]:visible').last();
+      const b = await z.boundingBox();
+      for (const f of [0.3, 0.5, 0.7]) { await moveTo(b.x + b.width * f, b.y + b.height / 2); await p.mouse.down(); await p.mouse.up(); await wait(1500); }
+      await moveTo(b.x + 2, b.y + b.height / 2); await p.mouse.down(); await p.mouse.up(); await wait(900);
+    });
+    await soft('spim b', async () => { await say('SPIM A and SPIM B: the same timepoint from the other side'); await press(btn(/^SPIM B$/), 3200); await press(btn(/^SPIM A$/), 1500); });
+    await soft('perception', async () => { await say('Under the picture: what perception made of this timepoint', 'The stage it judged, in words, and a box to ask a follow-up'); await point(p.getByText('VLM SUMMARY').first()); await wait(4200); });
+    await soft('table', async () => { await say('Table: every embryo against every timepoint'); await press(btn(/^Table$/), 3800); });
+    await soft('vitals', async () => { await say('Vitals: each embryo’s stage over time'); await press(btn(/^Vitals$/), 3800); await press(btn(/^Watch$/), 1500); });
     mark('embryos');
 
-    // ── 10. HALT ────────────────────────────────────────────────────────
+    // ── 12. HALT ────────────────────────────────────────────────────────
     await say('HALT is in the rig menu and on the Devices page', 'It stops every stage, puts the lasers and LED out, and stops the cameras');
     await press('#status-button', 1800);
     await press('#rig-halt', 3800);
