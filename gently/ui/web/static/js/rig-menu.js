@@ -274,13 +274,15 @@ const RigMenu = (function () {
         try {
             const r = await post('/api/devices/motion/halt', {});
             const stopped = (r.halted || []).join(', ');
-            tell(stopped ? `Halted: ${stopped}${(r.dark || []).length ? ' · light off' : ''}`
+            tell(stopped ? `Halted: ${stopped}${(r.dark || []).length ? ' · light off' : ''}${(r.views_stopped || []).length ? ' · cameras stopped' : ''}`
                 : 'HALT reached no positioners', !stopped);
         } catch (e) {
             const d = (e && e.data) || {};
             const failed = Object.keys(d.errors || {});
             tell(failed.length ? `HALT: ${failed.join(', ')} did NOT stop` : `HALT failed (${e.message})`, true);
         }
+        // HALT ends the live views too; the page showing them is told.
+        document.dispatchEvent(new CustomEvent('gently:halted'));
     }
 
     function init() {

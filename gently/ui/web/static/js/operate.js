@@ -609,7 +609,7 @@ const OperateManager = (function () {
             const stopped = (r.halted || []).join(', ');
             // success with nothing halted means no positioner was registered to
             // halt — not "everything is stopped". Say the difference.
-            if (stopped) toast(`Halted: ${stopped}${(r.dark || []).length ? ' · lasers, LED and scan off' : ''}`);
+            if (stopped) toast(`Halted: ${stopped}${(r.dark || []).length ? ' · lasers, LED and scan off' : ''}${(r.views_stopped || []).length ? ' · cameras stopped' : ''}`);
             else toastFail('HALT reached no positioners — none are registered');
         } catch (e) {
             // A refusal carries its body: which axes stopped, which did not and
@@ -625,8 +625,14 @@ const OperateManager = (function () {
                 toastFail(`HALT failed (${why(e)})`);
             }
         } finally {
+            viewsHalted();
             fd.refresh(); bz.refresh();
         }
+    }
+    // HALT ends the live views (the server stops them); the buttons say so.
+    function viewsHalted() {
+        if (_bottomOn) applyBottomCam(false);
+        if (_spimOn) applySpim(false);
     }
     // ══ VIEWPORT ════════════════════════════════════════════════════════════
     // ── what is arriving ────────────────────────────────────────────────────
@@ -1460,6 +1466,7 @@ const OperateManager = (function () {
             const block = document.querySelector(`.op-sheet-side[data-side="${side}"]`);
             if (block) block.classList.toggle('is-on', _side === side || multi);
         });
+        renderFollow();
         const note = $('op-spim-multi-note'); if (note) note.hidden = !multi;
         const says = $('op-sheet-side'); if (says) says.textContent = SIDE_SAYS[_side] || '';
         renderSource();
@@ -1588,12 +1595,68 @@ const OperateManager = (function () {
         if (!Number.isFinite(v)) return;
         _pose[side][key] = v;
         _poseKnown[side] = true;
+        const f = lockFit(side);
+        if (f) {
+            const line = g => f.slope * g + f.offset;
+            if (key === 'galvo') {
+                // The piezo goes with the galvo along the fit's line, keeping
+                // whatever it was trimmed by, inside its own limits.
+                const ext = (_range[side] || RANGE_DEFAULT).piezo;
+                _pose[side].piezo = Math.min(ext[1], Math.max(ext[0], line(v) + _lock[side].trim));
+            } else {
+                // The piezo moved by hand is a trim on the line, and is kept.
+                _lock[side].trim = v - line(_pose[side].galvo);
+            }
+        }
         // The sheet moved is the sheet looked at: its side comes on screen,
         // and the device layer is told the side with the pose.
         if (_side !== side) setSpimSide(side);
         renderPose();
         postLsParams();
     }
+    // ── galvo and piezo together, by the fit ────────────────────────────────
+    // Once a side of the selected embryo has a fit, its galvo and piezo can
+    // be moved as one: the piezo follows the galvo along the fit's line, so
+    // the sheet stays in focus as it is walked through the embryo. Moving the
+    // piezo itself trims the line by a fixed amount, which is kept and shown.
+    const _lock = { A: { on: true, trim: 0, of: '' }, B: { on: true, trim: 0, of: '' } };
+    const sideFitOf = (emb, side) => {
+        const c = (emb && emb.calibration) || {};
+        const f = side === 'B' ? (c.B || {}) : c;
+        const slope = Number(f.slope_um_per_deg);
+        return Number.isFinite(slope) && slope !== 0 ? { slope, offset: Number(f.offset_um) || 0 } : null;
+    };
+    // The fit a side's sheet is tied to now, or null when it is not tied.
+    function lockFit(side) {
+        if (!_lock[side] || !_lock[side].on) return null;
+        return sideFitOf(_embryos.find(e => e.id === _selected), side);
+    }
+    function renderFollow() {
+        const emb = _embryos.find(e => e.id === _selected);
+        ['A', 'B'].forEach(side => {
+            const k = side.toLowerCase(), wrap = $(`op-lock-${k}-wrap`);
+            if (!wrap) return;
+            const f = sideFitOf(emb, side), l = _lock[side];
+            // A trim belongs to one embryo's one fit: it does not carry over.
+            const of = f ? `${emb.id}|${f.slope}|${f.offset}` : '';
+            if (of !== l.of) { l.of = of; l.trim = 0; }
+            wrap.hidden = !f;
+            if (!f) return;
+            const box = $(`op-lock-${k}`); if (box) box.checked = l.on;
+            const says = $(`op-lock-${k}-says`);
+            if (says) says.textContent = `embryo ${labelFor(emb)} · ${f.slope.toFixed(1)} µm/°`
+                + (l.on && Math.abs(l.trim) >= 0.05 ? ` · piezo trimmed ${l.trim > 0 ? '+' : '−'}${Math.abs(l.trim).toFixed(1)} µm` : '');
+            const reset = $(`op-lock-${k}-reset`);
+            if (reset) reset.hidden = !(l.on && Math.abs(l.trim) >= 0.05);
+        });
+    }
+    // Back onto the fit's line at the galvo where the sheet is.
+    function clearTrim(side) {
+        _lock[side].trim = 0;
+        if (lockFit(side) && _poseKnown[side]) setAxis(side, 'galvo', _pose[side].galvo);
+        else renderFollow();
+    }
+
     // The LED has ONE control, in the Light panel. There used to be a second
     // button here with its own `_ledOn` belief, and the two did not talk: the
     // Light panel went on reporting the LED as it had last read it while this
@@ -1915,6 +1978,7 @@ const OperateManager = (function () {
     function renderFits(emb) {
         const who = $('op-calib-who');
         if (who) who.textContent = emb ? `embryo ${labelFor(emb)}` : 'no embryo selected';
+        renderFollow();
         const host = $('op-cal-fits');
         if (!host) return;
         const cal = (emb && emb.calibration) || {};
@@ -4831,6 +4895,10 @@ const OperateManager = (function () {
             bindAxis(side, 'galvo', $(`op-gv-${k}-in`), $(`op-gv-${k}`), 2);
             bindAxis(side, 'piezo', $(`op-pz-${k}-in`), $(`op-pz-${k}`), 1);
             fetchRange(side);   // each side's own extents, read once
+            const lock = $(`op-lock-${k}`);
+            if (lock) lock.addEventListener('change', () => { _lock[side].on = lock.checked; _lock[side].trim = 0; renderFollow(); });
+            const reset = $(`op-lock-${k}-reset`);
+            if (reset) reset.addEventListener('click', () => clearTrim(side));
         });
         // A side's name puts that side on screen.
         document.querySelectorAll('[data-sheet-view]').forEach(b =>
@@ -4858,6 +4926,7 @@ const OperateManager = (function () {
         adoptLsParams();
         document.querySelectorAll('#op-source [data-source], #op-fit-show').forEach(b =>
             b.addEventListener('click', () => chooseSource(b.dataset.source)));
+        document.addEventListener('gently:halted', viewsHalted);
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
         const keptStrip = $('op-cal-kept-strip');

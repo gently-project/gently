@@ -812,6 +812,15 @@
                             <span class="op-ext" id="op-pz-a-max">+100</span>
                             <input class="op-numbox" id="op-pz-a" type="text" inputmode="decimal" value="0.0" autocomplete="off"
                                    data-decimals="1" aria-label="Side A piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
+                          <!-- Shown once the selected embryo has a fit on this side:
+                               the piezo then follows the galvo along the fit's line. -->
+                          <div class="op-sheet-lock" id="op-lock-a-wrap" hidden>
+                            <label><input type="checkbox" id="op-lock-a" checked>
+                              Piezo follows galvo by the fit</label>
+                            <span class="op-sheet-lock-says" id="op-lock-a-says"></span>
+                            <button class="op-nbtn" type="button" id="op-lock-a-reset" hidden
+                                    title="Put the piezo back on the fit's line">Clear trim</button>
+                          </div>
                         </div>
                         <div class="op-sheet-side" data-side="B">
                           <button class="op-sheet-who" type="button" data-sheet-view="B"
@@ -831,6 +840,15 @@
                             <span class="op-ext" id="op-pz-b-max">+100</span>
                             <input class="op-numbox" id="op-pz-b" type="text" inputmode="decimal" value="0.0" autocomplete="off"
                                    data-decimals="1" aria-label="Side B piezo position in micrometres, typed"><i class="op-unit">µm</i></div>
+                          <!-- Shown once the selected embryo has a fit on this side:
+                               the piezo then follows the galvo along the fit's line. -->
+                          <div class="op-sheet-lock" id="op-lock-b-wrap" hidden>
+                            <label><input type="checkbox" id="op-lock-b" checked>
+                              Piezo follows galvo by the fit</label>
+                            <span class="op-sheet-lock-says" id="op-lock-b-says"></span>
+                            <button class="op-nbtn" type="button" id="op-lock-b-reset" hidden
+                                    title="Put the piezo back on the fit's line">Clear trim</button>
+                          </div>
                         </div>
                         <div class="op-cap" id="op-spim-multi-note" hidden>Multi shows both sides in one frame. Move a sheet and its side comes on screen.</div>
                       </div>

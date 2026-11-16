@@ -2845,3 +2845,9 @@ details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
 .cp-card-graph[hidden] { display: none; }
 .cp-card-graph svg { display: block; width: 100%; height: auto; }
 .cp-card .cp-stage[hidden] { display: none; }
+
+/* Galvo and piezo together, by the fit: a row under a side's two axes. */
+.op-sheet-lock { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 2px 0 4px; font: 12px var(--op-ui); color: var(--op-ink); }
+.op-sheet-lock[hidden] { display: none; }
+.op-sheet-lock label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.op-sheet-lock-says { font: 11px var(--op-mono); color: var(--op-ink-dim); }

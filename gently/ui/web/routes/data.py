@@ -857,6 +857,26 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"stop failed: {exc}") from exc
         return {"streaming": False}
 
+    async def _stop_the_views() -> list[str]:
+        """End the live views that are running: the bottom camera's and the
+        light sheet's. Returns which were. Never raises: it runs inside HALT."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        stopped: list[str] = []
+        for name, attr in (
+            ("bottom camera", "bottom_camera_monitor"),
+            ("light-sheet view", "lightsheet_monitor"),
+        ):
+            monitor = getattr(agent, attr, None) if agent else None
+            if monitor is None or getattr(monitor, "running", False) is not True:
+                continue
+            try:
+                await monitor.stop()
+                stopped.append(name)
+            except Exception:
+                logger.exception("HALT could not stop the %s", name)
+        return stopped
+
     def _resolve_client():
         """Resolve the live microscope client from the agent bridge, or None."""
         bridge = getattr(server, "agent_bridge", None)
@@ -2942,7 +2962,13 @@ def create_router(server) -> APIRouter:
             result = await client.halt_motion()
         except Exception as exc:
             logger.exception("motion halt failed")
+            await _stop_the_views()
             raise HTTPException(status_code=502, detail=f"halt failed: {exc}") from exc
+        # The device layer stops the exposure in hand, but a live view is this
+        # app asking for frames, and it went on asking: the camera ran again a
+        # moment after HALT. The views are ended here, after the stages.
+        if isinstance(result, dict):
+            result["views_stopped"] = await _stop_the_views()
         # The device layer already answers 502 with a per-axis `errors` map when
         # a controller refuses, but DiSPIMMicroscope._api_post returns the body
         # without looking at the status — so without this the browser saw 200
