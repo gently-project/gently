@@ -415,7 +415,9 @@ def create_router(server) -> APIRouter:
         embryos = getattr(experiment, "embryos", None)
         if not embryos:
             return  # nothing known to check against
-        missing = calibration_gate.uncalibrated(embryos, embryo_ids)
+        asked = payload.get("sides")
+        sides = [str(s) for s in asked] if isinstance(asked, list) and asked else ["A"]
+        missing = calibration_gate.uncalibrated(embryos, embryo_ids, sides)
         if missing:
             raise HTTPException(status_code=409, detail=calibration_gate.refusal_detail(missing))
 

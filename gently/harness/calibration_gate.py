@@ -43,15 +43,22 @@ reported for the operator to judge.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 # The one field that means a fit happened.
 FIT_KEY = "slope_um_per_deg"
 
 
-def is_calibrated(embryo: Any) -> bool:
-    """True when this embryo carries a usable galvo→piezo fit."""
+def is_calibrated(embryo: Any, side: str = "A") -> bool:
+    """True when this embryo carries a usable galvo→piezo fit on `side`.
+
+    Side A is the embryo's calibration; side B is its ``calibration["B"]``
+    (the other scanner and piezo's own numbers).
+    """
     cal = getattr(embryo, "calibration", None) or {}
+    if side == "B" and isinstance(cal, dict):
+        cal = cal.get("B") or {}
     if not isinstance(cal, dict):
         return False
     slope = cal.get(FIT_KEY)
@@ -63,15 +70,29 @@ def is_calibrated(embryo: Any) -> bool:
     return value == value and value not in (float("inf"), float("-inf")) and value != 0.0
 
 
-def uncalibrated(embryos: dict[str, Any], embryo_ids: list[str] | None) -> list[str]:
+def uncalibrated(
+    embryos: dict[str, Any], embryo_ids: list[str] | None, sides: Sequence[str] = ("A",)
+) -> list[str]:
     """Which of `embryo_ids` have no fit. `None` means every known embryo.
+
+    `sides` is the sides the run images: a two-view run needs a fit on each.
+    It used to be judged on side A alone, and the run then left side B out for
+    that embryo with a line in the log. An embryo missing only side B is named
+    with it ("e2 (side B)"), since it shows a fit everywhere else.
 
     Unknown ids are not reported here — the routes already reject those, and
     conflating "does not exist" with "not calibrated" would send an operator
     to the wrong fix.
     """
     ids = list(embryo_ids) if embryo_ids else list(embryos.keys())
-    return [eid for eid in ids if eid in embryos and not is_calibrated(embryos[eid])]
+    out = []
+    for eid in ids:
+        if eid not in embryos:
+            continue
+        missing = [s for s in (sides or ("A",)) if not is_calibrated(embryos[eid], s)]
+        if missing:
+            out.append(f"{eid} (side B)" if missing == ["B"] else eid)
+    return out
 
 
 def refusal_detail(missing: list[str]) -> str:

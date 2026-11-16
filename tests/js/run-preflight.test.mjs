@@ -111,6 +111,13 @@ test('lines: every embryo calibrated and the plan sound is nothing in the way', 
     assert.ok(find(ls, /^The head is at 114\.6 µm\.$/));
 });
 
+test('lines: an embryo missing only its side B fit is named with the side', () => {
+    const subjects = embryos(3, [2]);
+    subjects[1].missing = ['B'];
+    const l = find(P.lines(ctx(plan(), subjects)), /not calibrated/);
+    assert.equal(l.text, '1 of 3 is not calibrated: 2 (side B). A run refuses it.');
+});
+
 test('lines: an uncalibrated embryo stands in the way, by name, with both ways past it', () => {
     const p = plan();
     const ls = P.lines(ctx(p, embryos(11, [3, 8, 11])));

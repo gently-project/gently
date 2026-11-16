@@ -125,3 +125,22 @@ def test_the_refusal_names_the_embryos_and_the_way_past_it() -> None:
     # dependency file or a route signature.
     assert "allow_uncalibrated" in msg
     assert "invented" in msg or "guess" in msg
+
+
+# ── by side ──────────────────────────────────────────────────────────────────
+
+
+def test_side_b_is_judged_on_its_own_fit() -> None:
+    both = _Embryo({**_fit(), "B": _fit(40.0)})
+    only_a = _Embryo(_fit())
+    assert calibration_gate.is_calibrated(both, "B") is True
+    assert calibration_gate.is_calibrated(only_a, "B") is False
+    assert calibration_gate.is_calibrated(_Embryo({**_fit(), "B": _fit(0.0)}), "B") is False
+
+
+def test_a_two_view_run_needs_a_fit_on_both_sides_and_says_which_is_missing() -> None:
+    roster = {"e1": _Embryo({**_fit(), "B": _fit()}), "e2": _Embryo(_fit()), "e3": _Embryo({})}
+    assert calibration_gate.uncalibrated(roster, None, ["A", "B"]) == ["e2 (side B)", "e3"]
+    # A run on side A is judged as it always was.
+    assert calibration_gate.uncalibrated(roster, None, ["A"]) == ["e3"]
+    assert calibration_gate.uncalibrated(roster, None) == ["e3"]
