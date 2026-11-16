@@ -2840,3 +2840,8 @@ details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
 .cp-card-end.is-bad { border-color: var(--op-warn); }
 .cp-card-end .cp-cap { color: var(--op-ink); }
 @media (prefers-reduced-motion: reduce) { .cp-cards { scroll-behavior: auto; } }
+.cp-card-says { font: 11px var(--op-mono); color: var(--op-ink-dim); min-height: 0; }
+.cp-card-says:empty { display: none; }
+.cp-card-graph[hidden] { display: none; }
+.cp-card-graph svg { display: block; width: 100%; height: auto; }
+.cp-card .cp-stage[hidden] { display: none; }

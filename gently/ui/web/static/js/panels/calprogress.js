@@ -149,31 +149,148 @@ const CalProgressPanel = (() => {
         img.data_type === 'focus_plot' || img.data_type === 'calibration_summary' ||
         img.data_type === 'focus_montage';
 
-    // Which card a frame belongs on: its step, and in a walk its embryo.
+    // ── the steps, named as the Calibration tab names them ─────────────────
+    // "Where the embryo is", "Focus at 0.160° wide", "The fit": the same
+    // headings a kept run is browsed by afterwards, so what is watched and
+    // what is looked back at are organised the one way.
+    const MIN_POINTS = 3;   // fewer is not a curve
+    const SWEEP_WORD = { sparse: 'coarse', dense: 'dense', fine: 'fine', wide: 'wide' };
+    function stepOf(img) {
+        const m = img.metadata || {};
+        switch (img.data_type) {
+            case 'presence_check': return { key: 'presence', title: 'Checking there is something there' };
+            case 'edge_detection': return { key: 'edges', title: 'Where the embryo is' };
+            case 'focus_sweep': {
+                const name = String(m.galvo_name || '');
+                const word = SWEEP_WORD[m.sweep] || '';
+                return { key: `focus|${name}|${m.sweep || ''}`, focus: name, title: `Focus at ${name || 'the sheet'}${word ? ` ${word}` : ''}` };
+            }
+            // A sweep's plot and its montage are that sweep's conclusions:
+            // they go on its card, not on one of their own.
+            case 'focus_plot':
+            case 'focus_montage': {
+                const name = String(m.galvo_name || '');
+                return { key: `focus|${name}|`, focus: name, joins: true, title: `Focus at ${name || 'the sheet'}` };
+            }
+            case 'calibration_summary': return { key: 'fit', title: 'The fit' };
+            default: return { key: String(img.data_type), title: phaseOf(img) };
+        }
+    }
+
     function cardKey(img) {
         const who = (img.metadata || {}).embryo_id || '';
-        return `${who}|${phaseOf(img)}`;
+        return `${who}|${stepOf(img).key}`;
+    }
+
+    // What a step found, in the words the Calibration tab's graphs use.
+    function saysOf(img) {
+        const m = img.metadata || {};
+        if (img.data_type === 'focus_plot') {
+            const b = num(m.best_piezo, 1), r = num(m.r_squared, 2);
+            return [b !== null ? `sharpest at ${Number(m.best_piezo) > 0 ? '+' : ''}${b} µm` : '', r !== null ? `R² ${r}` : '']
+                .filter(Boolean).join(' · ');
+        }
+        if (img.data_type === 'calibration_summary') {
+            const sl = num(m.slope, 1), off = num(m.offset, 1), r = num(m.r_squared, 2);
+            return [sl !== null ? `${sl} µm/°` : '', off !== null ? `offset ${Number(m.offset) > 0 ? '+' : ''}${off} µm` : '', r !== null ? `R² ${r}` : '']
+                .filter(Boolean).join(' · ') || captionOf(img);
+        }
+        return '';
+    }
+
+    // A frame's point on its step's graph: sharpness against piezo for a
+    // sweep, signal against galvo for the edges. None when it has no numbers.
+    function pointOf(img) {
+        const m = img.metadata || {};
+        const ok = v => typeof v === 'number' && isFinite(v);
+        if (img.data_type === 'focus_sweep' && ok(m.piezo) && ok(m.score)) return { x: m.piezo, y: m.score };
+        if (img.data_type === 'edge_detection' && ok(m.galvo)) {
+            const y = ok(m.signal) ? m.signal : ok(m.feature_score) ? m.feature_score : null;
+            if (y !== null) return { x: m.galvo, y, seen: m.visible === true };
+        }
+        return null;
     }
 
     // Put a frame on the run's cards; true when it began a new card. Pure, so
     // the grouping can be tested without a page.
     function intoCards(cards, img) {
-        const key = cardKey(img);
+        const who = (img.metadata || {}).embryo_id || '';
+        const step = stepOf(img);
+        const key = `${who}|${step.key}`;
         let card = cards[cards.length - 1];
-        const fresh = !card || card.key !== key;
+        if (step.joins) {
+            // The newest card of this embryo's sweep at this angle, if any.
+            const prefix = `${who}|focus|${step.focus}|`;
+            for (let i = cards.length - 1; i >= 0; i--) {
+                if (cards[i].key.startsWith(prefix)) { card = cards[i]; break; }
+            }
+        }
+        const fits = card && (card.key === key || (step.joins && card.key.startsWith(`${who}|focus|${step.focus}|`)));
+        const fresh = !fits;
         if (fresh) {
-            card = { key, title: phaseOf(img), who: (img.metadata || {}).embryo_id || null, frames: [], shown: -1, el: null };
+            card = { key, title: step.title, who: who || null, frames: [], pts: [], says: '', best: null, shown: -1, el: null };
             cards.push(card);
         }
+        const m = img.metadata || {};
+        const ok = v => typeof v === 'number' && isFinite(v);
+        card.dirty = true;
+        const pt = pointOf(img);
+        if (pt) card.pts.push(pt);
+        const says = saysOf(img);
+        if (says) card.says = says;
+        if (img.data_type === 'focus_plot' && ok(m.best_piezo)) {
+            card.best = m.best_piezo;
+            if (ok(m.galvo)) card.galvo = m.galvo;
+        }
+        if (img.data_type === 'calibration_summary' && ok(m.slope)) {
+            // The line, and the sharpest piezo each of this embryo's sweeps
+            // came to: the newest sweep at an angle is the one that counts.
+            const at = new Map();
+            cards.forEach(c => { if (c.who === card.who && ok(c.galvo) && ok(c.best)) at.set(c.galvo, c.best); });
+            card.fit = { slope: m.slope, offset: ok(m.offset) ? m.offset : 0, points: [...at].map(([x, y]) => ({ x, y })) };
+        }
+        // The picture of a graph is not kept where the graph itself is drawn
+        // from the numbers (graphOf): the sweep's curve, the fit's line.
+        const drawn = (img.data_type === 'focus_plot' && card.pts.length >= MIN_POINTS)
+            || (img.data_type === 'calibration_summary' && card.fit && card.fit.points.length >= 2);
+        if (drawn) return fresh;
         card.frames.push(img);
         if (card.frames.length > MAX_FRAMES) {
             // Drop the oldest EXPOSURE, never a conclusion: the findings are
-            // the part of the step you still want when it ends.
+            // the part of the step you still want when it ends. Its point
+            // stays on the graph.
             const drop = card.frames.findIndex(f => !isConclusion(f));
             card.frames.splice(drop < 0 ? 0 : drop, 1);
             if (card.shown > 0) card.shown -= 1;
         }
         return fresh;
+    }
+
+    // The step's graph so far, drawn as the Calibration tab draws a kept
+    // run's (CalibrationArchive.chart): a point a frame, as the frames come.
+    function graphOf(card) {
+        const arc = typeof CalibrationArchive !== 'undefined' ? CalibrationArchive : null;
+        if (!arc || !arc.chart) return '';
+        if (card.fit && card.fit.points.length >= 2) {
+            const f = card.fit, gs = f.points.map(p => p.x);
+            const pad = (Math.max(...gs) - Math.min(...gs)) * 0.15 || 0.05;
+            const y = g => f.slope * g + f.offset;
+            try {
+                return arc.chart({ title: 'Sharpest piezo against galvo, and the line through it', xLabel: 'galvo °', h: 132,
+                    line: [[Math.min(...gs) - pad, y(Math.min(...gs) - pad)], [Math.max(...gs) + pad, y(Math.max(...gs) + pad)]],
+                    pts: f.points.map(q => ({ x: q.x, y: q.y, tip: `galvo ${q.x.toFixed(3)}° · sharpest at piezo ${q.y.toFixed(1)} µm` })) });
+            } catch (_) { return ''; }
+        }
+        if (card.pts.length < MIN_POINTS) return '';
+        const focus = card.key.includes('|focus|');
+        const top = Math.max(...card.pts.map(p => p.y), 1e-9);
+        const pts = card.pts.map(p => ({ x: p.x, y: focus ? p.y / top : p.y, tip: focus ? `piezo ${p.x.toFixed(1)} µm · sharpness ${(100 * p.y / top).toFixed(0)}%` : `galvo ${p.x.toFixed(3)}° · ${p.seen ? 'embryo seen' : 'nothing seen'}` }));
+        const seen = card.pts.filter(p => p.seen).map(p => p.x);
+        try {
+            return arc.chart(focus
+                ? { title: `Sharpness against piezo, ${card.title}`, xLabel: 'piezo µm', zero: true, yTop: 'best', vline: card.best, pts, line: pts.slice().sort((a, b) => a.x - b.x).map(p => [p.x, p.y]) }
+                : { title: 'Signal at each galvo angle', xLabel: 'galvo °', zero: true, band: seen.length ? [Math.min(...seen), Math.max(...seen)] : null, pts });
+        } catch (_) { return ''; }
     }
 
     const wrapOf = () => (_host ? _host.querySelector('.cp') : null);
@@ -196,6 +313,12 @@ const CalProgressPanel = (() => {
         const idx = card.shown >= 0 && card.shown < n ? card.shown : n - 1;
         const cur = card.frames[idx];
         el.querySelector('.cp-card-n').textContent = n > 1 ? `${n} frames` : '';
+        el.querySelector('.cp-stage').hidden = !n;
+        el.querySelector('.cp-card-says').textContent = card.says || '';
+        const graph = el.querySelector('.cp-card-graph');
+        const svg = graphOf(card);
+        graph.hidden = !svg;
+        if (svg) graph.innerHTML = svg;
         const img = el.querySelector('.cp-img');
         if (cur && cur.base64_png) { img.src = `data:image/png;base64,${cur.base64_png}`; img.hidden = false; }
         else img.hidden = true;
@@ -228,6 +351,8 @@ const CalProgressPanel = (() => {
               ${_walk && card.who ? `<span class="cp-card-who">${esc(String(card.who).replace(/^embryo_/, 'embryo '))}</span>` : ''}
               <span class="cp-card-n"></span>
             </header>
+            <div class="cp-card-says"></div>
+            <div class="cp-card-graph cal-arc-chart" hidden></div>
             <div class="cp-stage"><img class="cp-img" alt="${esc(card.title)}" hidden></div>
             <div class="cp-cap"></div>
             <div class="cp-strip" hidden></div>`;
@@ -289,9 +414,9 @@ const CalProgressPanel = (() => {
         }
         _count += 1;
         const fresh = intoCards(_cards, data);
-        const card = _cards[_cards.length - 1];
-        if (fresh) appendCard(card);
-        renderCard(card);
+        if (fresh) appendCard(_cards[_cards.length - 1]);
+        // A sweep's conclusion lands on its own card, which need not be the last.
+        _cards.forEach(c => { if (c.dirty) { c.dirty = false; renderCard(c); } });
         armIdle();
         render();
     }
@@ -354,7 +479,7 @@ const CalProgressPanel = (() => {
         render();
     }
 
-    return { mount, begin, finish, phaseOf, captionOf, cardKey, intoCards, MAX_FRAMES, _onImage: onImage };
+    return { mount, begin, finish, phaseOf, captionOf, stepOf, cardKey, intoCards, MAX_FRAMES, _onImage: onImage };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = CalProgressPanel;
