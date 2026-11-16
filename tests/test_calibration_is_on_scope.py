@@ -207,8 +207,7 @@ def test_the_fit_view_holds_what_a_run_looks_at() -> None:
     for part in (
         'id="op-cal-method"',  # what it is about to do, before it does it
         'id="op-cal-refused"',  # why it would not start, and the way past
-        'id="op-cal-progress"',  # the frames, as they land
-        'id="op-preview"',
+        'id="op-cal-progress"',  # the run, a card a step
         'id="op-cal-kept"',  # what the last run kept
         'id="op-cal-kept-all"',  # and the way to every run: the archive
     ):
@@ -267,11 +266,10 @@ def test_nothing_was_lost_in_the_move() -> None:
     """Every element the calibration functions write to is on the page once."""
     ids = (
         "op-cal-method op-cal-target op-cal-result op-cal-kept op-cal-kept-say op-cal-kept-open "
-        "op-cal-kept-strip cal-method cal-edges cal-zbuf cal-more cal-adv cal-adv-bounds cal-gtop "
+        "cal-method cal-edges cal-zbuf cal-more cal-adv cal-adv-bounds cal-gtop "
         "cal-gbot cal-estep cal-erange cal-etol cal-inset cal-adv-note cal-reset op-cal-borrow-row "
         "op-cal-borrow-from op-cal-borrow op-cal-all op-cal-clear op-calibrate op-cal-abort "
-        "op-cal-borrow-note op-cal-refused op-cal-refused-why op-cal-anyway op-cal-progress "
-        "op-preview op-preview-img op-preview-title op-preview-meta"
+        "op-cal-borrow-note op-cal-refused op-cal-refused-why op-cal-anyway op-cal-progress"
     ).split()
     for el in ids:
         assert INDEX.count(f'id="{el}"') == 1, el
@@ -329,24 +327,35 @@ def test_the_rail_shows_which_embryos_lack_a_fit() -> None:
 
 
 def test_fit_draws_the_runs_graphs_and_stands_apart_from_the_cameras():
-    """ "the Fit tab in the camera views of Scope ... is bit out of place. also
-    it shows the image based graphs and not the native graphs we worked on for
-    calibration." Fit showed the saved pictures of a run's graphs; it draws
-    them from the run's numbers, with the Calibration tab's own drawing."""
+    """Fit showed the saved pictures of a run's graphs; it draws them from the
+    run's numbers, with the Calibration tab's own drawing. A run is rendered
+    once: the cards that showed it going on show it kept."""
     web = Path(__file__).resolve().parents[1] / "gently" / "ui" / "web" / "static"
     archive = (web / "js" / "calibration-archive.js").read_text(encoding="utf-8")
     operate = (web / "js" / "operate.js").read_text(encoding="utf-8")
+    panel = (web / "js" / "panels" / "calprogress.js").read_text(encoding="utf-8")
     css = (web / "css" / "operate.css").read_text(encoding="utf-8")
     # One drawing, used by both.
     assert "function graphsHtml(_rec, _steps, _at) {" in archive
-    assert "if (host) host.innerHTML = graphsHtml(_rec, _steps, _at);" in archive
-    assert "return { ...pure, show, refresh, graphsHtml };" in archive
+    assert "arc.chart(" in panel
     kept = operate[operate.index("    async function renderCalKept(emb) {") :]
     kept = kept[: kept.index("    function calImageTitle(i) {")]
-    assert "arc.graphsHtml(record, arc.steps(images), -1)" in kept
-    assert kept.index("arc.graphsHtml(") < kept.index("op-cal-kept-img")  # pictures only without it
-    # One graph at a time, by name, opening on the fit.
-    assert "if (drawn) tabGraphs(strip);" in kept
-    assert "show(figs.length - 1);" in operate
+    # A run going on, or just watched, is not swapped for its own record.
+    assert "const free = () => P && !P.busy() && !P.watched(id);" in kept
+    assert "if (free()) {" in kept and "P.show(images.map(" in kept
+    # No second rendering, and nothing that seats and retires itself.
+    for gone in ("tabGraphs", "showPreview", "retirePreview", "op-cal-kept-strip"):
+        assert gone not in operate, gone
+    assert 'id="op-preview"' not in INDEX
+    # The graph is how a step is looked through: pointer, press and keys.
+    for how in ("'mouseover'", "'mouseleave'", "'click'", "'keydown'"):
+        assert f"graph.addEventListener({how}" in panel, how
+    # One step open, the rest folded to a line; the one picked is marked on
+    # the row of exposures, and the graph's box is held from the start.
+    assert "card.el.classList.toggle('is-open', card === cur);" in panel
+    assert "class=\"cp-thumb${f === picked ? ' is-pick' : ''}\"" in panel
+    assert ".cp-graph { align-self: center; aspect-ratio: 292 / 118;" in css
+    # The frames that come after the request has answered end that run.
+    assert "const tail = !_running && _endedAt &&" in panel
     # Not in the camera strip at all: lit in the Fit row while its graphs are up.
     assert "#op-fit-show.is-on {" in css

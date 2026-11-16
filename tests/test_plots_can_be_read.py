@@ -124,15 +124,8 @@ class TestTheMultiplier:
 
 
 class TestThePane:
-    def test_a_plot_is_given_room(self):
-        rule = CSS[CSS.index(".op-cal-kept-strip {") :][:260]
-        assert "display: grid;" in rule
-        assert f"minmax({SHOWN_PX}px, 1fr)" in rule
-
-    def test_it_fills_its_column(self):
-        assert ".op-cal-kept-img img { display: block; width: 100%; height: auto;" in CSS
-        assert "height: 84px" not in CSS[CSS.index(".op-cal-kept") :][:1500]
-
-    def test_it_is_asked_for_with_the_pixels_to_fill_it(self):
-        asked = re.search(r"\?max=(\d+)\" alt=\"\$\{escapeHtml\(calImageTitle", OPERATE)
-        assert asked and int(asked.group(1)) >= 2 * SHOWN_PX
+    def test_a_runs_picture_is_asked_for_with_the_pixels_to_fill_its_card(self):
+        asked = re.search(r"src: `\$\{i\.url\}\?max=(\d+)`", OPERATE)
+        tall = re.search(r"\.cp-detail \.cp-stage \{[^}]*max-height: (\d+)px", CSS)
+        assert asked and tall
+        assert int(asked.group(1)) >= 2 * int(tall.group(1))

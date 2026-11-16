@@ -267,62 +267,7 @@
 }
 
 /* Action bar beneath a viewport: what you do TO the image lives next to it. */
-/* ── Reactive preview ─────────────────────────────────────────────────────
-   Seats itself while a routine is producing images, retires when they stop.
-   No open/close affordance by design — see operate.js PREVIEW_IDLE_MS.
-   Transitioning opacity and translate (not height) keeps it off the layout's
-   critical path, so its arrival cannot reflow the camera above it. */
-.op-preview {
-    margin: 8px 0 0;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--bg-card);
-    opacity: 0;
-    transform: translateY(-4px);
-    transition: opacity 0.25s ease, transform 0.25s ease;
-}
-
-.op-preview.is-live {
-    opacity: 1;
-    transform: none;
-}
-
-.op-preview[hidden] {
-    display: none;
-}
-
-.op-preview-img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 4px;
-    background: var(--img-bg, #000);
-}
-
-.op-preview-cap {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: baseline;
-    margin-top: 6px;
-}
-
-.op-preview-title {
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--text);
-}
-
-.op-preview-meta {
-    font-size: 0.74rem;
-    color: var(--text-muted);
-}
-
 /* A reader mid-sentence should not lose the panel to a fade. */
-@media (prefers-reduced-motion: reduce) {
-    .op-preview { transition: none; }
-}
 
 .op-bar {
     display: flex;
@@ -1561,30 +1506,8 @@
     color: var(--op-ink-dim);
     min-height: 1em;
 }
-.cp-strip {
-    display: flex;
-    gap: 4px;
-    overflow-x: auto;
-    padding-bottom: 2px;
-    scrollbar-width: thin;
-}
-.cp-thumb {
-    flex: 0 0 auto;
-    width: 46px;
-    height: 46px;
-    padding: 0;
-    border: 1px solid var(--op-rule);
-    border-radius: 4px;
-    background: #000;
-    cursor: pointer;
-    overflow: hidden;
-}
-.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cp-thumb.is-on { border-color: var(--accent, #3b82f6); }
 /* The conclusions — the fitted curves, the montage, the summary — are what you
    scroll back for, so they are findable in a strip of near-identical frames. */
-.cp-thumb.is-key { border-color: var(--op-ink-dim); border-style: dashed; }
-.cp-thumb:focus-visible { outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px; }
 [data-theme="light"] .cp { background: var(--op-panel, #fff); }
 /* A caption that is warning rather than explaining. */
 .op-cap-warn { color: var(--op-warn); }
@@ -1603,7 +1526,6 @@
    needs its own guard. Without these the calibration progress panel, the
    settings disclosures and the alignment history are permanently on screen. */
 .cp[hidden] { display: none; }
-.cp-strip[hidden] { display: none; }
 .cal-adv[hidden] { display: none; }
 
 /* ── The rail's folding cards (operate.js wireDisclosures) ───────────────
@@ -1725,22 +1647,6 @@
 /* A plot is read, not glanced at: its axes and its legend are the point. It
    was 84 px tall in a strip, where its type was three pixels. Two to a row
    in the pane, and one to a row where the pane is narrow. */
-.op-cal-kept-strip {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 8px;
-    margin-top: 6px;
-}
-.op-cal-kept-img {
-    flex: 0 0 auto;
-    padding: 0;
-    border: 1px solid var(--op-line, var(--border));
-    border-radius: 4px;
-    background: #000;
-    cursor: pointer;
-}
-.op-cal-kept-img:hover, .op-cal-kept-img:focus-visible { border-color: var(--accent, #3b82f6); outline: none; }
-.op-cal-kept-img img { display: block; width: 100%; height: auto; border-radius: 3px; }
 
 /* ── STATUS SHAPES (vocabulary in main.css) ─────────────── */
 .op-btn.is-on::before { content: '● '; }
@@ -2177,10 +2083,6 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
    panel's Fit row, beside the fit it shows. Lit while its graphs are up. */
 #op-fit-show.is-on { color: var(--accent); border-color: var(--accent); }
 /* The run's graphs in the Fit pane: one to a row, the pane's width. */
-.op-cal-kept-strip.is-graphs { display: block; }
-.op-cal-kept-strip.is-graphs .cal-arc-graph { margin: 0 0 12px; }
-.op-cal-kept-strip.is-graphs .cal-arc-graph[hidden] { display: none; }
-.op-cal-kept-tabs { margin: 6px 0 10px; }
 .op-srcb:hover { color: var(--op-ink); }
 .op-srcb.is-on { background: var(--accent); color: var(--op-on-accent); font-weight: 600; }
 .op-srcb:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -2707,8 +2609,6 @@ body.ux-v2 .app-main:has(> #devices-content.active) > .v2-strip { display: none;
     gap: 8px;
 }
 .op-calfit-body > * { flex: 0 0 auto; margin: 0; }
-.op-calfit-body .op-preview { align-self: flex-start; max-width: 100%; }
-.op-calfit-body .op-preview-img { max-width: 100%; height: auto; display: block; }
 /* The options are as tall as what they say: a heading and three named lines.
    At Display's fixed height the heading and the Align line were cut off. */
 .op-calfit-opts .cal-opts, .op-calfit-opts .op-actions { margin: 0; gap: 6px 12px; justify-content: flex-start; }
@@ -2819,32 +2719,69 @@ details.op-calfit-opts .cal-group { min-width: 0; flex-basis: 100%; }
 .op-cal-then-align input:disabled + .op-label { opacity: 0.5; }
 #op-calib .cal-align { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--op-rule2); align-items: center; gap: 8px; }
 
-/* ── Calibration, as it happens: a card a step, appended ─────────────────── */
-.cp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; align-items: start; }
-.cp-card {
-    display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 7px 8px;
-    border: 1px solid var(--op-rule2); border-radius: 6px; background: var(--op-field);
+/* ── A calibration, a line a step, one open: the run going on, or kept ──── */
+.cp-head.is-ok .cp-phase { color: var(--accent-green, #3fb950); }
+.cp-head.is-bad .cp-phase { color: var(--op-warn); }
+.cp-owner { font: 11px var(--op-mono); color: var(--accent, #3b82f6); }
+/* Whose steps are shown: an embryo, a side. */
+.cp-secs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 6px; }
+.cp-secs[hidden] { display: none; }
+.cp-sec {
+    padding: 2px 8px; border: 1px solid var(--op-rule2); border-radius: 4px; background: none;
+    font: 11px var(--op-mono); color: var(--op-ink-dim); cursor: pointer;
 }
+.cp-sec.is-on { border-color: var(--accent, #3b82f6); color: var(--op-ink); }
+.cp-sec:focus-visible, .cp-step-head:focus-visible, .cp-thumb:focus-visible, .cp-graph:focus-visible {
+    outline: 2px solid var(--accent, #3b82f6); outline-offset: 1px;
+}
+.cp-steps { display: flex; flex-direction: column; border: 1px solid var(--op-rule2); border-radius: 6px; overflow: hidden; }
+.cp-step + .cp-step { border-top: 1px solid var(--op-rule2); }
+/* A step folded: its name and what it found. */
+.cp-step-head {
+    display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 5px 9px;
+    border: 0; background: none; text-align: left; cursor: pointer; color: var(--op-ink);
+}
+.cp-step-head::before { content: '▸'; flex: 0 0 auto; width: 9px; font-size: 10px; color: var(--op-ink-dim); }
+.cp-step.is-open > .cp-step-head::before { content: '▾'; }
+.cp-step-head:hover { background: var(--op-field); }
+.cp-step-title { flex: 0 0 auto; font: 600 12px var(--op-ui); white-space: nowrap; }
+.cp-step-says { flex: 1 1 auto; min-width: 0; font: 11px var(--op-mono); color: var(--op-ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cp-step-says.is-found { color: var(--op-ink); }
+.cp-step-n { flex: 0 0 auto; font: 11px var(--op-mono); color: var(--op-ink-dim); white-space: nowrap; }
+.cp-step.is-open { background: var(--op-field); }
 /* The step going on now. */
-.cp-card.is-live { border-color: var(--accent, #3b82f6); }
-.cp-card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.cp-card-title { font: 600 12px var(--op-ui); color: var(--op-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cp-card-who { font: 11px var(--op-mono); color: var(--accent, #3b82f6); white-space: nowrap; }
-.cp-card-n { margin-left: auto; font: 11px var(--op-mono); color: var(--op-ink-dim); white-space: nowrap; }
-.cp-card .cp-stage { min-height: 0; }
-.cp-card .cp-img { max-height: 190px; }
-.cp-card .cp-thumb { width: 30px; height: 30px; }
-/* How the run ended: the last card, the full width, one line. */
-.cp-card-end { grid-column: 1 / -1; }
-.cp-card-end.is-ok { border-color: var(--accent-green, #3fb950); }
-.cp-card-end.is-bad { border-color: var(--op-warn); }
-.cp-card-end .cp-cap { color: var(--op-ink); }
-@media (prefers-reduced-motion: reduce) { .cp-cards { scroll-behavior: auto; } }
-.cp-card-says { font: 11px var(--op-mono); color: var(--op-ink-dim); min-height: 0; }
-.cp-card-says:empty { display: none; }
-.cp-card-graph[hidden] { display: none; }
-.cp-card-graph svg { display: block; width: 100%; height: auto; }
-.cp-card .cp-stage[hidden] { display: none; }
+.cp-step.is-live > .cp-step-head .cp-step-title { color: var(--accent, #3b82f6); }
+/* The open step: its graph beside the exposure looked at, the exposures in a
+   row under them. Every box is held at its size, so what arrives fills its
+   place and moves nothing. */
+.cp-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr); gap: 6px 10px; padding: 2px 9px 8px; }
+.cp-detail[hidden] { display: none; }
+.cp-graph { align-self: center; aspect-ratio: 292 / 118; min-width: 0; border-radius: 4px; }
+.cp-graph svg { display: block; width: 100%; height: auto; }
+.cp-why { margin: 0; font: 11px/1.45 var(--op-mono); color: var(--op-ink-dim); }
+/* The exposure the step picked, marked on its graph. */
+.cp-graph .pt.is-pick .dot { stroke: var(--op-ink); r: 5.5; }
+.cp-detail .cp-stage { position: relative; aspect-ratio: 4 / 3; min-height: 0; max-height: 210px; justify-self: stretch; overflow: hidden; }
+.cp-detail .cp-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.cp-stage.can-open { cursor: zoom-in; }
+.cp-stage.is-gone::after { content: 'picture no longer held'; font: 11px var(--op-mono); color: var(--op-ink-dim); }
+.cp-said { margin: 0; padding: 8px; font: 11px/1.6 var(--op-mono); color: var(--op-ink); white-space: pre; }
+.cp-said[hidden] { display: none; }
+/* The step's exposures along its axis; the one picked is named. */
+.cp-thumbs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; }
+.cp-thumbs[hidden] { display: none; }
+.cp-thumb {
+    position: relative; aspect-ratio: 1; padding: 0; overflow: hidden; cursor: pointer;
+    border: 1px solid var(--op-rule2); border-radius: 3px; background: #000;
+}
+.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-thumb.is-on { border-color: var(--op-ink); }
+.cp-thumb.is-pick { border-color: var(--accent, #3b82f6); box-shadow: 0 0 0 1px var(--accent, #3b82f6); }
+.cp-thumb i {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 0 1px; font: 600 8px/11px var(--op-mono);
+    font-style: normal; text-align: center; letter-spacing: 0.02em; background: var(--accent, #3b82f6); color: #fff;
+}
+.cp-detail .cp-cap { grid-column: 1 / -1; min-height: 14px; }
 
 /* Galvo and piezo together, by the fit: a row under a side's two axes. */
 /* On the side's heading line, so the rail is no taller for it. */

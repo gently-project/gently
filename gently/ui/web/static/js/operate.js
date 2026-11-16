@@ -797,70 +797,6 @@ const OperateManager = (function () {
         const x = (e.clientX - rect.left) / sx, y = (e.clientY - rect.top) / sy;
         view.readAt(Math.floor((x - r.x) / r.w * view.w), Math.floor((y - r.y) / r.h * view.h));
     }
-    // ══ REACTIVE PREVIEW ════════════════════════════════════════════════════
-    // A routine that takes seconds and produces images has to show them where it
-    // was started. Calibrate used to be one blocking POST: the montage it builds
-    // was pushed to the viz server with nobody listening, so the only way to see
-    // what the sweep did was to decide, unprompted, to go and open the
-    // Calibration tab. The operator is watching the microscope, not hunting tabs.
-    //
-    // Presence-driven: it seats itself when images arrive and retires when they
-    // stop. There is deliberately no open or close control — an observer should
-    // be able to stand and watch without touching anything.
-    //
-    // RIG-NOTE: 45s is a guess at how long someone wants a finished sweep to stay
-    // readable before the pane goes quiet again. Tune it against real use; too
-    // short and the result vanishes mid-read, too long and a stale montage sits
-    // next to a live view.
-    const PREVIEW_IDLE_MS = 45000;
-    let _previewTimer = null;
-
-    function showPreview(title, meta, src) {
-        const fig = $('op-preview'), img = $('op-preview-img');
-        if (!fig || !img) return;
-        if (src) img.src = src;
-        const t = $('op-preview-title'), m = $('op-preview-meta');
-        if (t) t.textContent = title || '';
-        if (m) m.textContent = meta || '';
-        fig.hidden = false;
-        // Next frame, so the transition runs from the hidden state.
-        requestAnimationFrame(() => fig.classList.add('is-live'));
-        clearTimeout(_previewTimer);
-        _previewTimer = setTimeout(retirePreview, PREVIEW_IDLE_MS);
-    }
-
-    function retirePreview() {
-        const fig = $('op-preview');
-        clearTimeout(_previewTimer);
-        _previewTimer = null;
-        if (!fig || fig.hidden) return;
-        fig.classList.remove('is-live');
-        // Hide only after the fade, or it disappears with a jump.
-        setTimeout(() => { if (!fig.classList.contains('is-live')) fig.hidden = true; }, 300);
-    }
-
-    // Every image the server pushes lands here; we take the ones this pane is
-    // responsible for. Filtering on data_type rather than uid keeps a new routine
-    // one string away from having a preview.
-    const PREVIEW_KINDS = {
-        focus_montage: 'Focus sweep',
-    };
-
-    function onPushedImage(d) {
-        if (!d || !d.base64_png) return;
-        const title = PREVIEW_KINDS[d.data_type];
-        if (!title) return;
-        const md = d.metadata || {};
-        const bits = [];
-        if (md.pick) bits.push(`pick ${md.pick}`);
-        if (md.method) bits.push(md.method === 'vision' ? 'chosen by vision' : 'chosen by FFT');
-        if (Array.isArray(md.offsets) && md.offsets.length) {
-            bits.push(`${md.offsets.length} offsets, ${md.offsets[0]} to ${md.offsets[md.offsets.length - 1]} µm`);
-        }
-        if (md.reasoning) bits.push(String(md.reasoning));
-        showPreview(title, bits.join(' · '), `data:image/png;base64,${d.base64_png}`);
-    }
-
     function clearImg(imgId, phId, text) {
         const img = $(imgId), ph = $(phId), fit = img && img.closest('.op-cam-fit');
         if (img) img.classList.remove('has-frame');
@@ -1994,21 +1930,27 @@ const OperateManager = (function () {
 
     // ── what the calibration looked at ──────────────────────────────────────
     // The exposures and plots of each run are kept with the embryo. The latest
-    // run's plots are shown here; every image of it opens behind a click.
+    // run is shown as it was watched: the same cards (CalProgressPanel.show),
+    // drawn from the record. It was a second rendering of its own, graphs in
+    // tabs under the cards, beside a montage that seated and retired itself.
     let _calKept = null;     // {embryoId, run, images} as last shown
 
     async function renderCalKept(emb) {
         const host = $('op-cal-kept');
         if (!host) return;
+        const P = typeof CalProgressPanel !== 'undefined' ? CalProgressPanel : null;
         if (!emb) { host.hidden = true; return; }
         const id = emb.id;
+        // A run going on now, or one this page has just watched for this
+        // embryo, is on the cards already and is left there.
+        const free = () => P && !P.busy() && !P.watched(id);
         let runs = [];
         try {
             const d = await getJSON(`/api/calibration/records?embryo_id=${encodeURIComponent(id)}`);
             runs = (d && d.records) || [];
         } catch (_) { runs = []; }
         if (_selected !== id) return;            // the selection moved on while we asked
-        if (!runs.length) { host.hidden = true; _calKept = null; return; }
+        if (!runs.length) { host.hidden = true; _calKept = null; if (free()) P.show([]); return; }
         const last = runs[runs.length - 1];
         let images = [], record = last;
         try {
@@ -2026,48 +1968,18 @@ const OperateManager = (function () {
                 `${last.outcome || 'unknown'}: ${last.frames || 0} exposure${last.frames === 1 ? '' : 's'}, ` +
                 `${last.plots || 0} plot${last.plots === 1 ? '' : 's'}`;
         }
-        const strip = $('op-cal-kept-strip');
-        if (strip) {
-            // The run's graphs, drawn from its numbers as the Calibration tab
-            // draws them ("it shows the image based graphs and not the native
-            // graphs"). The saved pictures are for a page without the archive.
-            const arc = typeof CalibrationArchive !== 'undefined' ? CalibrationArchive : null;
-            const drawn = arc && arc.graphsHtml ? arc.graphsHtml(record, arc.steps(images), -1) : '';
-            strip.classList.toggle('is-graphs', !!drawn);
-            const plots = images.filter(i => (i.file || '').startsWith('plots/'));
-            const shown = plots.length ? plots : images.slice(-6);
-            strip.innerHTML = drawn || shown.map(i =>
-                `<button type="button" class="op-cal-kept-img" data-cal-img="${images.indexOf(i)}" title="${escapeHtml(calImageTitle(i))}">` +
-                `<img loading="lazy" src="${escapeHtml(i.url)}?max=720" alt="${escapeHtml(calImageTitle(i))}"></button>`).join('');
-            if (drawn) tabGraphs(strip);
+        if (free()) {
+            const side = (record.requested || {}).side;
+            P.show(images.map((i, n) => ({
+                data_type: i.kind, src: `${i.url}?max=480`, thumb: `${i.url}?max=96`, n,
+                metadata: i.side || !side ? i : { ...i, side },
+            })), {
+                title: `Latest run · ${t} · ${last.outcome || 'unknown'}`,
+                tone: last.outcome === 'calibrated' ? 'ok' : last.outcome ? 'bad' : undefined,
+                onOpen: f => openCalImage(f.n),
+            });
         }
         host.hidden = false;
-    }
-
-    // One graph at a time, chosen by name ("the graphs can be shown in some
-    // subtabs instead of top to bottom"): six graphs down the pane was three
-    // screens of scrolling. It opens on the fit, the run's answer.
-    function tabGraphs(strip) {
-        const figs = [...strip.querySelectorAll('.cal-arc-graph')];
-        if (figs.length < 2) return;
-        const bar = document.createElement('div');
-        bar.className = 'cal-arc-steps op-cal-kept-tabs';
-        bar.setAttribute('role', 'tablist');
-        const show = k => {
-            figs.forEach((f, i) => { f.hidden = i !== k; });
-            [...bar.children].forEach((b, i) => { b.classList.toggle('is-on', i === k); b.setAttribute('aria-selected', String(i === k)); });
-        };
-        figs.forEach((f, k) => {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'cal-arc-step';
-            b.setAttribute('role', 'tab');
-            b.textContent = (f.querySelector('figcaption b') || {}).textContent || `Graph ${k + 1}`;
-            b.addEventListener('click', () => show(k));
-            bar.appendChild(b);
-        });
-        strip.prepend(bar);
-        show(figs.length - 1);
     }
 
     function calImageTitle(i) {
@@ -4933,11 +4845,6 @@ const OperateManager = (function () {
         document.addEventListener('gently:halted', viewsHalted);
         const halt = $('op-halt');
         if (halt) halt.addEventListener('click', haltMotion);
-        const keptStrip = $('op-cal-kept-strip');
-        if (keptStrip) keptStrip.addEventListener('click', e => {
-            const b = e.target.closest('[data-cal-img]');
-            if (b) openCalImage(Number(b.dataset.calImg));
-        });
         const abAlign = $('op-ab-align');
         if (abAlign) abAlign.addEventListener('click', alignAB);
         const keptOpen = $('op-cal-kept-open');
@@ -5108,9 +5015,6 @@ const OperateManager = (function () {
             ['ACQUISITION_STARTED', 'ACQUISITION_COMPLETED', 'ACQUISITION_STOPPED',
              'ACQUISITION_FAILED', 'TIMELAPSE_STATE', 'VOLUME_ACQUIRED', 'IMAGE_ACQUIRED',
              'EMBRYO_TERMINATED'].forEach(ev => ClientEventBus.on(ev, () => { if (_pane === 'acquire') scheduleRenderRun(); }));
-            // Server-pushed stills (focus montages today). websocket.js emits
-            // this for every image; onPushedImage takes the kinds this pane owns.
-            ClientEventBus.on('IMAGE_RECEIVED', onPushedImage);
             // The agent asking for marks. One surface, two invocations.
             ClientEventBus.on('MARKING_IMAGE', onMarkingImage);
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {

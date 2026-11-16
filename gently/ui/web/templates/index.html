@@ -714,18 +714,11 @@
                           <span class="op-cap op-cap-warn" id="op-cal-refused-why"></span>
                           <button class="op-btn op-btn-warn" id="op-cal-anyway" type="button">Calibrate anyway</button>
                         </div>
-                        {# What the run is looking at, while it looks. Empty —
-                           and takes no room — until frames arrive. #}
+                        {# The run, a card a step: the one going on, or the
+                           latest one kept. #}
                         <div id="op-cal-progress"></div>
-                        <figure class="op-preview" id="op-preview" hidden>
-                          <img class="op-preview-img" id="op-preview-img" alt="Focus sweep preview">
-                          <figcaption class="op-preview-cap">
-                            <span class="op-preview-title" id="op-preview-title"></span>
-                            <span class="op-preview-meta" id="op-preview-meta"></span>
-                          </figcaption>
-                        </figure>
-                        {# What the calibration looked at, kept with the embryo: the
-                           latest run's plots, and every image behind a click. #}
+                        {# What the calibration kept with the embryo. The latest
+                           run is on the cards above; this is the way to the rest. #}
                         <div class="op-cal-kept" id="op-cal-kept" hidden>
                           <div class="op-cal-kept-head">
                             <span class="op-cap" id="op-cal-kept-say"></span>
@@ -736,7 +729,6 @@
                             <button class="op-nbtn" id="op-cal-kept-open" type="button"
                                     title="Open this run's folder in the file manager">Open folder</button>
                           </div>
-                          <div class="op-cal-kept-strip" id="op-cal-kept-strip"></div>
                         </div>
                       </div>
                     </div>
