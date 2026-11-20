@@ -78,52 +78,45 @@ before pushing. CI reads its Python version from `.python-version`, the same
 file `uv sync` reads, so the two cannot differ. The suite is expected to be fully green; a test that fails
 only when run with the others is a bug in the tests, not a known failure.
 
-## Releasing
+## Versions and releases
 
 Feedback is only actionable if it names a build. Keep that true.
 
-### Where the version lives
+### The number
 
-`gently/_version.py` — **one literal, nowhere else.** `pyproject.toml` derives
-it via `[tool.setuptools.dynamic]`, `gently/__init__.py` re-exports it, and the
-web server renders it. `tests/test_version_is_single_sourced.py` fails if a
-second copy reappears.
+`1.0.665`: the version, and the number of merges into `development`.
 
-### What the UI shows
+- **`1.0`** is `__version__` in `gently/_version.py`, the one place a person
+  writes it. Change it, through a pull request, when it is 1.1 or 2.0.
+  `pyproject.toml` derives it via `[tool.setuptools.dynamic]`;
+  `tests/test_version_is_single_sourced.py` fails if a second copy appears.
+- **`665`** nobody writes. `build_id()` counts the first-parent commits of
+  `development` up to the one that is running, so each merged pull request is
+  the next number and 665 is plainly older than 668. There is nothing to bump.
+- **`+local`** follows the number when the tree is not exactly one of those
+  merges: uncommitted edits to tracked files, or a branch `development` does
+  not have yet (the number is then where it branched off).
 
-`build_id()` — the version plus the commit, e.g. `1.0.0.dev1+g92816ea`, and
-`-dirty` when the tree had uncommitted tracked changes. It appears on the
-launch gate footer, on the Settings page, and as the OpenAPI version at
-`/openapi.json`. Outside a git checkout the bare version is shown.
+It appears on the launch gate footer (hover for the commit), on the Settings
+page with the commit and its date, at `/openapi.json`, and in every
+`session.yaml` as `gently_build` and `gently_commit`, so a session says what
+code acquired it.
 
-**Ask for the string from the launch gate in every bug report.** `1.0.0.dev1`
-alone names every commit between two tags; the suffix names exactly one, and
-`-dirty` distinguishes a real bug from someone's half-finished edit.
+**Ask for the number from the launch gate in every bug report.** A report that
+says `+local` did not come from a build anyone else has.
 
-### Cutting a release
+The count needs the history: a wheel, a copied folder or a shallow clone shows
+the bare `1.0`. The microscope computers run from a full clone and `git pull`.
+
+### Naming a release
+
+A release is a build someone was handed, given a name so it can be found
+again. On `development`, pulled, with no uncommitted edits:
 
 ```bash
-# 1. Bump the one literal
-$EDITOR gently/_version.py           # e.g. 1.0.0.dev1 -> 1.0.0.dev2
-
-# 2. Prove the package agrees with the module
-uv build --wheel --out-dir /tmp/gently-build
-ls /tmp/gently-build                 # filename must carry the new version
-
-# 3. Land it through a PR like anything else, then tag the merge commit
-git tag -a v1.0.0.dev2 -m "gently 1.0.0.dev2"
-git push upstream v1.0.0.dev2
-gh release create v1.0.0.dev2 --repo gently-project/gently \
-    --target development --title "gently 1.0.0.dev2" --notes-file <notes>
+just release
 ```
 
-Tag names are `v` + the literal, so `git tag` and `_version.py` read the same.
-Tag the commit that is actually on `development` after the merge — not the tip
-of the feature branch, which nobody else will ever check out.
-
-### Version numbers
-
-`1.0.0.devN` while 1.0.0 is being iterated with a reviewer; `1.0.0rcN` once the
-milestone is empty and only regressions are being fixed; `1.0.0` at release.
-Bump `devN` for each build handed to someone else, so their feedback has a
-distinct number to attach to.
+That creates the tag `v1.0.665` on the commit that is running and a GitHub
+release whose notes are the pull requests merged since the last one. Nothing
+is computed from tags, so skipping a release costs nothing.

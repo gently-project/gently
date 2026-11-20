@@ -69,3 +69,9 @@ lint:
 # What a pull request is checked for, in the order that fails fastest.
 [group('check')]
 check: lint test-js test
+
+# Name the build that is running as a release: tag v<build> on GitHub, notes from the pull requests since the last one.
+[group('release')]
+release build=`uv run --no-sync python -c "from gently._version import build_id; print(build_id())"` commit=`git rev-parse HEAD`:
+    {{ if build =~ '^\d+\.\d+\.\d+$' { "" } else { error("build " + build + " is not a merge on development: check out development, pull, and have no uncommitted edits") } }}
+    gh release create "v{{ build }}" --repo gently-project/gently --target {{ commit }} --title "gently {{ build }}" --generate-notes

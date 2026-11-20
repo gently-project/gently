@@ -1,9 +1,13 @@
 """The single source of truth for Gently's version.
 
+`__version__` is the part a person writes, `1.0`, and it changes when someone
+decides it is 1.1. The part after it nobody writes: `build_id()` counts the
+merges into `development` and reports `1.0.665`. Every merged pull request is
+the next number, so two builds can be put in order by looking at them, and no
+release needs a bump.
+
 `pyproject.toml` reads `__version__` from here (`[tool.setuptools.dynamic]`),
-`gently/__init__.py` re-exports it, and the web server renders it. The number
-is written in exactly one place, so a release cannot ship a package that says
-one version and a UI that says another.
+`gently/__init__.py` re-exports it, and the web server renders `build_id()`.
 
 This module deliberately imports nothing at the top level: setuptools reads
 `__version__` by parsing the file, and falls back to *importing* it when the
@@ -14,89 +18,100 @@ wheel. A file with one literal in it can always be parsed.
 
 from __future__ import annotations
 
-__version__ = "1.0.0rc1"
+__version__ = "1.0"
+
+_facts: tuple[str, str | None, str | None] | None = None
 
 
-def build_id() -> str:
-    """`__version__`, plus the commit it is running from inside a checkout.
+def _build() -> tuple[str, str | None, str | None]:
+    """(build id, commit, commit date), read from git once per process: the
+    code that is running is the code that was on disk when it started."""
+    global _facts
+    if _facts is None:
+        _facts = _read_git()
+    return _facts
 
-    A version string alone is not enough to route feedback while a dev release
-    is being iterated: everything between the `v1.0.0.dev1` tag and the next
-    one calls itself `1.0.0.dev1`, so "it's broken on dev1" can name a dozen
-    different trees. The commit makes a bug report land on an exact one, and
-    `-dirty` says the tree had uncommitted edits — which is the difference
-    between a real bug and someone's half-finished change.
 
-    Outside a checkout (an installed wheel, a copied directory) there is no
-    commit to report and the bare version is the honest answer.
-    """
+def _read_git() -> tuple[str, str | None, str | None]:
     import subprocess
     from pathlib import Path
 
     repo = Path(__file__).resolve().parents[1]
+    bare = (__version__, None, None)
     if not (repo / ".git").exists():
-        return __version__
+        return bare
 
-    def _git(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", *args],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
+    def git(*args: str) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", *args], cwd=repo, capture_output=True, text=True, timeout=5, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return out.stdout.strip() if out.returncode == 0 else None
 
-    try:
-        head = _git("rev-parse", "--short", "HEAD")
-        if head.returncode != 0:
-            return __version__
-        commit = head.stdout.strip()
-        # Tracked changes only — untracked screenshots and scratch files are
-        # not a different build.
-        dirty = "-dirty" if _git("diff", "--quiet", "HEAD").returncode == 1 else ""
-    except (OSError, subprocess.SubprocessError):
-        return __version__
+    head = git("rev-parse", "HEAD")
+    # A shallow clone has lost the history the number is counted from.
+    if not head or git("rev-parse", "--is-shallow-repository") != "false":
+        return bare
 
-    return f"{__version__}+g{commit}{dirty}"
+    # Tracked changes only: untracked screenshots and scratch files are not a
+    # different build.
+    dirty = git("diff", "--quiet", "HEAD") is None
+    # development as a remote has it (`origin` in a direct clone, `upstream` in
+    # a fork-based one), not the local branch, which can hold unmerged commits.
+    refs = git("for-each-ref", "--format=%(refname)", "refs/remotes/*/development") or ""
+    base, merged = head, False
+    for ref in refs.split():
+        chain = (git("rev-list", "--first-parent", ref) or "").split()
+        if head in chain:
+            merged = True
+            break
+        base = git("merge-base", head, ref) or base
+    count = git("rev-list", "--count", "--first-parent", base)
+    if not count:
+        return bare
+
+    local = "" if merged and not dirty else "+local"
+    commit = head[:8] + ("-dirty" if dirty else "")
+    return (f"{__version__}.{count}{local}", commit, git("log", "-1", "--format=%cI", "HEAD"))
+
+
+def build_id() -> str:
+    """`1.0.665`: the version and the number of merges into `development`.
+
+    The number is `git rev-list --count --first-parent` of the commit that is
+    running, so it goes up by one with each merged pull request and build 665
+    is plainly older than 668. `+local` follows it when the tree is not exactly
+    one of those merges: it has uncommitted edits, or it is a branch that
+    `development` does not have yet (the number is then where it branched off).
+    `build_commit()` says exactly which tree that is.
+
+    Outside a full checkout (an installed wheel, a copied directory, a shallow
+    clone) there is nothing to count and the bare version is the honest answer.
+    """
+    return _build()[0]
+
+
+def build_commit() -> str | None:
+    """The commit that is running, `a15d26ed`, with `-dirty` when tracked files
+    have uncommitted edits. None outside a checkout."""
+    return _build()[1]
 
 
 def build_date() -> str | None:
     """When the commit in the build id was made — ISO 8601, with its offset.
 
-    The build id names a tree exactly; it says nothing about how old that tree
-    is, and on a microscope the question behind "which version is this?" is
-    usually "is this from before the change". The version literal cannot
-    answer that — `1.0.0.dev1` is the same string for every commit after the
-    tag — so the date belongs to the commit the id already names, and moves
-    with it.
+    The build id puts builds in order; it says nothing about how old one is,
+    and on a microscope the question behind "which version is this?" is
+    usually "is this from before the change".
 
     The committer date, not the author date: a rebased or cherry-picked commit
     keeps its original author date, which would describe when the code was
     written rather than when this tree came to be.
 
     Returns None outside a checkout — an absent date is rendered as nothing
-    rather than as a guess. Note that with a `-dirty` build id the tree has
-    edits newer than this date; the suffix is what says so.
+    rather than as a guess. Note that a `+local` build can have edits newer than
+    this date; the suffix is what says so.
     """
-    import subprocess
-    from pathlib import Path
-
-    repo = Path(__file__).resolve().parents[1]
-    if not (repo / ".git").exists():
-        return None
-
-    try:
-        head = subprocess.run(
-            ["git", "log", "-1", "--format=%cI", "HEAD"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if head.returncode != 0:
-        return None
-    return head.stdout.strip() or None
+    return _build()[2]

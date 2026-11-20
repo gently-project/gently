@@ -841,10 +841,9 @@ def _computed(name: str) -> Any:
         found = fiji_path()
         return str(found) if found else "not found"
     if name == "build":
-        from gently._version import build_date, build_id
+        from gently._version import build_commit, build_date, build_id
 
-        stamp = build_date()
-        return f"{build_id()}" + (f" · {stamp}" if stamp else "")
+        return " · ".join(x for x in (build_id(), build_commit(), build_date()) if x)
     return None
 
 

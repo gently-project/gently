@@ -8,9 +8,10 @@ Feedback is only useful if it names a build. Two problems make that fail:
    `gently/_version.py` is now the only literal; pyproject derives it via
    `[tool.setuptools.dynamic]`.
 
-2. A version too coarse to identify a tree. Everything between the
-   `v1.0.0.dev1` tag and the next one calls itself `1.0.0.dev1`, so
-   `build_id()` appends the commit inside a checkout.
+2. A version that cannot tell two builds apart, or put them in order. A
+   literal bumped by hand stood at `1.0.0rc1` for 127 merges, and the commit
+   after it named a tree without saying which of two was newer. `build_id()`
+   counts the merges into `development` instead: `1.0.665`.
 
 Both are guarded here rather than in a release checklist, because a checklist
 is what fails at 2am before a handoff.
@@ -83,9 +84,35 @@ def test_build_id_extends_the_version_and_never_replaces_it() -> None:
         "quoting it would not name the release"
     )
     extra = bid[len(__version__) :]
-    assert extra == "" or re.match(r"^\+g[0-9a-f]{7,}(-dirty)?$", extra), (
+    assert extra == "" or re.match(r"^\.\d+(\+local)?$", extra), (
         f"unexpected build id suffix {extra!r}"
     )
+    assert PEP440.match(bid.removesuffix("+local")), f"{bid!r} is not a version"
+
+
+def test_the_number_is_the_merges_into_development_and_only_a_merge_is_bare() -> None:
+    """In this checkout: the count git gives, and `+local` unless the tree is
+    exactly a commit on a remote's development."""
+    import subprocess
+
+    from gently._version import __version__, build_commit, build_id
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+
+    if git("rev-parse", "--is-shallow-repository").stdout.strip() != "false":
+        assert build_id() == __version__  # CI's checkout: nothing to count
+        return
+    head = git("rev-parse", "HEAD").stdout.strip()
+    commit = build_commit()
+    assert commit and head.startswith(commit.removesuffix("-dirty"))
+    refs = git("for-each-ref", "--format=%(refname)", "refs/remotes/*/development").stdout.split()
+    on_development = any(head in git("rev-list", "--first-parent", r).stdout.split() for r in refs)
+    clean = git("diff", "--quiet", "HEAD").returncode == 0
+    assert build_id().endswith("+local") != (on_development and clean)
+    if on_development:
+        count = git("rev-list", "--count", "--first-parent", "HEAD").stdout.strip()
+        assert build_id().removesuffix("+local") == f"{__version__}.{count}"
 
 
 if __name__ == "__main__":
@@ -94,4 +121,18 @@ if __name__ == "__main__":
     test_version_module_stays_importable_without_dependencies()
     test_version_is_pep440()
     test_build_id_extends_the_version_and_never_replaces_it()
+    test_the_number_is_the_merges_into_development_and_only_a_merge_is_bare()
     print("ok")
+
+
+def test_a_session_records_the_build_that_started_it(tmp_path) -> None:
+    import yaml
+
+    from gently._version import build_commit, build_id
+    from gently.core.file_store import FileStore
+
+    FileStore(root=tmp_path).create_session("s1")
+    (written,) = tmp_path.glob("sessions/*/session.yaml")
+    record = yaml.safe_load(written.read_text(encoding="utf-8"))
+    assert record["gently_build"] == build_id()
+    assert record["gently_commit"] == build_commit()
