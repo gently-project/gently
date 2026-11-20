@@ -246,3 +246,11 @@ def test_the_agent_panel_is_collapsed_unless_settings_says_otherwise():
     assert s.store == "prefs:agentPanel" and s.applies == registry.LOAD
     chat = (JS / "agent-chat.js").read_text(encoding="utf-8")
     assert "SettingsStore.get('agentPanel', 'collapsed')" in chat
+
+
+def test_the_default_storage_root_is_an_absolute_path_on_every_system(monkeypatch):
+    """Off Windows "D:/Gently3" is relative, and made a folder named `D:` in the cwd."""
+    from gently.settings import StorageSettings
+
+    monkeypatch.delenv("GENTLY_STORAGE_PATH", raising=False)
+    assert StorageSettings().base_path.is_absolute()
