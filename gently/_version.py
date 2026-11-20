@@ -1,10 +1,10 @@
 """The single source of truth for Gently's version.
 
 `__version__` is the part a person writes, `1.0`, and it changes when someone
-decides it is 1.1. The part after it nobody writes: `build_id()` counts the
-merges into `development` and reports `1.0.665`. Every merged pull request is
-the next number, so two builds can be put in order by looking at them, and no
-release needs a bump.
+decides it is 1.1: that change is the release. The part after it nobody
+writes: `build_id()` counts the merges into `development` since that change
+and reports `1.0.12`. The merge that makes it 1.1 is `1.1.0`, the next one
+`1.1.1`.
 
 `pyproject.toml` reads `__version__` from here (`[tool.setuptools.dynamic]`),
 `gently/__init__.py` re-exports it, and the web server renders `build_id()`.
@@ -68,7 +68,13 @@ def _read_git() -> tuple[str, str | None, str | None]:
             merged = True
             break
         base = git("merge-base", head, ref) or base
-    count = git("rev-list", "--count", "--first-parent", base)
+    # The merge that last changed the `__version__` line is build 0 of this
+    # version; with none in the history, the count is from the beginning.
+    bump = git(
+        "log", "--first-parent", "--diff-merges=first-parent", "--no-patch", "-1",
+        "--format=%H", "-G^__version__ = ", base, "--", "gently/_version.py",
+    )  # fmt: skip
+    count = git("rev-list", "--count", "--first-parent", f"{bump}..{base}" if bump else base)
     if not count:
         return bare
 
@@ -78,11 +84,12 @@ def _read_git() -> tuple[str, str | None, str | None]:
 
 
 def build_id() -> str:
-    """`1.0.665`: the version and the number of merges into `development`.
+    """`1.0.12`: the version, and the merges into `development` since it began.
 
-    The number is `git rev-list --count --first-parent` of the commit that is
-    running, so it goes up by one with each merged pull request and build 665
-    is plainly older than 668. `+local` follows it when the tree is not exactly
+    The number is `git rev-list --count --first-parent` from the merge that
+    last changed `__version__` to the commit that is running, so it goes up by
+    one with each merged pull request and starts again at 0 when the version
+    changes. `+local` follows it when the tree is not exactly
     one of those merges: it has uncommitted edits, or it is a branch that
     `development` does not have yet (the number is then where it branched off).
     `build_commit()` says exactly which tree that is.
