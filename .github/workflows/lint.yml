@@ -84,8 +84,8 @@ jobs:
   #
   # It runs on Windows as well as Linux because the microscope computers are
   # Windows: drive letters, long paths and file locks behave differently there.
-  # Chromium is installed, so the tests that drive the app in a browser
-  # (tests/test_*_in_a_browser.py) run here rather than skip.
+  # Chromium is installed on the Linux one, so the tests that drive the app in
+  # a browser (tests/test_*_in_a_browser.py) run there rather than skip.
   tests:
     strategy:
       fail-fast: false
@@ -112,6 +112,9 @@ jobs:
         run: uv sync --locked
 
       - name: Install Chromium
+        # Linux only: the install takes three minutes on a Windows runner, and
+        # what the page does in Chromium does not depend on the system under it.
+        if: runner.os == 'Linux'
         run: uv run playwright install --with-deps chromium
 
       - name: pytest
