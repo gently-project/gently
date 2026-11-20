@@ -162,3 +162,21 @@ notes/issues-cache/
 # `git add -A` (d215003) and merged. The run writes them beside the repo root,
 # so they are one careless add away from coming back.
 detection_results/
+
+# Prototypes and one-off scripts that are not ready to be anyone else's problem.
+# Ignored, so ruff and mypy (exclude_gitignore) pass over them: the commit hook
+# checks the whole tree, and an untracked script elsewhere fails it for
+# unrelated work.
+/scratch/
+
+# Installed packages. paper/diagrams/node_modules (puppeteer and its tree) was
+# committed whole; `npm install` in that folder restores it from its lock file.
+node_modules/
+
+# Working screenshots. The ones already tracked stay tracked; a new one that
+# belongs in the repo is added with `git add -f`.
+/screenshots/
+/*.png
+
+# Output of the Playwright MCP server (page snapshots, console logs).
+.playwright-mcp/

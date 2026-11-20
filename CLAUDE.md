@@ -55,12 +55,21 @@ and that changes — read it rather than trusting a list here. What stays true:
 - **A job stops at its first failing step.** A ruff failure means the mypy step
   in that job never ran, so a green re-run after fixing ruff is not evidence
   that mypy passed.
-- **CI drives no browser.** It runs `pytest` and the JavaScript unit tests
-  under `tests/js/`, which cover pure modules only. What the UI looks like and
-  does under `gently/ui/web/static/js/` is not covered, so verify it by running
-  the app and exercising the UI by hand. Nothing checks those scripts for a
-  name that is never defined either: a variable left behind by a removal
-  throws only when its line runs.
+- **CI drives a browser for one surface only.** `pytest` there includes
+  `tests/test_the_hardware_timeline_in_a_browser.py`, which launches the app
+  and drives it in Chromium; the rest of what the UI looks like and does under
+  `gently/ui/web/static/js/` is still covered by nothing, so verify it by
+  running the app and exercising the UI by hand, or write the browser test
+  beside that one. Locally those tests skip until
+  `uv run playwright install chromium` has been run once.
+- **A name no UI script defines fails a test.**
+  `tests/js/undefined-names.test.mjs` has TypeScript read every script as one
+  program and fails on a name it cannot find. A new global that one script
+  reads from another, hung on `window` or defined in a file that also has
+  `module.exports`, needs a line in `tests/js/ui-globals.d.ts`.
+- **Prototypes go in `scratch/`.** The commit hook's mypy reads the whole
+  tree, so an untracked script anywhere else fails every commit. `scratch/` is
+  gitignored, and ruff and mypy pass over what git ignores.
 - **With no microscope, there is a simulated rig.** `tools/sim_rig.py` runs
   the real device layer on a stand-in for the Micro-Manager core (moving
   axes, both cameras, lasers, three embryos in the dish), so the Devices tab
