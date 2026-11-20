@@ -228,19 +228,6 @@ const HardwareTimelineMath = (() => {
         return (neg ? '-' : '') + body;
     }
 
-    // A moment on the rig's own clock, its offset said (the session may be
-    // read in another zone). With the offset not known, this browser's clock.
-    function fmtWall(t, offsetS) {
-        if (offsetS == null) {
-            return new Date(t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        }
-        const d = new Date((t + offsetS) * 1000);
-        const two = n => String(n).padStart(2, '0');
-        const a = Math.abs(offsetS), oh = Math.floor(a / 3600), om = Math.round((a % 3600) / 60);
-        const zone = offsetS === 0 ? 'UTC' : `UTC${offsetS < 0 ? '\u2212' : '+'}${oh}${om ? `:${two(om)}` : ''}`;
-        return `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}:${two(d.getUTCSeconds())} ${zone}`;
-    }
-
     function fmtDuration(s) {
         if (s < 1) return `${+(s * 1000).toPrecision(3)} ms`;
         if (s < 60) return `${s.toFixed(2)} s`;
@@ -358,7 +345,7 @@ const HardwareTimelineMath = (() => {
 
     return {
         SLOTS, sliceTimes, marks, rows, rounds, roundsOf, roundPause, zoomAt, pan, niceStep,
-        ticks, fmtClock, fmtDuration, fmtWall, hit, bins, slots, niceCeil, tempRange, roundView, stackStart,
+        ticks, fmtClock, fmtDuration, hit, bins, slots, niceCeil, tempRange, roundView, stackStart,
     };
 })();
 

@@ -28,7 +28,7 @@ flowchart LR
   CH --> OP
   DV -.->|no New Plan button| GAP((planning<br/>not discoverable))
   WS -.->|only via chat| CH
-  OP --> PT[Plans / Operations tab]
+  OP --> PT[Plans tab · Run tab]
 ```
 
 Tabs: home · experiment · embryos · plans · sessions · notebook · gallery ·
@@ -48,7 +48,7 @@ fan-out user-story audit + live browser walkthroughs).
 | 5 Operate (mark) | mark embryos · center embryo · import embryos |
 | 6 Operate (acquire) | lower SPIM→focus→acquire · run chooser · assign roles |
 | 7 Timelapse | start · monitor · pause/stop/resume |
-| 8 Operations/tactics | view plan · understand tactic · run tactic · library |
+| 8 The run & tactics | see the run and its hardware · run tactic · library |
 | 9 Temperature | configure thermalizer ✅ · setpoint · protocol · graph |
 | 10 Perception | stages over time · inspect trace · ground truth · export |
 | 11 Memory/campaigns | learnings · active mind · campaigns |

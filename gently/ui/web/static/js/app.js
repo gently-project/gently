@@ -95,9 +95,9 @@ function switchTab(tabName) {
         ReviewApp.init();
     }
 
-    // Lazy-init Experiment tab (mockup with stubbed data)
-    if (tabName === TABS.EXPERIMENT && typeof ExperimentOverview !== 'undefined') {
-        ExperimentOverview.init();
+    // The Run tab: the live session's acquisition and its hardware
+    if (tabName === TABS.EXPERIMENT && typeof RunView !== 'undefined') {
+        RunView.init();
     }
 
     // Lazy-init Notebook tab

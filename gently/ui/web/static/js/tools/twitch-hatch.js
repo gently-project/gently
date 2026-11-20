@@ -50,7 +50,7 @@ const TwitchHatchTool = {
     // pane shows it at ~720 px, so nothing visible is lost and a hover reads
     // the value. A click to mark still lands in fractions of the frame.
     u16(stem) { return `/api/sessions/${encodeURIComponent(this.sid)}/snapshot/${stem}.u16?scale=2`; },
-    hms(iso) { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); },
+    hms(iso) { return GentlyTime.format(iso, { hour: '2-digit', minute: '2-digit' }); },
 
     render() {
         const frames = this.frames();

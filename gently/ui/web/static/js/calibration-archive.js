@@ -18,6 +18,8 @@
  */
 const CalibrationArchive = (() => {
     const isNum = v => typeof v === 'number' && isFinite(v);
+    // Gently's clock: a page global in the browser, required in node's tests.
+    const Time = typeof GentlyTime !== 'undefined' ? GentlyTime : require('./gently-time.js');
     const signed = (v, d) => (v < 0 ? '−' : '+') + Math.abs(v).toFixed(d);
 
     /** A plot is a picture the run drew; anything else is an exposure. */
@@ -55,12 +57,12 @@ const CalibrationArchive = (() => {
 
     /** The clock time a run started, and its date when that is not today. */
     function startedAt(rec, now) {
-        const d = new Date(rec && rec.started_at);
-        if (isNaN(d)) return String((rec && rec.run) || '');
+        const d = Time.toDate(rec && rec.started_at);
+        if (!d) return String((rec && rec.run) || '');
         const n = now || new Date();
-        const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        const same = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
-        return same ? hm : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${hm}`;
+        const hm = Time.format(d, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, 'en-GB');
+        const day = x => Time.format(x, { year: 'numeric', month: '2-digit', day: '2-digit' }, 'en-GB');
+        return day(d) === day(n) ? hm : `${Time.format(d, { month: 'short', day: 'numeric' })} ${hm}`;
     }
 
     /** An exposure in words: what it was for and where the sheet stood. */

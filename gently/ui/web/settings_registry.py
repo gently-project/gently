@@ -124,6 +124,26 @@ SETTINGS: list[Setting] = [
         readers=((f"{_JS}/app.js", "gently-theme"),),
     ),
     Setting(
+        key="views.timeZone",
+        label="Time zone",
+        help="Where this microscope is. Gently keeps its times in UTC and shows every "
+        "one in this zone, so a page opened from anywhere says the times the rig saw. "
+        "Empty is the zone of the computer Gently runs on, found by itself; set an "
+        "IANA name such as Europe/Copenhagen only if that computer's zone is wrong.",
+        category="views",
+        type="text",
+        default="",
+        reach=RIG,
+        applies=RESTART,
+        store="env:GENTLY_TIME_ZONE",
+        source="ui.time_zone",
+        readers=(
+            ("gently/settings.py", "TIME_ZONE"),
+            ("gently/ui/web/routes/pages.py", "time_zone"),
+            (f"{_JS}/gently-time.js", "gently-time-zone"),
+        ),
+    ),
+    Setting(
         key="views.atrium",
         label="Open in the Atrium",
         help="The canvas surface instead of the tabs. Experimental.",

@@ -274,14 +274,6 @@ test('roundView: a round with its margins; one with no length gets a second to b
     assert.deepEqual(M.roundView({ a: 0, b: 0 }, bounds), { a: 0, b: 1 });
 });
 
-test('fmtWall: the rig\'s own clock, with its offset said', () => {
-    const t = 1794700000;            // 2026-11-14T23:46:40Z
-    assert.equal(M.fmtWall(t, -5 * 3600), '18:46:40 UTC−5');
-    assert.equal(M.fmtWall(t, 3600), '00:46:40 UTC+1');
-    assert.equal(M.fmtWall(t, 5.5 * 3600), '05:16:40 UTC+5:30');
-    assert.equal(M.fmtWall(t, 0), '23:46:40 UTC');
-});
-
 // A volume for round grouping: [a, b] its laser window.
 const vol = (embryo, side, a, b) => ({ embryo, side, recorded: true, lasers_on: a, scan_started: a, last_frame: b, lasers_off: b });
 const frame = (a, b) => ({ recorded: true, light_on: a, light_off: b, exposed: b, exposure_ms: 10 });

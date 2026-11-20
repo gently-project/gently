@@ -46,6 +46,11 @@ dependencies = [
     "pyyaml>=6.0",
     "matplotlib>=3.7.0",
     "python-dotenv>=1.0.0",
+    # The zone of the computer Gently runs on, as an IANA name ("Europe/Copenhagen"),
+    # which every page shows its times in unless Settings › Time zone says otherwise.
+    # Windows names its zones its own way ("Romance Standard Time"); tzlocal maps
+    # them, and brings tzdata there.
+    "tzlocal>=5.0",
     # Perception harness — installed as an editable sibling clone (see
     # [tool.uv.sources]); clone gently-project/gently-perception next to this repo.
     "gently-perception",

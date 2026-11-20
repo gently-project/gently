@@ -1,18 +1,16 @@
 """
-Strategy snapshot builder for the Experiment overview tab.
+Strategy snapshot: what a session's run is set to do beyond its plan.
 
 Reads ``session.yaml``, ``timelapse.yaml``, ``embryos/{eid}/embryo.yaml`` and
-replays ``timeline.jsonl`` to reconstruct the dynamic history the frontend
-swimlane view needs (phase boundaries, trigger firings, power history).
+replays ``timeline.jsonl``: each embryo's role, cadence over time, stop
+condition and dose; the rules on top of the plan (interval and power rules)
+and the monitoring modes. The Run tab's acquisition summary
+(``static/js/run-view.js``) reads it.
 
 This is a pure read-only view over the on-disk state. The live orchestrator
 saves its state every acquisition so the data is at most one-acquisition
 stale; the viz server doesn't need direct access to the running
 orchestrator object.
-
-Output shape mirrors the ``STUB_STRATEGY`` literal in
-``static/js/experiment-overview.js`` — see that file for the contract the
-frontend expects.
 """
 
 from __future__ import annotations

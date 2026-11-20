@@ -468,8 +468,7 @@ const EmbryosManager = {
     },
 
     formatTime(iso) {
-        const d = new Date(iso);
-        return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+        return GentlyTime.format(iso, { hour: '2-digit', minute: '2-digit', hour12: false });
     },
 
     _wireBfStrip() {
@@ -940,8 +939,7 @@ const EmbryosManager = {
             </div>`;
         html += '<div class="filmstrip-thumbs">';
         for (const f of shown) {
-            const when = f.when ? new Date(f.when) : null;
-            const t = when && !isNaN(when) ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const t = GentlyTime.format(f.when, { hour: '2-digit', minute: '2-digit' });
             const idx = every.indexOf(f);
             html += `<div class="filmstrip-cell filmstrip-bf-cell" data-bf-index="${idx}" title="brightfield overview, frame ${f.frame}${t ? ` — ${t}` : ''}">`;
             if (f.thumb) {

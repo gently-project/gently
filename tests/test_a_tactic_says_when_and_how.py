@@ -30,9 +30,6 @@ from gently.ui.web.routes.data import create_router
 
 ROOT = Path(__file__).resolve().parents[1]
 OPERATE = (ROOT / "gently" / "ui" / "web" / "static" / "js" / "operate.js").read_text("utf-8")
-OVERVIEW = (ROOT / "gently" / "ui" / "web" / "static" / "js" / "experiment-overview.js").read_text(
-    "utf-8"
-)
 AGENT = (ROOT / "gently" / "app" / "agent.py").read_text("utf-8")
 
 
@@ -226,10 +223,3 @@ class TestTheScreen:
         for key in ("live.started", "live.ended", "live.acquired", "struct.laser_config"):
             assert key in body, key
         assert "op-tcard-when" in body
-
-    def test_the_operations_tab_shows_a_done_tactics_live_facts(self):
-        """It already renders every flat live.* key of a done tactic; the
-        facts ride on that, so nothing there had to change."""
-        body = OVERVIEW[OVERVIEW.index("_renderOpsTactic(") :]
-        assert "t.state === 'active' || t.state === 'done'" in body
-        assert "ops-livefacts" in body

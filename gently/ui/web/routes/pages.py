@@ -1,9 +1,36 @@
 """Page routes - HTML template rendering."""
 
+import functools
+import logging
+
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from gently.settings import settings
+
+logger = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1)
+def _this_computers_zone() -> str:
+    """The zone of the computer Gently runs on, as an IANA name ("Europe/Copenhagen"),
+    or "" when it cannot say. Windows names its zones its own way; tzlocal maps them."""
+    try:
+        from tzlocal import get_localzone_name
+
+        return get_localzone_name() or ""
+    except Exception:
+        logger.warning(
+            "Could not tell this computer's time zone; pages show times in each browser's",
+            exc_info=True,
+        )
+        return ""
+
+
+def time_zone() -> str:
+    """The zone every page shows its times in: Settings › Time zone if set, else the
+    zone of the computer Gently runs on, else nothing (each browser's own)."""
+    return settings.ui.time_zone or _this_computers_zone()
 
 
 def create_router(server) -> APIRouter:
@@ -37,6 +64,8 @@ def create_router(server) -> APIRouter:
                 "active_section": "embryos",
                 "is_live": True,
                 "ux_v2": settings.ui.ux_v2,
+                # The zone every time on the page is shown in (gently-time.js).
+                "time_zone": time_zone(),
             },
         )
 

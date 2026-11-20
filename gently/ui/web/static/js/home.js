@@ -76,9 +76,9 @@ const HomeApp = (() => {
     function sessionTitle(g) {
         const named = g.session_name && g.session_name !== g.session_id && g.session_name !== 'unnamed';
         if (named) return g.session_name;
-        const t = g.created_at ? new Date(g.created_at) : null;
-        if (t && !isNaN(t)) {
-            return t.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const t = GentlyTime.toDate(g.created_at);
+        if (t) {
+            return GentlyTime.format(t, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
         return 'Session';
     }
@@ -123,7 +123,7 @@ const HomeApp = (() => {
         if (s < 3600) return `${Math.floor(s / 60)}m ago`;
         if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
         const d = Math.floor(s / 86400);
-        return d < 30 ? `${d}d ago` : new Date(t).toLocaleDateString();
+        return d < 30 ? `${d}d ago` : GentlyTime.format(t, { year: 'numeric', month: 'numeric', day: 'numeric' });
     }
 
     function empty(el, msg) {

@@ -54,8 +54,8 @@ const HardwareTimeline = (() => {
         };
         const theme = () => (document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark');
         const lightName = l => ({ led: 'LED', room: 'room light', none: 'no light' }[l] || l || 'light');
-        // On the rig's clock when the session says what it was.
-        const wall = t => M.fmtWall(t, S && S.seq ? S.seq.utc_offset_s : null);
+        // A moment on Gently's clock: the zone the microscope is set to, named.
+        const wall = t => `${GentlyTime.clock(t * 1000)} ${GentlyTime.zoneLabel(t * 1000)}`;
 
         function colours() {
             return {
@@ -986,7 +986,10 @@ const HardwareTimeline = (() => {
             resize();
         }
 
-        return { mount, destroy, state, pointAt, refresh };
+        // What this timeline read of its session, for the page around it.
+        const data = () => (S && S.seq ? S.seq : null);
+
+        return { mount, destroy, state, pointAt, refresh, data };
     }
 
     const main = create();

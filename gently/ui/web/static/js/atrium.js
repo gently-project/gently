@@ -50,10 +50,7 @@ const Atrium = (() => {
             { tab: 'calibration', title: 'CALIBRATION', x: 540, y: 700, w: 700, h: 460, crit: 0.85, children: [
                 { key: 'runs', title: 'runs', go: () => CalibrationManager.switchView('runs') },
               ] },
-            { tab: 'experiment',  title: 'EXPERIMENT',  x: 1280, y: 700, w: 700, h: 460, crit: 0.6, children: [
-                { key: 'overview', title: 'overview', go: () => ExperimentOverview.setView('overview') },
-                { key: 'rules',    title: 'rules',    go: () => ExperimentOverview.setView('rules') },
-              ] },
+            { tab: 'experiment',  title: 'RUN',         x: 1280, y: 700, w: 700, h: 460, crit: 0.6 },
             { tab: 'events',      title: 'EVENTS',      x: 40, y: 620, w: 460, h: 400, crit: 0.4,
               tol: 45, pressWhen: () => !ConnectionStatus.get().gentlyConnected, children: [
                 { key: 'log',      title: 'log',      go: () => switchSystemView('log') },
@@ -270,7 +267,7 @@ const Atrium = (() => {
             if (tab === 'embryos' && typeof EmbryosManager !== 'undefined') EmbryosManager.clearDetectionBadge?.();
             if (tab === 'plans' && typeof CampaignsApp !== 'undefined') CampaignsApp.init();
             if (tab === 'sessions' && typeof ReviewApp !== 'undefined') ReviewApp.init();
-            if (tab === 'experiment' && typeof ExperimentOverview !== 'undefined') ExperimentOverview.init();
+            if (tab === 'experiment' && typeof RunView !== 'undefined') RunView.init();
             if (tab === 'notebook' && typeof NotebookApp !== 'undefined') NotebookApp.init();
             if (tab === 'gallery' && typeof GalleryTab !== 'undefined') GalleryTab.init();
             inited.add(tab);          // AFTER the work: a throw must not count as done
@@ -494,7 +491,7 @@ const Atrium = (() => {
             if (rung <= (f._rung || 0)) return;
             f._rung = rung;
             const ch = CONFIG.release.ladder[rung].channel;
-            RELEASES.unshift({ t: new Date().toLocaleTimeString(), tab: cfg.tab, u: u.toFixed(2), ch });
+            RELEASES.unshift({ t: GentlyTime.format(new Date(), { hour: '2-digit', minute: '2-digit', second: '2-digit' }), tab: cfg.tab, u: u.toFixed(2), ch });
             if (RELEASES.length > 200) RELEASES.length = 200;
             // R6 calls this log "how the policy gets defended the first time it
             // wakes someone up" — so it has to outlive a refresh.

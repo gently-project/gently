@@ -1959,8 +1959,8 @@ const OperateManager = (function () {
         } catch (_) { images = []; }
         if (_selected !== id) return;
         _calKept = { embryoId: id, run: last.run, images };
-        const when = last.started_at ? new Date(last.started_at) : null;
-        const t = when && !isNaN(when) ? when.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : last.run;
+        const when = GentlyTime.toDate(last.started_at);
+        const t = when ? GentlyTime.format(when, { dateStyle: 'medium', timeStyle: 'short' }) : last.run;
         const say = $('op-cal-kept-say');
         if (say) {
             say.textContent = `${runs.length} run${runs.length === 1 ? '' : 's'} kept · latest ${t}, ` +
@@ -3831,8 +3831,7 @@ const OperateManager = (function () {
         const last = _bfFrames[_bfFrames.length - 1];
         const perRound = Math.max(1, Number(last.fields) || 1);
         return _bfFrames.slice(-perRound).map((f, i) => {
-            const at = f.captured_at ? new Date(f.captured_at) : null;
-            const when = at && !isNaN(at) ? at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+            const when = GentlyTime.format(f.captured_at, { hour: '2-digit', minute: '2-digit' });
             const field = perRound > 1 ? `field ${Number(f.field) > 0 ? f.field : i + 1}` : 'overview';
             return {
                 id: `bf:${f.stem}`, label: field,

@@ -210,6 +210,10 @@ class UISettings:
     # usually unpacked (gently/core/reveal.py). Never Micro-Manager's ImageJ:
     # starting that starts Micro-Manager, which takes the microscope's ports.
     fiji_path: str = field(default_factory=lambda: _env("FIJI_PATH", ""))
+    # Where this microscope is, as an IANA zone ("Europe/Copenhagen"). Gently
+    # keeps its times in UTC and every page shows them in this zone; empty is
+    # the zone of the computer Gently runs on (tzlocal), found by itself.
+    time_zone: str = field(default_factory=lambda: _env("TIME_ZONE", ""))
 
 
 @dataclass(frozen=True)
