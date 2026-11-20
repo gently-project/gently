@@ -414,25 +414,31 @@ def _one_frame(tmp_path, light, room="off"):
     orch._bf = bf
     asyncio.run(orch._capture_bf_field(bf, 1, 0, 1, None))
     snap = store.list_snapshots("s1")[0]
-    # Whole microseconds, which is what the record keeps. On Windows two reads
-    # of the clock can share a tick, and the finer of them then looks later.
-    return (snap.get("metadata") or {}), {k: int(t * 1e6) / 1e6 for k, t in log}
+    return (snap.get("metadata") or {}), dict(log)
+
+
+# The record keeps whole microseconds and the log here does not. On Windows the
+# two reads of the clock can share a tick, and the record is then the earlier
+# of them by the fraction it dropped.
+_US = 2e-6
 
 
 def test_a_brightfield_frame_keeps_when_its_led_was_on(tmp_path):
     md, at = _one_frame(tmp_path, "led")
     on, off = _epoch(md["light_on_utc"]), _epoch(md["light_off_utc"])
     # On once the LED opened, before the settle and the frame; off once it closed.
-    assert at["led Open"] <= on <= at["capture"] <= at["led Closed"] <= off
-    assert on + 0.05 <= at["capture"]
+    assert at["led Open"] - _US <= on <= at["capture"] <= at["led Closed"] <= off + _US
+    # The settle is 0.05 s; asyncio may end a sleep one clock tick early, and a
+    # Windows tick is 16 ms.
+    assert on + 0.03 <= at["capture"]
     # The camera's own moment for the frame, from the device.
     assert md["exposed_utc"] == "2026-11-14T23:46:40.500000Z"
 
 
 def test_a_room_light_this_frame_switched_has_a_window_too(tmp_path):
     md, at = _one_frame(tmp_path, "room")
-    assert at["room on"] <= _epoch(md["light_on_utc"]) <= at["capture"]
-    assert at["room off"] <= _epoch(md["light_off_utc"])
+    assert at["room on"] - _US <= _epoch(md["light_on_utc"]) <= at["capture"]
+    assert at["room off"] - _US <= _epoch(md["light_off_utc"])
 
 
 def test_a_room_light_that_did_not_come_on_has_no_window(tmp_path):
