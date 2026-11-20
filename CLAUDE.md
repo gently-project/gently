@@ -32,9 +32,15 @@ gh pr create --repo gently-project/gently --base development
 
 Check `git remote -v` before pushing: in a direct clone `origin` *is* the org
 repo; in a fork-based clone `origin` is your fork and `upstream` is the org repo.
-Two `gh` defaults will misfile a PR — the repo's default branch is `main` while
-PRs target `development`, and with no `gh` default repo set it resolves from
-whichever remote it finds. Pass `--base development --repo gently-project/gently`.
+`development` is the repo's default branch, so a fresh clone and `gh pr create`
+start there; `main` moves only at a release. In a fork-based clone `gh` with no
+default repo set resolves from whichever remote it finds and can file the PR
+against the fork: run `gh repo set-default gently-project/gently` once, or pass
+`--repo gently-project/gently`.
+
+`development` is protected: the four checks in `lint.yml` must pass before a
+merge, for admins too, and nothing is pushed to it directly. A pull request
+with a merge conflict gets no CI run at all; merge `development` into it first.
 
 ### Before committing
 
