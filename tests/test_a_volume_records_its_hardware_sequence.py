@@ -414,7 +414,9 @@ def _one_frame(tmp_path, light, room="off"):
     orch._bf = bf
     asyncio.run(orch._capture_bf_field(bf, 1, 0, 1, None))
     snap = store.list_snapshots("s1")[0]
-    return (snap.get("metadata") or {}), dict(log)
+    # Whole microseconds, which is what the record keeps. On Windows two reads
+    # of the clock can share a tick, and the finer of them then looks later.
+    return (snap.get("metadata") or {}), {k: int(t * 1e6) / 1e6 for k, t in log}
 
 
 def test_a_brightfield_frame_keeps_when_its_led_was_on(tmp_path):

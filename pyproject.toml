@@ -114,6 +114,9 @@ dev = [
     # once. Dev-only; never in the published runtime.
     "playwright>=1.44.0",
     "httpx2>=2.13.1",
+    # `pytest -n auto`: the suite on every core. Each test has a storage root
+    # of its own (tests/conftest.py), so they do not meet.
+    "pytest-xdist>=3.8.0",
 ]
 # Everything the microscope computer needs to drive hardware. Default-on (see
 # [tool.uv] default-groups); drop on a machine with no microscope via
@@ -194,5 +197,8 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.10"
 ignore_missing_imports = true
 explicit_package_bases = true
+# What git ignores, mypy skips: `mypy .` then reads the files CI will read, and
+# a prototype in scratch/ cannot fail the commit hook for unrelated work.
+exclude_gitignore = true
 mypy_path = "."
 

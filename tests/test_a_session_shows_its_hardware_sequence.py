@@ -48,9 +48,17 @@ RECORDED = {
 }
 
 
+def _a_clock_a_test_can_set():
+    """Windows has no tzset: a process there cannot change the zone its local
+    times are read in, so the tests that need this PC in a known zone skip."""
+    if not hasattr(time, "tzset"):
+        pytest.skip("this system's local zone cannot be set from a test")
+
+
 @pytest.fixture
 def utc_clock(monkeypatch):
     """The PC's local time is UTC here, so an old local stamp reads plainly."""
+    _a_clock_a_test_can_set()
     monkeypatch.setenv("TZ", "UTC")
     time.tzset()
     yield
@@ -307,6 +315,7 @@ def test_a_reading_that_is_not_a_number_is_left_out_not_a_broken_page(tmp_path, 
 @pytest.fixture
 def pc_an_hour_ahead_of_utc(monkeypatch):
     """This PC's clock is an hour ahead of UTC (POSIX: zone "LOCAL", UTC+1)."""
+    _a_clock_a_test_can_set()
     monkeypatch.setenv("TZ", "LOCAL-1")
     time.tzset()
     yield

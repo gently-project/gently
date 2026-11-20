@@ -2025,6 +2025,7 @@ function renderTimelinePlanView() {
                         const start = startDay[item.id] || 0;
                         const dur = item.estimated_days || 1;
                         const fill = TYPE_COLORS[item.type] || STATUS_COLORS.planned;
+                        const icon = TYPE_ICONS[item.type] || '';
                         const statusAccent = item.status && item.status !== 'planned' ? (STATUS_COLORS[item.status] || '') : '';
                         const dim = isDim(item) ? ' dim' : '';
                         const styles = `top:${idx * rowHeight + 4}px;left:${start * dayWidth}px;width:${dur * dayWidth - 2}px;background:${fill}` +
