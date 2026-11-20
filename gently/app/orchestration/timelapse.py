@@ -24,7 +24,8 @@ from typing import TYPE_CHECKING, Any, Optional
 import numpy as np
 
 from gently.core import EventType, get_event_bus, spim_alignment
-from gently.core.file_store import utc_of_epoch
+from gently.core.file_store import utc_now, utc_of_epoch
+from gently.core.hardware_sequence import record_of
 from gently.core.imaging import (
     apply_crop_bounds,
     compute_crop_bounds,
@@ -200,6 +201,9 @@ class TimelapseOrchestrator:
         self._volumes = True
         self._run_stop: StopCondition | None = None
         self._bf_failures = 0
+        # When the brightfield light last went on and off (UTC), for its frame.
+        self._bf_lit_at: str | None = None
+        self._bf_unlit_at: str | None = None
 
         # The run's laser preset. Every volume routes its own lines as it
         # starts, so a preset set once on the controller lasts until the first
@@ -1012,6 +1016,8 @@ class TimelapseOrchestrator:
         file. Whether there is a frame to show, and when it was taken."""
         lit: str | None = None
         lit_led = False
+        # When this frame's light went on and off, set by the two calls below.
+        self._bf_lit_at = self._bf_unlit_at = None
         try:
             if pos:
                 await self.client.move_to_position(float(pos["x"]), float(pos["y"]))
@@ -1062,7 +1068,13 @@ class TimelapseOrchestrator:
                     "led_intensity_pct": bf.led_intensity_pct if lit_led else None,
                     "references": getattr(self, "_bf_references", None),
                     "captured_at": captured_at.isoformat(),
+                    # The light this frame switched, on and off; none when it
+                    # found the light on already, or used none of its own.
+                    "light_on_utc": self._bf_lit_at,
+                    "light_off_utc": self._bf_unlit_at,
                 }
+                if (result or {}).get("acquired_at_epoch"):
+                    meta["exposed_utc"] = utc_of_epoch(result["acquired_at_epoch"])
                 try:
                     if image_path and Path(image_path).exists():
                         stored = self._store.register_snapshot(
@@ -1134,12 +1146,14 @@ class TimelapseOrchestrator:
                         res.get("error") or res,
                     )
                     return None
+                self._bf_lit_at = utc_now()
                 await asyncio.sleep(self._bf_light_settle_s)
                 return "room"
             if light == "led":
                 await self._bf_led_brightness(frame)
                 began = "led"
                 await self.client.set_led("Open")
+                self._bf_lit_at = utc_now()
                 await asyncio.sleep(self._bf_light_settle_s)
                 return "led"
         except asyncio.CancelledError:
@@ -1191,6 +1205,7 @@ class TimelapseOrchestrator:
                 else:
                     res = await self.client.set_led("Closed")
                 if not (isinstance(res, dict) and res.get("success") is False):
+                    self._bf_unlit_at = utc_now()
                     return
                 why: Any = res.get("error") or res
             except Exception as exc:
@@ -1678,7 +1693,7 @@ class TimelapseOrchestrator:
                         # Pass volume_path if available (zero-copy from device).
                         # The side travels only when it is not A, so a callback
                         # written for one view keeps working.
-                        extra = {"side": side} if side != "A" else {}
+                        extra: dict[str, Any] = {"side": side} if side != "A" else {}
                         # Likewise the stack's own time, when the device gave one.
                         # The store writes it in local time and in UTC.
                         if r.get("acquired_at_epoch"):
@@ -1686,6 +1701,9 @@ class TimelapseOrchestrator:
                                 float(r["acquired_at_epoch"])
                             ).isoformat()
                             extra["acquired_at_utc"] = utc_of_epoch(r["acquired_at_epoch"])
+                        # And what the hardware did for it, when the device said.
+                        if r.get("sequence"):
+                            extra["hardware"] = record_of(r["sequence"])
                         callback_result = await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,

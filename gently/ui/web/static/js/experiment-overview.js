@@ -11,7 +11,7 @@
 const ExperimentOverview = {
     initialized: false,
     expandedMode: null,
-    activeView: 'overview',  // 'overview' | 'rules'
+    activeView: 'hardware',  // 'hardware' (the live session's timeline, the main view) | 'overview' | 'rules'
     activeStrategy: null,    // last fetched strategy snapshot (rules view)
     activePlan: null,        // last fetched/loaded operation plan (overview spine)
     isLive: false,           // true when data came from the API
@@ -209,6 +209,15 @@ const ExperimentOverview = {
         }
         // Tear down any prior ticker before we blow away the SVG it pointed at.
         this._stopNowTicker();
+        // The hardware view keeps its own timeline current (refresh() on each
+        // volume and frame): a plan re-render must not reset where it is zoomed.
+        if (this.activeView === 'hardware') {
+            if (this._hw && this._hwSid === this._currentSessionId && root.querySelector('.ops-hwt')) return;
+            root.innerHTML = '';
+            this._renderHardware(root);
+            return;
+        }
+        if (this._hw) this._hw.destroy();
         // Reset plan-picker state on each full render so the picker doesn't persist
         // across tactic-event-driven re-renders.
         this._planPickerOpen = false;
@@ -246,6 +255,33 @@ const ExperimentOverview = {
         }
     },
 
+
+    // What the instrument has done in the live session (hardware-timeline.js),
+    // kept current as its volumes and brightfield frames land.
+    _renderHardware(root) {
+        const sid = this._currentSessionId;
+        if (!sid || typeof HardwareTimeline === 'undefined') {
+            root.innerHTML = '<div class="empty-tab">No live session: what the hardware does in one will appear here.</div>';
+            return;
+        }
+        const host = document.createElement('div');
+        host.className = 'hwt-host ops-hwt';
+        root.appendChild(host);
+        this._hw = this._hw || HardwareTimeline.create();
+        this._hwSid = sid;
+        this._hw.mount(host, sid);
+        if (!this._hwSubscribed) {
+            this._hwSubscribed = true;
+            let timer = null;
+            const later = () => {
+                if (this.activeView !== 'hardware' || !this._hw) return;
+                clearTimeout(timer);
+                timer = setTimeout(() => this._hw.refresh(), 1500);
+            };
+            ClientEventBus.on('VOLUME_ACQUIRED', later);
+            ClientEventBus.on('IMAGE_ACQUIRED', later);
+        }
+    },
 
     _stopNowTicker() {
         if (this._nowTickerHandle) {

@@ -988,6 +988,9 @@ const ReviewApp = {
                             Tools
                             <span class="tab-count">${(s.tools || []).length}</span>
                         </button>
+                        <button class="tab ${this.currentTab === 'hardware' ? 'active' : ''}" data-tab="hardware" title="What the instrument did, and when: lights, lasers, exposures, temperature">
+                            Hardware
+                        </button>
                     </div>
                     <label class="session-scrub" id="session-scrub" hidden title="Puts every picture at one moment of the run">
                         <input type="range" id="session-scrub-in" min="1" max="1" value="1" aria-label="The timepoint every picture shows">
@@ -1050,6 +1053,7 @@ const ReviewApp = {
         this.setupTabHandlers();
         this.wireScrub();
         this.fitTiles();
+        this.mountHardware();
         if (!this._fitWatch && typeof ResizeObserver !== 'undefined') {
             this._fitWatch = new ResizeObserver(() => this.fitTiles());
             this._fitWatch.observe(content);
@@ -1673,6 +1677,7 @@ const ReviewApp = {
                 document.getElementById('session-tab-content').innerHTML = this.renderCurrentTab();
                 this.wireScrub();
                 this.mountTools();
+                this.mountHardware();
                 this.fitTiles();
             });
         });
@@ -1683,8 +1688,20 @@ const ReviewApp = {
             case 'embryos': return this.renderEmbryosTab();
             case 'conversation': return this.renderConversationTab();
             case 'tools': return this.renderToolsTab();
+            case 'hardware': return '<div class="hwt-host" id="hwt-host"></div>';
             default: return '';
         }
+    },
+
+    // ---- hardware: what the instrument did, and when (hardware-timeline.js) --
+    mountHardware() {
+        if (typeof HardwareTimeline === 'undefined') return;
+        const host = document.getElementById('hwt-host');
+        if (this.currentTab !== 'hardware' || !host || !this.currentSession) {
+            HardwareTimeline.destroy();
+            return;
+        }
+        HardwareTimeline.mount(host, this.currentSession.session_id);
     },
 
     // ---- tools: optional panes a session imports at any time ---------------

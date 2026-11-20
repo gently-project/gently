@@ -947,6 +947,21 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="Session not found")
         return data
 
+    @router.get("/api/sessions/{session_id}/hardware-sequence")
+    async def get_hardware_sequence(session_id: str):
+        """What the instrument did in a session, on one clock: each volume's
+        lasers and frames, each brightfield frame's light, the temperature.
+        For the Sessions view's hardware timeline."""
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        if store.get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        from gently.core.hardware_sequence import session_sequence
+
+        data = await asyncio.to_thread(session_sequence, store, session_id)
+        return {"session_id": session_id, **data}
+
     def _what_to_look_at(
         store, sid: str, snapshot: dict | None = None
     ) -> tuple[list[dict], list[dict]]:

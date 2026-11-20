@@ -768,6 +768,8 @@ td.slog-proj { overflow: visible; position: relative; }
 .session-viewbar .session-tabs { margin: 0; border-bottom: 0; flex: 0 0 auto; }
 .session-viewbar .session-tabs .tab { padding: 4px 10px; font-size: 12.5px; }
 .session-scrub { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
+/* display:flex outranks the hidden attribute: off the Embryos tab it is hidden. */
+.session-scrub[hidden] { display: none; }
 .session-scrub input { flex: 1 1 auto; min-width: 60px; margin: 0; accent-color: var(--accent); }
 .session-scrub-at { flex: 0 0 auto; min-width: 86px; font: 11.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text-muted); white-space: nowrap; }
 .session-view .session-tab-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: 0; }
@@ -850,3 +852,64 @@ td.slog-proj { overflow: visible; position: relative; }
 .slog td > .chip, .slog td > .session-file-link, .slog td > span, .slog td > a { margin-top: 0; margin-bottom: 0; vertical-align: middle; }
 .slog td { vertical-align: middle; }
 .slog td.slog-proj { line-height: 16px; }
+
+/* The hardware timeline (hardware-timeline.js): what the instrument did, and
+   when. Marks are drawn on a canvas; everything with words is HTML in the
+   text tokens, so it themes and reads like the rest of the view. */
+.hwt { display: flex; flex-direction: column; gap: 8px; padding: 4px 2px 8px; }
+.hwt-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.hwt-legend { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.hwt-key {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px;
+    background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+.hwt-key:hover { background: var(--bg-hover); }
+.hwt-key[aria-pressed="false"] { color: var(--text-muted); }
+.hwt-key[aria-pressed="false"] .hwt-swatch { opacity: 0.25; }
+.hwt-key-static { cursor: default; border-style: dashed; }
+.hwt-key-static:hover { background: transparent; }
+.hwt-swatch { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+.hwt-swatch-hatch { background: repeating-linear-gradient(135deg, var(--text-muted) 0 1px, transparent 1px 4px); box-shadow: inset 0 0 0 1px var(--text-muted); }
+.hwt-key[hidden] { display: none; }
+.hwt-tools { display: flex; align-items: center; gap: 6px; }
+.hwt-where { font-size: 12px; color: var(--text-muted); min-width: 12ch; text-align: center; font-variant-numeric: tabular-nums; }
+.hwt-btn {
+    padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-card); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+.hwt-btn:hover { background: var(--bg-hover); }
+.hwt-btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.hwt-plot {
+    position: relative; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-card); cursor: crosshair; touch-action: none; user-select: none; overflow: hidden;
+}
+.hwt-plot:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hwt-canvas { display: block; }
+/* The timeline's words are HTML over the canvas, drawn like the page's own. */
+.hwt-overlay { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.hwt-row-label { position: absolute; left: 0; text-align: right; line-height: 14px; }
+.hwt-row-label strong { display: block; font-size: 12px; font-weight: 600; color: var(--text); }
+.hwt-row-label span { display: block; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.hwt-axis { position: absolute; left: 0; right: 0; height: 30px; }
+.hwt-tick { position: absolute; top: 0; width: 80px; text-align: center; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hwt-caption { position: absolute; top: 15px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.hwt-tip {
+    position: absolute; z-index: 2; pointer-events: none; max-width: 340px;
+    padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 6px;
+    background: var(--bg-card); box-shadow: 0 4px 14px var(--panel-edge-shadow); font-size: 12px;
+}
+.hwt-tip-head { color: var(--text-muted); margin-bottom: 4px; }
+.hwt-tip-row { display: flex; gap: 8px; align-items: baseline; line-height: 1.45; }
+.hwt-tip-row strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hwt-tip-row span { color: var(--text-muted); }
+.hwt-hint, .hwt-note { margin: 0; font-size: 11.5px; color: var(--text-muted); }
+.hwt-note { border-left: 2px solid var(--border-strong); padding-left: 8px; }
+.hwt-table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.hwt-table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.hwt-table th, .hwt-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.hwt-table th { position: sticky; top: 0; background: var(--bg-card); color: var(--text-muted); font-weight: 600; }
+.hwt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (forced-colors: active) {
+    .hwt-swatch { forced-color-adjust: none; }
+}

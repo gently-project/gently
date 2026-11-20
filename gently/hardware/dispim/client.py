@@ -6,6 +6,7 @@ device_layer.py server (Bluesky plans + SAM detection).
 """
 
 import asyncio
+import json
 import logging
 import traceback
 from typing import Any
@@ -52,6 +53,9 @@ class DiSPIMMicroscope(Microscope):
     >>> # Acquire volume
     >>> volume_data = await client.acquire_volume(num_slices=50)
     """
+
+    # The names a bottom-camera frame is read out under.
+    _BOTTOM_KEYS = ("bottom_camera", "bottom_camera_image", "Bottom PCO")
 
     def __init__(
         self,
@@ -495,6 +499,22 @@ class DiSPIMMicroscope(Microscope):
     # Imaging
     # =========================================================================
 
+    @staticmethod
+    def _sequence_of(result: dict, scanner_key: str) -> dict | None:
+        """The hardware sequence a scanner read out beside its stack: its
+        lasers' preset, lines and powers, and the moments its lasers came on,
+        its scan began, its frames came and its lasers went out."""
+        for ev in (result.get("documents") or {}).get("events", []):
+            raw = (ev.get("data") or {}).get(f"{scanner_key}_sequence")
+            if raw is None:
+                continue
+            try:
+                seq = json.loads(raw) if isinstance(raw, str) else raw
+            except ValueError:
+                return None
+            return seq if isinstance(seq, dict) else None
+        return None
+
     def _extract_image(
         self, result: dict, candidate_keys: list[str], multi_event: bool = False
     ) -> tuple | None:
@@ -671,6 +691,9 @@ class DiSPIMMicroscope(Microscope):
                 if began:
                     ret["acquired_at_epoch"] = float(began)
                     break
+            seq = self._sequence_of(result, scanner_name)
+            if seq is not None:
+                ret["sequence"] = seq
             return ret
 
         return {"error": result.get("error", "Acquisition failed"), "success": False}
@@ -721,6 +744,9 @@ class DiSPIMMicroscope(Microscope):
                 if began:
                     ret["acquired_at_epoch"] = float(began)
                     break
+            seq = self._sequence_of(result, key)
+            if seq is not None:
+                ret["sequence"] = seq
             out[side] = ret
         return out
 
@@ -1331,9 +1357,7 @@ class DiSPIMMicroscope(Microscope):
             "capture_bottom_image_plan", kwargs={"bottom_camera": "bottom_camera"}
         )
 
-        extracted = self._extract_image(
-            result, ["bottom_camera", "bottom_camera_image", "Bottom PCO"]
-        )
+        extracted = self._extract_image(result, list(self._BOTTOM_KEYS))
         if extracted:
             arr, fpath = extracted
             # _submit_plan_and_wait has already swapped the staged file for its
@@ -1346,7 +1370,15 @@ class DiSPIMMicroscope(Microscope):
                 from pathlib import Path
 
                 fpath = Path(str(result["volume_path"]))
-            return {"image": arr, "image_path": fpath}
+            out: dict[str, Any] = {"image": arr, "image_path": fpath}
+            # When the camera had its frame, as the device read it.
+            for ev in (result.get("documents") or {}).get("events", []):
+                stamps = ev.get("timestamps") or {}
+                took = next((stamps[k] for k in self._BOTTOM_KEYS if stamps.get(k)), None)
+                if took:
+                    out["acquired_at_epoch"] = float(took)
+                    break
+            return out
 
         return {"image": np.zeros((100, 100), dtype=np.uint16), "image_path": None}
 
