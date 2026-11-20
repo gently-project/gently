@@ -144,7 +144,7 @@ The live per-session tactic spine (operation_plans/{session}.yaml) — the order
 
 ### Tactic
 An imaging behavior/protocol card (monitor, transmission burst, temp-change burst, recovery monitor …) with rationale/scope/cadence; the executable step of an Operation Plan and the reusable unit saved to the library.
-- **Surfaced in:** Operations > Overview (expandable tactic cards, US-17), Operate > Run chooser ('From library', 'Continue a plan', 'Hand to agent'), tactic library
+- **Surfaced in:** the Run tab's acquisition summary (the Operations tab's tactic cards, US-17, retired 2026-11-20), Operate > Run chooser ('From library', 'Continue a plan', 'Hand to agent'), tactic library
 - **Ops today:** view, act(expand card), act(run POST /api/operate/run-tactic), act(apply saved tactic /api/tactic_library)
 - **Relates to:** Operation Plan, Embryo (scope), Role, Setpoint (temperature), Campaign
 

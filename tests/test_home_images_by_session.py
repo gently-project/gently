@@ -121,7 +121,8 @@ class TestHome:
     def test_a_session_is_named_or_dated(self):
         fn = HOME[HOME.index("    function sessionTitle(g) {") :][:700]
         assert "g.session_name !== 'unnamed'" in fn
-        assert "toLocaleString" in fn
+        # Dated on Gently's clock: the zone the microscope is set to.
+        assert "GentlyTime.format(t, { month: 'short', day: 'numeric'" in fn
 
     def test_the_session_open_now_is_said(self):
         assert "g.session_id === liveSessionId()" in HOME

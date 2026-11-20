@@ -621,8 +621,8 @@ const SettingsHistory = {
             host.innerHTML = '<table class="settings-history"><thead><tr>' +
                 '<th>When</th><th>Setting</th><th>From</th><th>To</th><th>Reach</th><th>By</th></tr></thead><tbody>' +
                 rows.map(r => {
-                    const when = r.at ? new Date(r.at) : null;
-                    const t = when && !isNaN(when) ? when.toLocaleString() : this.say(r.at);
+                    const when = GentlyTime.toDate(r.at);
+                    const t = when ? GentlyTime.format(when, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : this.say(r.at);
                     const who = [r.by ? (typeof Who !== 'undefined' ? Who.chip(r.by) : this.esc(r.by)) : '', r.client ? this.esc(r.client) : ''].filter(Boolean).join(' · ');
                     return `<tr title="${this.esc(r.via || '')}"><td>${this.esc(t)}</td>` +
                         `<td>${this.esc(r.label || r.key)}<div class="settings-history-key">${this.esc(r.key)}</div></td>` +

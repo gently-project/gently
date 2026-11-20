@@ -215,7 +215,7 @@ const Lightbox = {
             if (timepoint !== undefined) {
                 this.els.infoTime.textContent = `T${timepoint}`;
             } else if (img.timestamp) {
-                this.els.infoTime.textContent = new Date(img.timestamp).toLocaleTimeString();
+                this.els.infoTime.textContent = GentlyTime.format(img.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             } else {
                 this.els.infoTime.textContent = '-';
             }
@@ -533,7 +533,7 @@ const Lightbox = {
         if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = this.embryoOf(img);
         if (this.els.infoShape) this.els.infoShape.textContent = img.shape ? img.shape.join(' x ') : '-';
         if (this.els.infoTime) {
-            this.els.infoTime.textContent = img.timestamp ? new Date(img.timestamp).toLocaleTimeString()
+            this.els.infoTime.textContent = img.timestamp ? GentlyTime.format(img.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
                 : (tp !== undefined && tp !== null ? `T${tp}` : '-');
         }
 

@@ -80,14 +80,13 @@ function escapeHtml(str) {
  * @param {string} isoStr
  * @returns {string} e.g. "Mar 14, 2:30 PM"
  */
-const _DAY = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
-const _TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });
+// In the zone the microscope is set to (gently-time.js).
 function formatDate(isoStr) {
     if (!isoStr) return '';
-    try {
-        const d = new Date(isoStr);
-        return _DAY.format(d) + ', ' + _TIME.format(d);
-    } catch { return isoStr; }
+    const d = GentlyTime.toDate(isoStr);
+    if (!d) return isoStr;
+    return GentlyTime.format(d, { month: 'short', day: 'numeric' }, 'en-US') + ', '
+        + GentlyTime.format(d, { hour: 'numeric', minute: '2-digit' }, 'en-US');
 }
 
 /**

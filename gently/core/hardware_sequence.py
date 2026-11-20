@@ -70,14 +70,6 @@ class _RigClock:
         offset = int(round((as_utc - ut.timestamp()) / 900.0)) * 900
         bisect.insort(self._pairs, (as_utc, offset))
 
-    @property
-    def offset(self) -> int | None:
-        """The session's usual offset, seconds east of UTC, or None."""
-        if not self._pairs:
-            return None
-        offsets = sorted(o for _, o in self._pairs)
-        return offsets[len(offsets) // 2]
-
     def epoch(self, stamp: Any) -> float | None:
         """Seconds since 1970 for any stamp on disk: UTC with its Z, UTC with
         an offset, or the rig's local time with no zone."""
@@ -273,8 +265,6 @@ def session_sequence(store: Any, sid: str) -> dict[str, Any]:
     return {
         "t0": t0,
         "t1": t1,
-        # The rig's clock, for showing a moment as the people at the rig saw it.
-        "utc_offset_s": clock.offset,
         "embryos": named,
         "lines": lines,
         "volumes": volumes,

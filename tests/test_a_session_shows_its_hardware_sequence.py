@@ -345,7 +345,6 @@ def test_a_session_from_a_rig_in_another_zone_reads_on_that_rigs_clock(
         },
     )
     seq = session_sequence(store, "s1")
-    assert seq["utc_offset_s"] == -5 * 3600
     assert seq["bf"][0]["filed"] == pytest.approx(E0 + 10.0)
     assert seq["t1"] - seq["t0"] == pytest.approx(10.0)
 
@@ -377,7 +376,9 @@ def test_an_old_volume_with_only_a_local_time_reads_on_its_sessions_clock(
     assert old["scan_started"] == pytest.approx(E0 + 600.0)
 
 
-def test_with_no_time_kept_both_ways_the_offset_is_not_known(tmp_path, pc_an_hour_ahead_of_utc):
+def test_with_no_time_kept_both_ways_a_local_time_is_read_on_this_pcs_clock(
+    tmp_path, pc_an_hour_ahead_of_utc
+):
     """Nothing to learn the rig's clock from: this PC's zone, the last resort, and said."""
     store = FileStore(root=tmp_path)
     store.create_session("s1")
@@ -388,7 +389,6 @@ def test_with_no_time_kept_both_ways_the_offset_is_not_known(tmp_path, pc_an_hou
         metadata={"channel": "bf", "captured_at": "2026-11-15T00:46:50"},
     )
     seq = session_sequence(store, "s1")
-    assert seq["utc_offset_s"] is None
     assert seq["bf"][0]["filed"] == pytest.approx(E0 + 10.0)  # 00:46:50 at UTC+1 is 23:46:50Z
 
 

@@ -7,7 +7,7 @@ list_tactics — return a readable summary of all saved templates.
 apply_tactic — instantiate a template into a fresh planned tactic and append
                it to the current session's Operation Plan.
 
-Store + session resolution mirrors declare_operation_plan in operation_plan_tools.py.
+Store + session resolution as the tactic executor does (orchestration/tactic_executor.py).
 """
 
 import logging

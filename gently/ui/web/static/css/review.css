@@ -913,3 +913,18 @@ td.slog-proj { overflow: visible; position: relative; }
 @media (forced-colors: active) {
     .hwt-swatch { forced-color-adjust: none; }
 }
+
+/* The Run tab (run-view.js): what the live session's acquisition is set to
+   do, in words, above its hardware timeline. */
+.run-tab-head { display: flex; align-items: center; padding: 14px 20px 6px; }
+.run-tab-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+.run-tab-body { padding: 4px 20px 20px; display: flex; flex-direction: column; gap: 12px; }
+#run-root { display: flex; flex-direction: column; gap: 12px; }
+.run-summary { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); padding: 12px 14px; }
+.run-summary-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 8px; }
+.run-summary-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); text-transform: none; }
+.run-summary-run .session-run { margin: 0; font-size: 12px; color: var(--text-muted); }
+.run-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; font-size: 12.5px; }
+.run-grid dt { color: var(--text-muted); font-weight: 600; }
+.run-grid dd { margin: 0; color: var(--text); display: flex; flex-direction: column; gap: 2px; }
+.run-grid dd > div:first-child { color: var(--text); }

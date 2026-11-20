@@ -2123,9 +2123,9 @@ function focusFirst() {
 
 function fmtWhen(iso) {
     if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso);
-    return d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const d = GentlyTime.toDate(iso);
+    if (!d) return String(iso);
+    return GentlyTime.format(d, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function specProvenanceNote(s) {

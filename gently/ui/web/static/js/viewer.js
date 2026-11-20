@@ -138,7 +138,7 @@ function displayImage(data) {
     const infoUid = document.getElementById('info-uid');
     if (infoUid) infoUid.textContent = data.uid.slice(0, 12) + '...';
     const imageTime = document.getElementById('image-time');
-    if (imageTime) imageTime.textContent = new Date(data.timestamp).toLocaleTimeString();
+    if (imageTime) imageTime.textContent = GentlyTime.format(data.timestamp, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     // Update recent strip to show active state
     renderRecentList();

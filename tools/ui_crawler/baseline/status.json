@@ -35,14 +35,6 @@
     "status": "blocked",
     "title": "Monitor, pause and stop a run"
   },
-  "US-16": {
-    "status": "works",
-    "title": "View the Operation Plan"
-  },
-  "US-17": {
-    "status": "works",
-    "title": "Understand a tactic (expand its card)"
-  },
   "US-18": {
     "status": "blocked",
     "title": "Run a saved tactic"

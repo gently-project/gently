@@ -61,7 +61,14 @@ def _volumes(experiment, **start):
     async def go():
         msg = await orch.start(base_interval_seconds=0.1, **start)
         assert msg.startswith("Started"), msg
-        await asyncio.sleep(0.4)
+        # Until every embryo has had its volumes, not a fixed 0.4 s: that was
+        # room enough alone, and too little late in a loaded full run, where
+        # the second embryo's volume came after the stop.
+        want = max(3, 2 * len(experiment.embryos))
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if len(orch.client.acquire_volume.await_args_list) >= want:
+                break
         await orch.stop("test done")
 
     asyncio.run(go())

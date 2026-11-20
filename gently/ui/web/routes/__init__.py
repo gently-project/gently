@@ -28,7 +28,6 @@ from .inbox import create_router as create_inbox_router
 from .logs import create_router as create_logs_router
 from .notebook import create_router as create_notebook_router
 from .notebook_pages import create_router as create_notebook_pages_router
-from .operation_plan import create_router as create_operation_plan_router
 from .pages import create_router as create_pages_router
 from .replay import create_router as create_replay_router
 from .reveal import create_router as create_reveal_router
@@ -63,7 +62,6 @@ def register_all_routes(server):
         create_notebook_pages_router,
         create_inbox_router,
         create_temperature_router,
-        create_operation_plan_router,
         create_roles_router,
         create_tactic_library_router,
         create_bf_router,

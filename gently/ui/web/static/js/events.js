@@ -190,8 +190,7 @@ function formatEventData(data) {
 }
 
 function formatEventTime(timestamp) {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', {
+    return GentlyTime.format(timestamp, {
         hour12: false,
         hour: '2-digit',
         minute: '2-digit',
@@ -282,7 +281,7 @@ function addEventToTable(event, prepend = true) {
                     `<span class="log-logger">${loggerName}</span>` +
                     `<span class="log-message">${message}</span>${excTag}`;
             }
-        });
+        }, 'en-US');
     } else {
         const badgeClass = getEventBadgeClass(event.event_type);
 

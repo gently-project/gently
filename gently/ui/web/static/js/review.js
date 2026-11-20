@@ -502,9 +502,9 @@ const ReviewApp = {
     // When, for the log: the day of the week first. "Which night was that"
     // is asked by the day far more often than by the date.
     whenWords(iso) {
-        const d = new Date(iso);
-        if (isNaN(d)) return '';
-        return `${d.toLocaleDateString([], { weekday: 'short' })} ${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+        const d = GentlyTime.toDate(iso);
+        if (!d) return '';
+        return `${GentlyTime.format(d, { weekday: 'short' })} ${GentlyTime.format(d, { month: 'short', day: 'numeric' })}, ${GentlyTime.format(d, { hour: 'numeric', minute: '2-digit' })}`;
     },
 
     /** How long a session's run lasted, in hours, or null. */
@@ -1866,8 +1866,7 @@ const ReviewApp = {
     formatDateTime(isoString) { return formatDate(isoString); },
 
     formatTime(isoString) {
-        const d = new Date(isoString);
-        return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return GentlyTime.format(isoString, { hour: '2-digit', minute: '2-digit' });
     },
 
     escapeHtml(str) { return escapeHtml(str == null ? '' : String(str)); },

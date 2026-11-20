@@ -81,7 +81,7 @@ function createOverviewStage() {
 
     const $ = id => host && host.querySelector('#' + id);
     const esc = s => (typeof escapeHtml === 'function') ? escapeHtml(String(s == null ? '' : s)) : String(s == null ? '' : s);
-    const fmtT = iso => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }); };
+    const fmtT = iso => GentlyTime.format(iso, { hour: '2-digit', minute: '2-digit', hour12: false });
     const fmtEl = ms => `${Math.floor(ms / 36e5)}h ${String(Math.floor(ms / 6e4) % 60).padStart(2, '0')}m`;
     const frames = () => opts.frames() || [];
     const tools = () => Object.assign({}, TOOLS, opts.tools || {});

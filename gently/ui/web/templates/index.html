@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta name="gently-time-zone" content="{{ time_zone }}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gently - Microscopy Visualization</title>
@@ -15,7 +16,6 @@
     <link rel="stylesheet" href="/static/css/rig-menu.css">
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
-    <link rel="stylesheet" href="/static/css/experiment.css">
     <link rel="stylesheet" href="/static/css/agent-chat.css">
     <link rel="stylesheet" href="/static/css/ask-overlay.css">
     <link rel="stylesheet" href="/static/css/shell.css">
@@ -43,9 +43,9 @@
             <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.8V21h14V9.8"></path></svg>
             <span class="v2-nav-text">Home</span>
           </button>
-          <button class="v2-nav-item" data-tab="experiment" title="Operations">
+          <button class="v2-nav-item" data-tab="experiment" title="The live run: what it is set to do, and what the hardware is doing">
             <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"></path><path d="M4 12h10"></path><path d="M4 17h13"></path><circle cx="18" cy="12" r="2"></circle></svg>
-            <span class="v2-nav-text">Operations</span>
+            <span class="v2-nav-text">Run</span>
           </button>
           <button class="v2-nav-item" data-tab="embryos" title="Embryos">
             <svg class="v2-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3.2"></circle></svg>
@@ -394,18 +394,13 @@
         <!-- Marking subtab -->
     </div>
 
-    <!-- Experiment Tab -->
+    <!-- Run Tab: the live session's acquisition, and its hardware (run-view.js) -->
     <div id="experiment-content" class="tab-content">
-        <div class="experiment-header-bar">
-            <h2 class="experiment-title">Operations</h2>
-            <div class="view-switcher" id="experiment-view-switcher">
-                <button class="view-btn active" data-experiment-view="hardware" title="What the instrument has done in this session, and when">Hardware</button>
-                <button class="view-btn" data-experiment-view="overview" title="The agent's operation plan">Overview</button>
-                <button class="view-btn" data-experiment-view="rules" title="The run's monitoring rules">Rules</button>
-            </div>
+        <div class="run-tab-head">
+            <h2 class="run-tab-title">Run</h2>
         </div>
-        <div class="experiment-body">
-            <div id="experiment-overview-root"></div>
+        <div class="run-tab-body">
+            <div id="run-root"></div>
         </div>
     </div>
 
@@ -1858,6 +1853,7 @@
     </aside>
     </div><!-- /.app-shell -->
 
+    <script src="/static/js/gently-time.js"></script>
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/logconsole.js"></script>
     {# The agent's question, on demand, while the chat is collapsed: the same
@@ -1916,8 +1912,6 @@
     <script src="/static/js/xy-limits-state.js"></script>
     <script src="/static/js/rig-menu.js"></script>
     <script src="/static/js/settings.js"></script>
-    <script src="/static/js/operations-scenarios.js"></script>
-    <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/occupancy3d.js"></script>
@@ -1932,6 +1926,7 @@
     <script src="/static/js/hardware-timeline-math.js"></script>
     <script src="/static/js/hardware-timeline.js"></script>
     <script src="/static/js/review.js"></script>
+    <script src="/static/js/run-view.js"></script>
     <script src="/static/js/agent-chat.js"></script>
     <script src="/static/js/ask-overlay.js"></script>
     <script src="/static/js/shell.js"></script>

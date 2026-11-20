@@ -10,11 +10,10 @@ Contracts:
 - missing/unknown mode → []
 - embryo dicts use 'embryo_id' key (from /api/embryos/positions)
 
-Scope validation in declare_operation_plan:
+Scope validation in the tactic schema (operation_plan_tools._validate_tactics):
 - A tactic with scope.mode='role' and a valid REGISTRY key passes validation.
 """
 
-import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -115,84 +114,45 @@ def test_embryo_id_key_used_not_id():
 
 
 # ---------------------------------------------------------------------------
-# declare_operation_plan: role-scoped tactic passes validation
+# The tactic schema: a role-scoped tactic passes validation
 # ---------------------------------------------------------------------------
 
 
-class _FakeContextStore:
-    def __init__(self):
-        self._plans = {}
+def test_role_scoped_tactic_passes_validation():
+    """A tactic with scope.mode='role' and a valid role key is kept as it is."""
+    from gently.app.tools.operation_plan_tools import _validate_tactics
 
-    def set_operation_plan(self, sid, plan):
-        self._plans[sid] = plan
-
-    def get_operation_plan(self, sid):
-        return self._plans.get(sid)
-
-
-class _FakeAgent:
-    def __init__(self):
-        self.context_store = _FakeContextStore()
-        self.session_id = "sess_scope_test"
-
-
-@pytest.mark.asyncio
-async def test_role_scoped_tactic_passes_declare_validation():
-    """A tactic with scope.mode='role' and a valid role key is accepted by
-    declare_operation_plan."""
-    from gently.app.tools.operation_plan_tools import declare_operation_plan
-
-    role_scoped_tactic = {
-        "id": "t-role",
-        "name": "Test-embryo timelapse",
-        "kind": "standing_timelapse",
-        "state": "active",
-        "scope": {"mode": "role", "role": "test"},
-        "rationale": "Only image the test embryos",
-        "structure": {"cadence_s": 120, "per_embryo": []},
-        "live_bind": ["cadence"],
-        "relations": {},
-    }
-
-    ctx = {"agent": _FakeAgent()}
-    result = await declare_operation_plan(
-        title="Role-scoped plan",
-        goal="Image test embryos only",
-        tactics=[role_scoped_tactic],
-        updated_reason="role scope test",
-        context=ctx,
+    (tactic,) = _validate_tactics(
+        [
+            {
+                "id": "t-role",
+                "name": "Test-embryo timelapse",
+                "kind": "standing_timelapse",
+                "state": "active",
+                "scope": {"mode": "role", "role": "test"},
+                "rationale": "Only image the test embryos",
+                "structure": {"cadence_s": 120, "per_embryo": []},
+            }
+        ]
     )
-
-    assert "Error" not in result, f"Unexpected error: {result}"
-    stored = ctx["agent"].context_store.get_operation_plan("sess_scope_test")
-    assert stored is not None
-    tactic = stored["tactics"][0]
-    assert tactic["scope"]["mode"] == "role"
-    assert tactic["scope"]["role"] == "test"
+    assert tactic["scope"] == {"mode": "role", "role": "test"}
 
 
-@pytest.mark.asyncio
-async def test_role_scoped_tactic_all_registry_roles():
+def test_role_scoped_tactic_all_registry_roles():
     """All four REGISTRY role keys are accepted as valid scope.role values."""
-    from gently.app.tools.operation_plan_tools import declare_operation_plan
+    from gently.app.tools.operation_plan_tools import _validate_tactics
 
     for role_name in ("test", "calibration", "lineaging", "unassigned"):
-        tactic = {
-            "id": f"t-{role_name}",
-            "name": f"{role_name} monitor",
-            "kind": "standing_timelapse",
-            "state": "planned",
-            "scope": {"mode": "role", "role": role_name},
-            "rationale": f"Target {role_name} embryos",
-            "structure": {"cadence_s": 300},
-            "live_bind": [],
-            "relations": {},
-        }
-        ctx = {"agent": _FakeAgent()}
-        result = await declare_operation_plan(
-            title=f"Plan for {role_name}",
-            goal="Role-specific imaging",
-            tactics=[tactic],
-            context=ctx,
+        (tactic,) = _validate_tactics(
+            [
+                {
+                    "id": f"t-{role_name}",
+                    "name": f"{role_name} monitor",
+                    "kind": "standing_timelapse",
+                    "state": "planned",
+                    "scope": {"mode": "role", "role": role_name},
+                    "rationale": f"Target {role_name} embryos",
+                }
+            ]
         )
-        assert "Error" not in result, f"Role {role_name!r} was rejected: {result}"
+        assert tactic["scope"]["role"] == role_name

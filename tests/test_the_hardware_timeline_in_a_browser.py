@@ -51,6 +51,30 @@ def seed_recorded(store: FileStore, sid: str = "hw_recorded") -> dict:
     store.create_session(sid, name="Recorded hardware")
     for eid, nick, _, _ in EMBRYOS:
         store.register_embryo(sid, eid, nickname=nick)
+    # The plan, as the start route keeps it with the session.
+    store.save_acquisition_plan(
+        sid,
+        {
+            "cadence_s": EVERY_S,
+            "interval": EVERY_S,
+            "stop_condition": "manual",
+            "monitoring_mode": "idle",
+            "num_slices": SLICES,
+            "exposure_ms": EXPOSURE_MS,
+            "laser_config": "488 and 561",
+            "volumes": True,
+            "sides": ["A", "B"],
+            "embryo_ids": [eid for eid, *_ in EMBRYOS],
+            "bf": {
+                "enabled": True,
+                "every_seconds": EVERY_S,
+                "light": "led",
+                "led_intensity_pct": 30,
+                "exposure_ms": 10.0,
+                "positions": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}],
+            },
+        },
+    )
     vol = np.zeros((SLICES, 16, 16), np.uint16)
     frame = np.full((32, 32), 900, np.uint16)
     marks: dict = {"volumes": [], "bf": []}
@@ -290,7 +314,7 @@ def app(tmp_path_factory, browser):
         )
         # Past the launch gate the way "Make live" goes, so the gate's remembered
         # choices (config/launch.local.json, the repo's own) are never written;
-        # the recorded session is the live one, the Operations tab's.
+        # the recorded session is the live one, the Run tab's.
         # The list answers before the agent is up: until then this is a 503.
         wait_for(
             "let a session open",
@@ -384,6 +408,13 @@ def test_the_hardware_tab_draws_a_sessions_sequence(page, app):
     assert st["rows"] == ["bf", "488", "561", "exposure", "temp"]
     assert len(st["rounds"]) == ROUNDS
     assert st["where"].startswith("Whole session")
+    # Nothing set in Settings: the page carries the zone of the computer Gently
+    # runs on, and shows its times there (gently-time.js).
+    from tzlocal import get_localzone_name
+
+    zone = page.locator('meta[name="gently-time-zone"]').get_attribute("content")
+    assert zone == get_localzone_name()
+    assert page.evaluate("GentlyTime.zone") == zone
     # The legend names each embryo, and the dish's light.
     keys = page.locator(".hwt-legend .hwt-key:not([hidden])").all_inner_texts()
     assert keys == ["A", "B", "C", "Brightfield (the dish)"]
@@ -640,15 +671,42 @@ def test_a_pixel_holding_several_embryos_says_so_and_takes_no_ones_colour(page, 
     assert not several.is_visible()
 
 
-def test_the_operations_tab_follows_the_live_session(page, app):
-    """The live session's hardware, beside its plan, kept current as it runs."""
+def test_the_run_tab_says_what_the_acquisition_is_set_to_do(page, app):
+    """The live session's acquisition in words, above its hardware."""
     page.goto(app["url"], wait_until="domcontentloaded")
-    page.locator('nav button:has-text("Operations")').click()
-    # The main view: what opens with the tab, no click on a view needed.
-    page.wait_for_selector('#experiment-overview-root .hwt[data-state="ready"]', timeout=20_000)
-    hardware = page.locator('[data-experiment-view="hardware"]')
-    assert "active" in hardware.get_attribute("class").split()
-    live = "ExperimentOverview._hw.state()"
+    page.locator('nav button[data-tab="experiment"]').click()
+    page.wait_for_selector('#run-root .hwt[data-state="ready"]', timeout=20_000)
+    page.wait_for_selector("#run-root .run-grid dt", timeout=10_000)
+    rows = dict(
+        zip(
+            page.locator("#run-root .run-grid dt").all_inner_texts(),
+            page.locator("#run-root .run-grid dd").all_inner_texts(),
+            strict=True,
+        )
+    )
+    # The plan in its own sentence: the one Operate and a plan card say it in.
+    assert rows["Plan"] == (
+        "Every 2 min: SPIM volumes (20 slices · 20 ms · 488 and 561) of 3 embryos"
+        " + a brightfield overview per round from 3 positions, under the LED at 30 %"
+        " · until stopped."
+    )
+    assert rows["Embryos"].startswith("Taken in turn, each as it comes due.")
+    assert "C · " in rows["Embryos"] and "sides A and B" in rows["Embryos"]
+    assert "side A ·" in rows["Embryos"].split("\n")[1]  # A: one side
+    # The bath, from what was recorded: 20 C, and 21 C from six minutes in.
+    assert rows["Bath"] == "held at 20.0 °C, then 21.0 °C from 5:59"
+    # No rules on top of this plan, so no row saying there are none.
+    assert "Rules" not in rows
+    _shot(page, "07-run")
+    assert page.errors == []  # type: ignore[attr-defined]
+
+
+def test_the_run_tab_follows_the_live_session(page, app):
+    """The live session's hardware, kept current as it runs."""
+    page.goto(app["url"], wait_until="domcontentloaded")
+    page.locator('nav button[data-tab="experiment"]').click()
+    page.wait_for_selector('#run-root .hwt[data-state="ready"]', timeout=20_000)
+    live = "RunView._hw.state()"
     assert page.evaluate(live)["rows"] == ["bf", "488", "561", "exposure", "temp"]
     assert len(page.evaluate(live)["rounds"]) == ROUNDS
     # A seventh round lands, the way the run files it, and its event arrives.
@@ -684,10 +742,7 @@ def test_the_operations_tab_follows_the_live_session(page, app):
         acquired_at_utc=stamp["scan_started"],
     )
     page.evaluate("ClientEventBus.emit('VOLUME_ACQUIRED', {embryo_id: 'embryo_1'})")
-    page.wait_for_function(
-        f"ExperimentOverview._hw.state().rounds.length === {ROUNDS + 1}", timeout=10_000
-    )
-    _shot(page, "07-operations")
+    page.wait_for_function(f"RunView._hw.state().rounds.length === {ROUNDS + 1}", timeout=10_000)
     # The Sessions view's timeline is another one, and was not disturbed.
     assert page.evaluate("HardwareTimeline.state().state") in ("none", "ready")
     assert page.errors == []  # type: ignore[attr-defined]
