@@ -5,6 +5,11 @@ on:
     branches: [main, development]
   pull_request:
 
+# A newer push to the same branch or pull request ends the run it supersedes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -14,7 +19,9 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          # The interpreter `uv sync` builds everywhere else, so this job, the
+          # two below and a local run cannot disagree over it.
+          python-version-file: .python-version
 
       - name: Install ruff
         # Pinned so CI never floats to a new ruff release mid-review. Keep in
@@ -59,11 +66,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
           enable-cache: true
 
       - name: uv sync
-        run: uv sync
+        # --locked: a uv.lock that pyproject.toml has moved on from fails here
+        # instead of being quietly re-resolved.
+        run: uv sync --locked
 
       - name: mypy (deps-installed)
         run: uv run mypy .
@@ -72,11 +80,21 @@ jobs:
   #
   # Until this job nothing ran either. A pull request could merge with its own
   # tests failing, and one did (#198, fixed by #199); sixteen tests failed for
-  # months without anyone seeing them (#143). The browser is still not driven
-  # here: a change to what the UI looks like or does is verified by running the
-  # app, as CLAUDE.md says.
+  # months without anyone seeing them (#143).
+  #
+  # It runs on Windows as well as Linux because the microscope computers are
+  # Windows: drive letters, long paths and file locks behave differently there.
+  # Chromium is installed, so the tests that drive the app in a browser
+  # (tests/test_*_in_a_browser.py) run here rather than skip.
   tests:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -86,11 +104,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
           enable-cache: true
 
       - name: uv sync
-        run: uv sync
+        # --locked: a uv.lock that pyproject.toml has moved on from fails here
+        # instead of being quietly re-resolved.
+        run: uv sync --locked
+
+      - name: Install Chromium
+        run: uv run playwright install --with-deps chromium
 
       - name: pytest
         # No key: no test may call the API. The storage root is redirected per
@@ -98,7 +120,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ""
           GENTLY_STORAGE_PATH: ${{ runner.temp }}/gently-storage
-        run: uv run pytest -q
+        run: uv run pytest -q -n auto
 
       - uses: actions/setup-node@v4
         with:
@@ -107,6 +129,7 @@ jobs:
       - name: JavaScript unit tests
         # One file per invocation: `node --test <dir>` does not find .mjs
         # files on every Node version (see tests/js/operate-math.test.mjs).
+        # undefined-names.test.mjs fetches the TypeScript compiler through npx.
         run: |
           for f in tests/js/*.test.mjs; do
             echo "::group::$f"

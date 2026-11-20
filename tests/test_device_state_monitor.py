@@ -198,6 +198,7 @@ def test_watchdog_recovers_after_kick():
             async def _gen():
                 while True:
                     await asyncio.sleep(60)
+                yield  # never reached: makes this a stream that stalls, not a coroutine
 
             return _gen()
         # Subsequent connects: yield a marker event then hang

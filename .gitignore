@@ -162,3 +162,9 @@ notes/issues-cache/
 # `git add -A` (d215003) and merged. The run writes them beside the repo root,
 # so they are one careless add away from coming back.
 detection_results/
+
+# Prototypes and one-off scripts that are not ready to be anyone else's problem.
+# Ignored, so ruff and mypy (exclude_gitignore) pass over them: the commit hook
+# checks the whole tree, and an untracked script elsewhere fails it for
+# unrelated work.
+/scratch/

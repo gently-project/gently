@@ -1331,7 +1331,9 @@ class FileStore:
         vol_path = vol_dir / self._volume_filename(timepoint)
         self._keep_what_is_there(vol_path)
 
-        tifffile.imwrite(str(vol_path), volume, compression="zlib")
+        # minisblack said outright: left to guess, tifffile stores a stack of
+        # three or four slices as one RGB image.
+        tifffile.imwrite(str(vol_path), volume, compression="zlib", photometric="minisblack")
 
         # Write sidecar metadata
         meta = {
