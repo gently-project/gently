@@ -1733,10 +1733,12 @@ class MicroscopyAgent:
         side: str = "A",
         acquired_at: str | None = None,
         acquired_at_utc: str | None = None,
+        hardware: dict | None = None,
     ):
         """Callback when a volume is acquired. ``side`` is the imaging path it
         came from; A is the canonical view and lands where volumes always have,
-        B beside it under ``volumes/B`` with its own projection."""
+        B beside it under ``volumes/B`` with its own projection. ``hardware``
+        is what the instrument did for it (gently.core.hardware_sequence)."""
         embryo = self.experiment.embryos.get(embryo_id)
         if not embryo:
             return
@@ -1770,6 +1772,8 @@ class MicroscopyAgent:
                     "calibration": embryo.calibration,
                     "side": side,
                 }
+                if hardware:
+                    acq_metadata["hardware"] = hardware
                 if volume_path is not None:
                     stored_path = self.store.register_volume(
                         self.session_id,

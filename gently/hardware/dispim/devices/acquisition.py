@@ -2,7 +2,9 @@
 DiSPIM compound acquisition devices (volume scanner and light sheet snap).
 """
 
+import json
 import logging
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -48,6 +50,44 @@ def _lasers_out_after(core, group_name: str, seconds: float) -> threading.Timer:
 
 # Far longer than any stack takes, and short for a sample under four lasers.
 LASERS_ON_AT_MOST_S = 30.0
+
+_LINES = (405, 488, 561, 637)
+# Lines whose power could not be read back: said once, not on every volume of a night.
+_UNREADABLE: set[int] = set()
+
+
+def lines_of(laser_config: str | None) -> list[int] | None:
+    """The lines a preset routes: '488 and 561' is [488, 561], ALL OFF is
+    none. A preset that names no line is None: not knowing is not none."""
+    cfg = str(laser_config or "").strip().upper()
+    if cfg == "ALL OFF":
+        return []
+    if cfg == "ALL":
+        return list(_LINES)
+    named = {int(n) for n in re.findall(r"\d{3}", cfg)} & set(_LINES)
+    return sorted(named) if named else None
+
+
+def _laser_setup(laser_control, laser_config: str | None, applied: dict[int, float]) -> dict:
+    """What a volume's lasers stand at: the preset, the lines it routes and
+    each routed line's power. A power set here is the one set; a line given
+    none runs at its setpoint, read back now, in the set-up, never between
+    the set-up and the scan. One that cannot be read is unknown, not a
+    failed volume."""
+    lines = lines_of(laser_config)
+    powers: dict[str, float | None] = {}
+    for wl in lines or []:
+        if wl in applied:
+            powers[str(wl)] = float(applied[wl])
+            continue
+        try:
+            powers[str(wl)] = float(laser_control.get_power_pct(wl))
+        except Exception:
+            if wl not in _UNREADABLE:
+                _UNREADABLE.add(wl)
+                logger.warning("Could not read the %d nm power back for the record", wl)
+            powers[str(wl)] = None
+    return {"laser_config": laser_config, "lines": lines, "powers_pct": powers}
 
 
 class DiSPIMVolumeScanner:
@@ -119,6 +159,14 @@ class DiSPIMVolumeScanner:
         # the volume's time. The time it was finished, read out and its lasers
         # put out is _last_volume_time, over a second later.
         self._scan_started: float | None = None
+        # The last stack's hardware sequence: its lasers' preset, lines and
+        # powers, and when they came on, the scan began, its first and last
+        # frames were read out and the lasers went out. Read out beside the
+        # volume. shortcut: a frame's moment is when this loop popped it from
+        # the core's buffer (behind a 10 ms poll), not the camera's exposure;
+        # read MMCore's per-image ElapsedTime-ms instead once tried on the rig.
+        self._laser_record: dict = {}
+        self._last_sequence: dict | None = None
         self._configured = False
 
         # Configuration cache
@@ -210,6 +258,7 @@ class DiSPIMVolumeScanner:
         self._exposure_ms = exposure_ms
         self._laser_config = laser_config
         self._laser_powers_pct = applied_powers  # for metadata downstream
+        self._laser_record = _laser_setup(self.laser_control, laser_config, applied_powers)
         self._configured = True
         # Where a volume's setup goes: it is the wait between the two views.
         logger.info(
@@ -236,13 +285,17 @@ class DiSPIMVolumeScanner:
 
         status = Status(obj=self, timeout=120)
 
+        self._last_sequence = None
+
         def wait():
             watch = _lasers_out_after(self.core, self.laser_control.group_name, LASERS_ON_AT_MOST_S)
+            seq: dict[str, float] = {}
             try:
                 t0 = time.perf_counter()
                 # Enable lasers
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
+                seq["lasers_on"] = time.time()
                 t_lasers = time.perf_counter()
 
                 # Defensive stop: the lightsheet live streamer may have left the
@@ -269,6 +322,7 @@ class DiSPIMVolumeScanner:
                 # Trigger SPIM state machine
                 t_ready = time.perf_counter()
                 self._scan_started = time.time()
+                seq["scan_started"] = self._scan_started
                 self.scanner.set_spim_state("Running")
 
                 # Collect images
@@ -287,6 +341,8 @@ class DiSPIMVolumeScanner:
                             pass
 
                         images.append(img)
+                        seq.setdefault("first_frame", time.time())
+                        seq["last_frame"] = time.time()
 
                     if time.time() - start_time > timeout_s:
                         raise TimeoutError(f"Volume acquisition timeout after {timeout_s:.1f}s")
@@ -306,6 +362,7 @@ class DiSPIMVolumeScanner:
                 # Disable lasers (important for sample health!)
                 self.core.setConfig(self.laser_control.group_name, "ALL OFF")
                 self.core.waitForConfig(self.laser_control.group_name, "ALL OFF")
+                seq["lasers_off"] = time.time()
 
                 # A stack stopped part way (HALT, a camera that gave up) is a
                 # failure. It used to be returned as it stood, and a volume of
@@ -317,6 +374,12 @@ class DiSPIMVolumeScanner:
                 # Store volume
                 self._last_volume = np.array(images)
                 self._last_volume_time = time.time()
+                self._last_sequence = {
+                    **self._laser_record,
+                    "num_slices": self._num_slices,
+                    "exposure_ms": self._exposure_ms,
+                    **seq,
+                }
                 logger.info(
                     "Side %s stack: lasers on %.0f ms, camera ready %.0f, scan %.0f, put away %.0f",
                     self.side,
@@ -357,6 +420,11 @@ class DiSPIMVolumeScanner:
                 # When the stack began, which is when the sample was imaged.
                 "timestamp": self._scan_started or self._last_volume_time or time.time(),
             }
+            if self._last_sequence is not None:
+                data[f"{self.name}_sequence"] = {
+                    "value": json.dumps(self._last_sequence),
+                    "timestamp": data[self.name]["timestamp"],
+                }
             return data
         else:
             return OrderedDict()
@@ -370,6 +438,8 @@ class DiSPIMVolumeScanner:
             "shape": getattr(self._last_volume, "shape", []),
             "units": "counts",
         }
+        if self._last_sequence is not None:
+            data[f"{self.name}_sequence"] = {"source": self.name, "dtype": "string", "shape": []}
         return data
 
     def read_configuration(self):
@@ -414,6 +484,10 @@ class DiSPIMTwoSidedVolumeScanner:
         self._laser_config: str | None = None
         self._volumes: dict[str, np.ndarray] = {}
         self._started: dict[str, float] = {}
+        self._exposure_ms: float | None = None
+        self._laser_record: dict = {}
+        # Each side's hardware sequence, as the one-sided scanner's.
+        self._sequences: dict[str, dict] = {}
 
     def configure(
         self,
@@ -453,6 +527,7 @@ class DiSPIMTwoSidedVolumeScanner:
         self.core.setProperty(
             self.a.scanner.name, "SPIMDelayBeforeSide(ms)", float(delay_before_side_ms)
         )
+        applied: dict[int, float] = {}
         for wavelength, pct in (
             (488, laser_power_488_pct),
             (561, laser_power_561_pct),
@@ -461,8 +536,11 @@ class DiSPIMTwoSidedVolumeScanner:
         ):
             if pct is not None:
                 self.laser_control.set_power_pct(wavelength, pct)
+                applied[wavelength] = pct
         self._num_slices = num_slices
+        self._exposure_ms = exposure_ms
         self._laser_config = laser_config
+        self._laser_record = _laser_setup(self.laser_control, laser_config, applied)
         self._configured = True
         logger.info("Both sides configured in %.0f ms", (time.perf_counter() - t0) * 1000)
 
@@ -499,12 +577,14 @@ class DiSPIMTwoSidedVolumeScanner:
             raise RuntimeError("Device not configured. Call configure() first.")
         n = self._num_slices
         status = Status(obj=self, timeout=120)
+        self._sequences = {}
 
         def wait():
             watch = _lasers_out_after(self.core, self.laser_control.group_name, LASERS_ON_AT_MOST_S)
             try:
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
+                lasers_on = time.time()
                 if self.core.isSequenceRunning():
                     self.core.stopSequenceAcquisition()
                 self.core.clearCircularBuffer()
@@ -521,6 +601,8 @@ class DiSPIMTwoSidedVolumeScanner:
                 # A stack began when its first frame came: the card waits
                 # before each side, A as well, so the trigger is not A's start.
                 started: dict[str, float] = {}
+                last: dict[str, float] = {}
+                scan_started = time.time()
                 self.a.scanner.set_spim_state("Running")
 
                 timeout_s = settings.timeouts.volume_acquisition
@@ -535,7 +617,9 @@ class DiSPIMTwoSidedVolumeScanner:
                         # The camera's name says the side. A core that gives
                         # no name gives the frames in order: A's, then B's.
                         side = names.get(cam or "") or ("A" if len(frames["A"]) < n else "B")
-                        started.setdefault(side, time.time())
+                        now = time.time()
+                        started.setdefault(side, now)
+                        last[side] = now
                         frames[side].append(img)
                         continue
                     if time.time() - t0 > timeout_s:
@@ -550,8 +634,25 @@ class DiSPIMTwoSidedVolumeScanner:
                         f"{len(frames['B'])} from B, wanted {n} of each"
                     )
                 self._put_away()
+                lasers_off = time.time()
                 self._volumes = {"A": np.array(frames["A"]), "B": np.array(frames["B"])}
                 self._started = started
+                self._sequences = {
+                    side: {
+                        **self._laser_record,
+                        "num_slices": n,
+                        "exposure_ms": self._exposure_ms,
+                        "lasers_on": lasers_on,
+                        "scan_started": scan_started,
+                        # The card takes A, then B: B began as much after the
+                        # trigger as its first frame came after A's.
+                        "side_began": scan_started + (started[side] - started["A"]),
+                        "first_frame": started[side],
+                        "last_frame": last[side],
+                        "lasers_off": lasers_off,
+                    }
+                    for side in ("A", "B")
+                }
                 logger.info(
                     "Both sides taken: B began %.0f ms after A",
                     (started["B"] - started["A"]) * 1000,
@@ -578,6 +679,11 @@ class DiSPIMTwoSidedVolumeScanner:
                     "value": self._volumes[side],
                     "timestamp": self._started.get(side) or time.time(),
                 }
+            if side in self._volumes and side in self._sequences:
+                data[f"{vs.name}_sequence"] = {
+                    "value": json.dumps(self._sequences[side]),
+                    "timestamp": data[vs.name]["timestamp"],
+                }
         return data
 
     def describe(self):
@@ -590,6 +696,8 @@ class DiSPIMTwoSidedVolumeScanner:
                     "shape": list(self._volumes[side].shape),
                     "units": "counts",
                 }
+            if side in self._volumes and side in self._sequences:
+                data[f"{vs.name}_sequence"] = {"source": vs.name, "dtype": "string", "shape": []}
         return data
 
     def read_configuration(self):

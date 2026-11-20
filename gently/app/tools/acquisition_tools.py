@@ -7,11 +7,14 @@ Tools for acquiring lightsheet volumes and images from the microscope.
 import asyncio
 import logging
 import time
+from datetime import datetime
 from typing import Any
 
 import numpy as np
 
 from gently.core import spim_alignment
+from gently.core.file_store import utc_of_epoch
+from gently.core.hardware_sequence import record_of
 from gently.harness import calibration_gate
 from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
@@ -234,6 +237,15 @@ async def acquire_volume(
                     )
                     if _temp_stamp is not None:
                         acq_metadata["temperature"] = _temp_stamp
+                    # What the hardware did, and the stack's own time, when the
+                    # device said: the same record a run's volume keeps.
+                    when: dict[str, str] = {}
+                    if result.get("sequence"):
+                        acq_metadata["hardware"] = record_of(result["sequence"])
+                    if result.get("acquired_at_epoch"):
+                        epoch = float(result["acquired_at_epoch"])
+                        when["acquired_at"] = datetime.fromtimestamp(epoch).isoformat()
+                        when["acquired_at_utc"] = utc_of_epoch(epoch)
                     volume_path_ref = result.get("volume_path")
                     if volume_path_ref is not None:
                         saved_path = agent.store.register_volume(
@@ -243,6 +255,7 @@ async def acquire_volume(
                             incoming_path=_Path(volume_path_ref),
                             metadata=acq_metadata,
                             volume_data=volume,
+                            **when,
                         )
                     elif volume is not None:
                         saved_path = agent.store.put_volume(
@@ -251,6 +264,7 @@ async def acquire_volume(
                             timepoint,
                             volume,
                             metadata=acq_metadata,
+                            **when,
                         )
                 except Exception as store_err:
                     logger.warning("FileStore write failed (non-fatal): %s", store_err)

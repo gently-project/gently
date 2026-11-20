@@ -162,7 +162,13 @@ def test_it_reads_as_a_volume_of_each_side_and_puts_everything_away(monkeypatch)
     ab, a, b = _pair(core)
     _scan(ab, monkeypatch)
     got = ab.read()
-    assert list(got) == ["volume_scanner", "volume_scanner_b"]
+    # Each side's volume, and beside it what the hardware did for it.
+    assert list(got) == [
+        "volume_scanner",
+        "volume_scanner_sequence",
+        "volume_scanner_b",
+        "volume_scanner_b_sequence",
+    ]
     assert got["volume_scanner"]["value"].shape == (3, 2, 2)
     assert (got["volume_scanner"]["value"] == 1).all() and (
         got["volume_scanner_b"]["value"] == 2
