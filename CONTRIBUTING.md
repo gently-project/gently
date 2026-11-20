@@ -108,15 +108,16 @@ says `+local` did not come from a build anyone else has.
 The count needs the history: a wheel, a copied folder or a shallow clone shows
 the bare `1.0`. The microscope computers run from a full clone and `git pull`.
 
-### Naming a release
+### Releases
 
-A release is a build someone was handed, given a name so it can be found
-again. On `development`, pulled, with no uncommitted edits:
+A release is a new minor version: 1.0 becoming 1.1. Builds in between have
+their number and nothing else; there are several a day, and a release of each
+would bury the ones that mean something.
 
-```bash
-just release
-```
+To release, change `__version__` in `gently/_version.py` in a pull request and
+merge it. `.github/workflows/release.yml` then tags that merge `v1.1` and
+creates the GitHub release, its notes the pull requests merged since the last
+one. There is no other step, and nothing to run by hand.
 
-That creates the tag `v1.0.665` on the commit that is running and a GitHub
-release whose notes are the pull requests merged since the last one. Nothing
-is computed from tags, so skipping a release costs nothing.
+The count does not start again: the build after `1.0.700` is `1.1.701`, so
+build numbers stay in order across releases.

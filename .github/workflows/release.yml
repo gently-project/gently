@@ -1,0 +1,40 @@
+name: Release
+
+# A release is a new minor version: 1.0 becoming 1.1. The pull request that
+# changes `__version__` in gently/_version.py is the release, and merging it
+# runs this. Builds in between have their number (1.0.666) and no release.
+on:
+  push:
+    branches: [development]
+    paths: [gently/_version.py]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the merge and what it was merged into
+
+      - name: Release v<version> if this merge changed it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The file changes for other reasons too (a docstring, the counting),
+        # so the release is only for a merge whose diff changes the
+        # `__version__` line itself. Notes are the pull requests merged since
+        # the previous release.
+        run: |
+          if ! git diff HEAD^ HEAD -- gently/_version.py | grep -q '^+__version__ = '; then
+            echo "the version did not change; no release"
+            exit 0
+          fi
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' gently/_version.py)
+          test -n "$version"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already released"
+          else
+            gh release create "v$version" --target "$GITHUB_SHA" --title "gently $version" --generate-notes
+          fi
