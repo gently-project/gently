@@ -189,7 +189,7 @@ class VisualizationServer(Service):
         self.app = FastAPI(
             title="Gently Visualization Server",
             description="Real-time microscopy visualization",
-            version=gently.__version__,
+            version=gently.build_id(),
         )
 
         # Setup templates and static files
@@ -197,6 +197,9 @@ class VisualizationServer(Service):
         # A global rather than a key threaded through each route's context, so a
         # new template gets the version without anyone remembering to pass it.
         self.templates.env.globals["gently_version"] = gently.build_id()
+        # The commit behind that number, for the hover text: the number orders
+        # builds, the commit names a tree that is not one of development's.
+        self.templates.env.globals["gently_build_commit"] = gently.build_commit()
         # When the commit in that id was made. None outside a checkout, and
         # the templates render nothing rather than a placeholder — an absent
         # date is better than a made-up one.

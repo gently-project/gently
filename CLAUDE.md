@@ -132,7 +132,7 @@ D:/Gently3/
     _index.yaml                            # session_id -> folder_name mapping
     _list_cache.json                       # what the Sessions list last read of each session; a cache, safe to delete
     {YYYYMMDD}_{HHMM}_{slug}_{id8}/
-      session.yaml                         # metadata, config, organism, project_id (its home project)
+      session.yaml                         # metadata, config, organism, project_id (its home project; gently_build + gently_commit (the build that started it)
       session.lock                         # PID + hostname (while active)
       intent.yaml                          # planned vs actual
       timelapse.yaml                       # checkpointed timelapse state

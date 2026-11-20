@@ -171,10 +171,10 @@
         <div class="status" id="status"></div>
         <div class="foot"><span id="foot-note" aria-live="polite">Remembers your last choice</span> ·
           <button type="button" class="foot-version" id="foot-version"
-                  title="Copy this build id — paste it into bug reports">v{{ gently_version }}</button></div>
+                  title="Copy this build number for a bug report{% if gently_build_commit %} (commit {{ gently_build_commit }}){% endif %}">v{{ gently_version }}</button></div>
         {% if gently_build_date %}
         <div class="foot foot-when">built <time id="foot-when" datetime="{{ gently_build_date }}"
-            title="Date of the commit in the build id above">{{ gently_build_date }}</time></div>
+            title="Date of the commit this build is">{{ gently_build_date }}</time></div>
         {% endif %}
       </div>
 

@@ -1574,7 +1574,7 @@ class AgentBridge:
             "session_id": self.agent.session_id,
             "commands": self.get_commands_json(),
             "tools": self.get_tools_json(),
-            "version": getattr(gently, "__version__", "dev"),
+            "version": gently.build_id(),
             "tokens": self._get_token_snapshot(),
             "embryo_count": len(exp.embryos),
             "campaign_count": self._get_campaign_count(),

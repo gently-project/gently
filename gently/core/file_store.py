@@ -74,6 +74,8 @@ from typing import Any, cast
 import numpy as np
 import yaml
 
+from gently._version import build_commit, build_id
+
 from .store_types import (
     EmbryoInfo,
     GroundTruthEntry,
@@ -590,6 +592,10 @@ class FileStore:
             "last_active": now,
             "metadata": metadata,
             "project_id": project_id,
+            # The build that started this session, so its data can say what
+            # code acquired it. A resume under a later build does not rewrite it.
+            "gently_build": build_id(),
+            "gently_commit": build_commit(),
         }
         _write_yaml(session_path / "session.yaml", session_data)
 

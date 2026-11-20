@@ -2,7 +2,7 @@
 
 Agentic harness for microscopy.
 
-**Status**: 1.0.0 release candidate — in use at Shroff Lab, Janelia. See `CHANGELOG.md`.
+**Status**: 1.0 — in use at Shroff Lab, Janelia. See `CHANGELOG.md`.
 
 ![Safety Architecture](docs/images/safety_architecture.png)
 
