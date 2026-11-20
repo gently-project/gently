@@ -2,7 +2,8 @@ name: Release
 
 # A release is a new minor version: 1.0 becoming 1.1. The pull request that
 # changes `__version__` in gently/_version.py is the release, and merging it
-# runs this. Builds in between have their number (1.0.666) and no release.
+# runs this. That merge is build 1.1.0, which is the tag. Builds after it have
+# their number (1.1.12) and no release.
 on:
   push:
     branches: [development]
@@ -19,7 +20,7 @@ jobs:
         with:
           fetch-depth: 2 # the merge and what it was merged into
 
-      - name: Release v<version> if this merge changed it
+      - name: Release v<version>.0 if this merge changed the version
         env:
           GH_TOKEN: ${{ github.token }}
         # The file changes for other reasons too (a docstring, the counting),
@@ -33,8 +34,8 @@ jobs:
           fi
           version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' gently/_version.py)
           test -n "$version"
-          if gh release view "v$version" >/dev/null 2>&1; then
-            echo "v$version is already released"
+          if gh release view "v$version.0" >/dev/null 2>&1; then
+            echo "v$version.0 is already released"
           else
-            gh release create "v$version" --target "$GITHUB_SHA" --title "gently $version" --generate-notes
+            gh release create "v$version.0" --target "$GITHUB_SHA" --title "gently $version" --generate-notes
           fi

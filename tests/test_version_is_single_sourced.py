@@ -11,7 +11,8 @@ Feedback is only useful if it names a build. Two problems make that fail:
 2. A version that cannot tell two builds apart, or put them in order. A
    literal bumped by hand stood at `1.0.0rc1` for 127 merges, and the commit
    after it named a tree without saying which of two was newer. `build_id()`
-   counts the merges into `development` instead: `1.0.665`.
+   counts the merges into `development` since the version last changed
+   instead: `1.0.12`.
 
 Both are guarded here rather than in a release checklist, because a checklist
 is what fails at 2am before a handoff.
@@ -90,7 +91,7 @@ def test_build_id_extends_the_version_and_never_replaces_it() -> None:
     assert PEP440.match(bid.removesuffix("+local")), f"{bid!r} is not a version"
 
 
-def test_the_number_is_the_merges_into_development_and_only_a_merge_is_bare() -> None:
+def test_the_number_is_the_merges_since_the_version_changed_and_only_a_merge_is_bare() -> None:
     """In this checkout: the count git gives, and `+local` unless the tree is
     exactly a commit on a remote's development."""
     import subprocess
@@ -111,7 +112,15 @@ def test_the_number_is_the_merges_into_development_and_only_a_merge_is_bare() ->
     clean = git("diff", "--quiet", "HEAD").returncode == 0
     assert build_id().endswith("+local") != (on_development and clean)
     if on_development:
-        count = git("rev-list", "--count", "--first-parent", "HEAD").stdout.strip()
+        # Every merge that touched the file, newest first; the first whose own
+        # diff changes the version line is build 0.
+        touched = git("log", "--first-parent", "--format=%H", "--", "gently/_version.py")
+        bump = next(
+            c
+            for c in touched.stdout.split()
+            if "\n+__version__ = " in git("diff", f"{c}^", c, "--", "gently/_version.py").stdout
+        )
+        count = git("rev-list", "--count", "--first-parent", f"{bump}..HEAD").stdout.strip()
         assert build_id().removesuffix("+local") == f"{__version__}.{count}"
 
 
@@ -121,7 +130,7 @@ if __name__ == "__main__":
     test_version_module_stays_importable_without_dependencies()
     test_version_is_pep440()
     test_build_id_extends_the_version_and_never_replaces_it()
-    test_the_number_is_the_merges_into_development_and_only_a_merge_is_bare()
+    test_the_number_is_the_merges_since_the_version_changed_and_only_a_merge_is_bare()
     print("ok")
 
 

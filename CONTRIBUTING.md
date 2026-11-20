@@ -84,15 +84,16 @@ Feedback is only actionable if it names a build. Keep that true.
 
 ### The number
 
-`1.0.665`: the version, and the number of merges into `development`.
+`1.0.12`: the version, and the number of merges into `development` since that
+version began.
 
 - **`1.0`** is `__version__` in `gently/_version.py`, the one place a person
-  writes it. Change it, through a pull request, when it is 1.1 or 2.0.
-  `pyproject.toml` derives it via `[tool.setuptools.dynamic]`;
+  writes it. `pyproject.toml` derives it via `[tool.setuptools.dynamic]`;
   `tests/test_version_is_single_sourced.py` fails if a second copy appears.
-- **`665`** nobody writes. `build_id()` counts the first-parent commits of
-  `development` up to the one that is running, so each merged pull request is
-  the next number and 665 is plainly older than 668. There is nothing to bump.
+- **`12`** nobody writes. `build_id()` counts the merges into `development`
+  since the one that last changed `__version__`. That merge is `1.0.0`, each
+  merged pull request after it is the next number, and the count starts again
+  at 0 when the version changes. There is nothing to bump between releases.
 - **`+local`** follows the number when the tree is not exactly one of those
   merges: uncommitted edits to tracked files, or a branch `development` does
   not have yet (the number is then where it branched off).
@@ -115,9 +116,7 @@ their number and nothing else; there are several a day, and a release of each
 would bury the ones that mean something.
 
 To release, change `__version__` in `gently/_version.py` in a pull request and
-merge it. `.github/workflows/release.yml` then tags that merge `v1.1` and
-creates the GitHub release, its notes the pull requests merged since the last
-one. There is no other step, and nothing to run by hand.
-
-The count does not start again: the build after `1.0.700` is `1.1.701`, so
-build numbers stay in order across releases.
+merge it. That merge is build `1.1.0`: `.github/workflows/release.yml` tags it
+`v1.1.0` and creates the GitHub release, its notes the pull requests merged
+since the last one. There is no other step, and nothing to run by hand. The
+next merge is `1.1.1`.
