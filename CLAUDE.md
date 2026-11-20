@@ -76,14 +76,22 @@ and that changes — read it rather than trusting a list here. What stays true:
 - CI runs on pull requests and on pushes to `main`/`development`, so a feature
   branch with no PR open gets no signal at all.
 
+### The commands
+
+`justfile` holds the commands this repo is developed with; `just` lists them
+(`uv tool install rust-just` once). `just dev` is the UI with no hardware, no
+Anthropic key and no login, on `http://localhost:8080`; `just seed` gives it a
+session to show; `just sim` and `just sim-app` are the simulated rig above;
+`just check` is what a pull request is checked for. Every recipe uses
+`uv run --no-sync` and a storage root of its own (`~/.gently-dev`, or
+`GENTLY_DEV_STORAGE`), so none of them touches the environment's extras or the
+rig's data.
+
 ### Running the app off-Windows
 
 The storage paths throughout this file (`D:\Gently3\...`) are the Windows
-microscope PCs, where `D:` is the dedicated data drive. Off-Windows that default
-is **not an absolute path**: it resolves against the cwd and silently creates a
-junk directory literally named `D:` with session data inside it
-(`gently/settings.py`). Always set an explicit path when running on Linux or
-macOS:
+microscope PCs, where `D:` is the dedicated data drive. Anywhere else the
+default is `~/Gently3` (`gently/settings.py`). Run by hand, without `just`:
 
 ```bash
 GENTLY_STORAGE_PATH=/tmp/gently-dev uv run python launch_gently.py --no-api --no-auth --no-browser

@@ -73,7 +73,7 @@ Currently, the sample abstraction is the `Embryo` object for *C. elegans* work. 
   project root (`ANTHROPIC_API_KEY=your-key`), which is loaded automatically
   on launch and is gitignored. *(Not required if you launch with `--no-api`
   to browse the UI only — see Launch below.)*
-- *(Optional)* `GENTLY_STORAGE_PATH` — where sessions and data live (default `D:/Gently3`)
+- *(Optional)* `GENTLY_STORAGE_PATH` — where sessions and data live (default `D:/Gently3` on Windows, `~/Gently3` elsewhere)
 
 Gently is **web-first**: the agent is driven from an in-page chat in your
 browser. There is no TUI to build (Node.js is only needed for the paper
@@ -173,6 +173,14 @@ started from, so keep it at the repo root
 ```bash
 uv run pytest
 ```
+
+#### The everyday commands
+
+The [`justfile`](justfile) wraps the commands used while developing: `just dev`
+(the UI with no hardware, key or login), `just seed` (a session for it to show),
+`just sim` and `just sim-app` (a simulated rig), `just check` (what a pull
+request is checked for). Install it once with `uv tool install rust-just`, then
+run `just` for the list.
 
 ### Launch
 
@@ -309,7 +317,7 @@ gently/
 │
 ├── app/                   # Layer 4: The microscopy agent
 │   ├── agent.py           #   MicroscopyAgent orchestrator
-│   ├── tools/             #   19 domain-specific tool modules
+│   ├── tools/             #   Domain-specific tool modules
 │   └── orchestration/     #   Timelapse, plan synthesis, ML subagent
 │
 ├── ui/web/                # FastAPI viz server + web assets
@@ -353,7 +361,7 @@ We welcome contributions across the project:
 
 Coding agents are welcome contributors.
 
-**Questions or ideas?** [Open an issue](https://github.com/pskeshu/gently/issues).
+**Questions or ideas?** [Open an issue](https://github.com/gently-project/gently/issues).
 
 ## Acknowledgements
 

@@ -25,6 +25,9 @@ project whenever you `git commit`.
 
 ### Running manually
 
+`just check` runs everything below and the two test suites (see the `justfile`;
+`uv tool install rust-just` once).
+
 To check all files at once (useful before opening a PR):
 
 ```bash

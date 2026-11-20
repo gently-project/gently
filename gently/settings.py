@@ -107,7 +107,15 @@ class ModelSettings:
 class StorageSettings:
     """File paths for data storage."""
 
-    base_path: Path = field(default_factory=lambda: _env("STORAGE_PATH", Path("D:/Gently3")))
+    # D: is the data drive of the microscope computers. Anywhere else "D:/Gently3"
+    # is not an absolute path: it resolved against the cwd and left a folder
+    # literally named `D:` wherever the app was started, so there the default is
+    # under the home folder.
+    base_path: Path = field(
+        default_factory=lambda: _env(
+            "STORAGE_PATH", Path("D:/Gently3") if os.name == "nt" else Path.home() / "Gently3"
+        )
+    )
     # What a calibration keeps of what it looked at: "all" (every exposure and
     # every plot), "plots" (the curves, the montage and the summary), or
     # "none". A run is sixty to eighty exposures, so "all" costs disk.
